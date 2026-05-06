@@ -6,4 +6,9 @@ from app.models.category import Category  # noqa: F401
 from app.models.role import Permission, Role, RolePermission  # noqa: F401
 from app.models.team import Team, TeamMember  # noqa: F401
 from app.models.ticket import Ticket  # noqa: F401
+from app.models.ticket_history import (  # noqa: F401
+    Attachment,
+    TicketAssignment,
+    TicketComment,
+)
 from app.models.user import User  # noqa: F401
