@@ -12,6 +12,7 @@ from redis.asyncio import Redis
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.session import SessionLocal
+from app.services.escalation_service import EscalationService
 from app.services.sla_engine import SLAEngine
 
 log = get_logger(__name__)
@@ -36,6 +37,9 @@ class SLAScheduler:
                 engine = SLAEngine(session)
                 breached = await engine.detect_breaches()
                 if breached:
+                    esc = EscalationService(session)
+                    for ticket_id in breached:
+                        await esc.raise_for_breach(ticket_id)
                     await session.commit()
                     log.info("sla_tick", breached=len(breached))
                 else:

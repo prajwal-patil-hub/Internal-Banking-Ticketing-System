@@ -7,7 +7,7 @@
 | **P2** | branches, categories, teams CRUD; ticket model + ticket-number generator; ticket create/read/list with filters and pagination | ✅ Done |
 | **P3** | Ticket status transitions, assignment, comments (internal flag), attachments to MinIO | ✅ Done |
 | **P4** | sla_policies, sla_tracking, APScheduler job, breach detection, on_hold pause | ✅ Done |
-| **P5** | Escalations table, notification service + email/sms/in-app adapters, in-app SSE | |
+| **P5** | Escalations table, notification service + email/sms/in-app adapters (SSE deferred) | ✅ Done |
 | **P6** | Audit middleware, immutable trigger, auditor read-only UI | |
 | **P7** | Dashboard KPIs, role-specific views, dark-mode polish, responsive layouts | |
 | **P8** | Rate limit, MFA enforcement, login-attempt tracking, security headers, structured logs, Prometheus metrics | |

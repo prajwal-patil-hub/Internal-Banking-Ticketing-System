@@ -28,6 +28,12 @@ from app.repositories.ticket_history_repo import (
     TicketCommentRepository,
 )
 from app.repositories.ticket_repo import TicketRepository
+from app.services.escalation_service import EscalationService
+from app.services.notification_service import (
+    NotificationChannel,
+    NotificationService,
+    NotificationType,
+)
 from app.services.sla_engine import SLAEngine
 
 
@@ -38,6 +44,8 @@ class WorkflowService:
         self.assignments = TicketAssignmentRepository(db)
         self.comments = TicketCommentRepository(db)
         self.sla = SLAEngine(db)
+        self.notifications = NotificationService(db)
+        self.escalations = EscalationService(db)
 
     # ---- helpers ---------------------------------------------------------
 
@@ -108,6 +116,16 @@ class WorkflowService:
         t.assigned_team_id = team_id
         if t.status in {TicketStatus.NEW.value, TicketStatus.ACKNOWLEDGED.value, TicketStatus.REOPENED.value}:
             t.status = TicketStatus.ASSIGNED.value
+
+        if user_id is not None:
+            await self.notifications.dispatch(
+                user_ids=[user_id],
+                type_=NotificationType.TICKET_ASSIGNED,
+                subject=f"Ticket {t.ticket_no} assigned to you",
+                body=f"{t.title}\n\nReason: {reason or '—'}",
+                payload={"ticket_id": str(t.id), "ticket_no": t.ticket_no},
+                channels=[NotificationChannel.IN_APP, NotificationChannel.EMAIL],
+            )
         return t
 
     async def start(self, actor: User, ticket_id: uuid.UUID) -> Ticket:
@@ -136,6 +154,7 @@ class WorkflowService:
                     ticket_id=t.id, author_id=actor.id, body=f"[Escalated] {reason}", is_internal=True
                 )
             )
+        await self.escalations.raise_manual(ticket_id=t.id, triggered_by=actor, reason=reason)
         return t
 
     async def resolve(self, actor: User, ticket_id: uuid.UUID, *, notes: str = "") -> Ticket:
@@ -149,6 +168,14 @@ class WorkflowService:
                     ticket_id=t.id, author_id=actor.id, body=f"[Resolution] {notes}", is_internal=False
                 )
             )
+        await self.notifications.dispatch(
+            user_ids=[t.raised_by],
+            type_=NotificationType.TICKET_RESOLVED,
+            subject=f"Ticket {t.ticket_no} resolved",
+            body=notes or "Your ticket has been resolved. Please confirm or reopen.",
+            payload={"ticket_id": str(t.id), "ticket_no": t.ticket_no},
+            channels=[NotificationChannel.IN_APP, NotificationChannel.EMAIL],
+        )
         return t
 
     async def close(self, actor: User, ticket_id: uuid.UUID) -> Ticket:

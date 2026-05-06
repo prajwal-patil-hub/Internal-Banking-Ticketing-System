@@ -11,6 +11,7 @@ import { TicketDetailPage } from '@/pages/TicketDetailPage';
 import { BranchesPage } from '@/pages/BranchesPage';
 import { UsersPage } from '@/pages/UsersPage';
 import { SlaPage } from '@/pages/SlaPage';
+import { EscalationsPage } from '@/pages/EscalationsPage';
 
 export default function App() {
   return (
@@ -40,7 +41,7 @@ export default function App() {
           path="/escalations"
           element={
             <RequireAuth roles={['admin', 'supervisor']}>
-              <PlaceholderPage title="Escalations" phase="P5" />
+              <EscalationsPage />
             </RequireAuth>
           }
         />

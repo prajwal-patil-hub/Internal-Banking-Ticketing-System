@@ -5,6 +5,7 @@ import { useTheme } from '@/store/theme';
 import { cn } from '@/lib/cn';
 import { useAuth, type Role } from '@/store/auth';
 import { logout as apiLogout } from '@/features/auth/api';
+import { NotificationBell } from '@/features/notifications/NotificationBell';
 
 interface NavItem {
   to: string;
@@ -99,6 +100,7 @@ export function AppLayout() {
 
           <div className="flex items-center gap-3">
             <input className="input w-72" placeholder="Search tickets, branches, users…" />
+            <NotificationBell />
             <div className="flex items-center gap-2">
               <div className="text-right text-xs hidden md:block">
                 <div className="font-medium leading-tight">{user?.full_name}</div>

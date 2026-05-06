@@ -16,7 +16,15 @@ from app.core.rbac import Role
 from app.models.enums import Priority, TicketStatus
 from app.models.ticket import Ticket
 from app.models.user import User
+from sqlalchemy import select
+
+from app.models.role import Role as RoleModel
 from app.repositories.ticket_repo import TicketFilter, TicketRepository
+from app.services.notification_service import (
+    NotificationChannel,
+    NotificationService,
+    NotificationType,
+)
 from app.services.sla_engine import SLAEngine
 from app.utils.ticket_number import next_ticket_number
 
@@ -60,7 +68,27 @@ class TicketService:
         )
         await self.repo.create(t)
         await SLAEngine(self.db).on_ticket_created(t)
+        await self._notify_admins_of_new(t)
         return t
+
+    async def _notify_admins_of_new(self, t: Ticket) -> None:
+        # Notify every active admin so the queue stays visible.
+        stmt = (
+            select(User.id)
+            .join(RoleModel, RoleModel.id == User.role_id)
+            .where(RoleModel.name == Role.ADMIN.value, User.is_active.is_(True))
+        )
+        admin_ids = list((await self.db.execute(stmt)).scalars().all())
+        if not admin_ids:
+            return
+        await NotificationService(self.db).dispatch(
+            user_ids=admin_ids,
+            type_=NotificationType.TICKET_CREATED,
+            subject=f"New ticket {t.ticket_no} ({t.priority})",
+            body=t.title,
+            payload={"ticket_id": str(t.id), "ticket_no": t.ticket_no, "priority": t.priority},
+            channels=[NotificationChannel.IN_APP],
+        )
 
     async def list_for(
         self,
