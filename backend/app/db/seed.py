@@ -26,6 +26,7 @@ from app.models.branch import Branch
 from app.models.category import Category
 from app.models.role import Permission as PermissionModel
 from app.models.role import Role as RoleModel
+from app.models.sla import SLAPolicy, SLATracking
 from app.models.ticket import Ticket
 from app.models.user import User
 
@@ -53,6 +54,14 @@ DEMO_CATEGORIES = [
     ("Network / Infra",    "Branch network, VPN",       "critical"),
     ("Cards & Payments",   "Card issuance, UPI, IMPS",  "high"),
     ("HR / Admin",         "Branch ops, HR support",    "low"),
+]
+
+# Banking-standard defaults (also act as fallbacks if the table is wiped).
+SLA_DEFAULTS = [
+    ("critical",  15,   120),
+    ("high",      30,   360),
+    ("medium",    60,  1440),
+    ("low",      120,  4320),
 ]
 
 
@@ -155,7 +164,20 @@ async def main() -> None:
             users_by_email[email] = user
             log.info("seed_user_created", email=email, role=role_enum.value, password=password)
 
-        # 7. A few demo tickets so the dashboard has rows on first run.
+        # 7. SLA policies — banking-standard defaults.
+        for prio, response_min, resolution_min in SLA_DEFAULTS:
+            existing = (
+                await session.execute(select(SLAPolicy).where(SLAPolicy.priority == prio))
+            ).scalar_one_or_none()
+            if existing is None:
+                session.add(SLAPolicy(
+                    priority=prio,
+                    response_minutes=response_min,
+                    resolution_minutes=resolution_min,
+                ))
+                log.info("seed_sla_policy_created", priority=prio)
+
+        # 8. A few demo tickets so the dashboard has rows on first run.
         existing_tickets = (
             await session.execute(select(Ticket))
         ).scalars().first()
@@ -169,6 +191,8 @@ async def main() -> None:
                 ("Printer ribbon order",    "Pass-book printer needs ribbon.",     "low",      "HR / Admin"),
             ]
             for i, (title, desc, prio, cat) in enumerate(samples):
+                resolution = next(r for p, _, r in SLA_DEFAULTS if p == prio)
+                due_at = now + timedelta(minutes=resolution)
                 t = Ticket(
                     ticket_no=f"TKT-{now.year}-{i + 1:06d}",
                     branch_id=branches_by_code["BR001"].id,
@@ -178,9 +202,15 @@ async def main() -> None:
                     description=desc,
                     priority=prio,
                     status="new",
-                    sla_due_at=now + timedelta(hours=6 if prio == "high" else 2 if prio == "critical" else 72),
+                    sla_due_at=due_at,
                 )
                 session.add(t)
+                await session.flush()
+                session.add(SLATracking(
+                    ticket_id=t.id,
+                    policy_priority=prio,
+                    due_at=due_at,
+                ))
 
         await session.commit()
         log.info("seed_complete")

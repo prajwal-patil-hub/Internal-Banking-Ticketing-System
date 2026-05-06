@@ -28,6 +28,7 @@ from app.repositories.ticket_history_repo import (
     TicketCommentRepository,
 )
 from app.repositories.ticket_repo import TicketRepository
+from app.services.sla_engine import SLAEngine
 
 
 class WorkflowService:
@@ -36,6 +37,7 @@ class WorkflowService:
         self.tickets = TicketRepository(db)
         self.assignments = TicketAssignmentRepository(db)
         self.comments = TicketCommentRepository(db)
+        self.sla = SLAEngine(db)
 
     # ---- helpers ---------------------------------------------------------
 
@@ -110,14 +112,18 @@ class WorkflowService:
 
     async def start(self, actor: User, ticket_id: uuid.UUID) -> Ticket:
         t = await self._load_for(actor, ticket_id)
+        was_on_hold = t.status == TicketStatus.ON_HOLD.value
         self._assert_transition(t.status, TicketStatus.IN_PROGRESS)
         t.status = TicketStatus.IN_PROGRESS.value
+        if was_on_hold:
+            await self.sla.on_resumed(t)
         return t
 
     async def hold(self, actor: User, ticket_id: uuid.UUID) -> Ticket:
         t = await self._load_for(actor, ticket_id)
         self._assert_transition(t.status, TicketStatus.ON_HOLD)
         t.status = TicketStatus.ON_HOLD.value
+        await self.sla.on_paused(t)
         return t
 
     async def escalate(self, actor: User, ticket_id: uuid.UUID, *, reason: str = "") -> Ticket:
@@ -159,6 +165,7 @@ class WorkflowService:
         t.reopened_count += 1
         t.resolved_at = None
         t.closed_at = None
+        await self.sla.on_reopened(t)
         if reason:
             await self.comments.add(
                 TicketComment(

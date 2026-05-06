@@ -10,6 +10,7 @@ import { TicketsPage } from '@/pages/TicketsPage';
 import { TicketDetailPage } from '@/pages/TicketDetailPage';
 import { BranchesPage } from '@/pages/BranchesPage';
 import { UsersPage } from '@/pages/UsersPage';
+import { SlaPage } from '@/pages/SlaPage';
 
 export default function App() {
   return (
@@ -31,7 +32,7 @@ export default function App() {
           path="/sla"
           element={
             <RequireAuth roles={['admin', 'supervisor']}>
-              <PlaceholderPage title="SLA Monitor" phase="P4 / P7" />
+              <SlaPage />
             </RequireAuth>
           }
         />

@@ -8,27 +8,17 @@ settings.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.rbac import Role
 from app.models.enums import Priority, TicketStatus
 from app.models.ticket import Ticket
 from app.models.user import User
 from app.repositories.ticket_repo import TicketFilter, TicketRepository
+from app.services.sla_engine import SLAEngine
 from app.utils.ticket_number import next_ticket_number
-
-
-def _sla_minutes_for(priority: Priority) -> int:
-    return {
-        Priority.CRITICAL: settings.SLA_CRITICAL_MINUTES,
-        Priority.HIGH:     settings.SLA_HIGH_MINUTES,
-        Priority.MEDIUM:   settings.SLA_MEDIUM_MINUTES,
-        Priority.LOW:      settings.SLA_LOW_MINUTES,
-    }[priority]
 
 
 class TicketService:
@@ -57,7 +47,6 @@ class TicketService:
                 raise ValidationError("Branch user can only raise tickets for their own branch.")
 
         ticket_no = await next_ticket_number(self.db)
-        sla_due_at = datetime.now(timezone.utc) + timedelta(minutes=_sla_minutes_for(prio))
 
         t = Ticket(
             ticket_no=ticket_no,
@@ -68,9 +57,10 @@ class TicketService:
             description=description.strip(),
             priority=prio.value,
             status=TicketStatus.NEW.value,
-            sla_due_at=sla_due_at,
         )
-        return await self.repo.create(t)
+        await self.repo.create(t)
+        await SLAEngine(self.db).on_ticket_created(t)
+        return t
 
     async def list_for(
         self,
