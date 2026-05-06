@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Tokens that need CSS-var form for animations & gradients */
+:root {
+  --brand-grad: linear-gradient(180deg, #4F36DC 0%, #3F2FBE 100%);
+  --accent-grad: linear-gradient(135deg, #B89AFF 0%, #7E4DFF 100%);
+}
+
+html, body, #root { height: 100%; }
+
+/* Subtle scrollbar to match enterprise feel */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb {
+  background: rgba(63, 47, 190, 0.25);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(63, 47, 190, 0.45); }
+
+@layer components {
+  .card {
+    @apply bg-surface rounded-2xl shadow-card p-6;
+  }
+  .kpi {
+    @apply card flex flex-col gap-1;
+  }
+  .pill {
+    @apply inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 hover:bg-brand-500
+           text-white px-4 py-2 text-sm font-medium shadow-card transition-colors
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-transparent
+           hover:bg-surface-subtle text-slate-700 px-4 py-2 text-sm font-medium;
+  }
+  .input {
+    @apply w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm
+           placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-200
+           outline-none transition-colors;
+  }
+}
+
+/* Dark mode overrides */
+.dark body { @apply bg-slate-950 text-slate-100; }
+.dark .card { @apply bg-slate-900 shadow-none border border-slate-800; }
+.dark .input { @apply bg-slate-900 border-slate-700 text-slate-100 placeholder:text-slate-500; }
