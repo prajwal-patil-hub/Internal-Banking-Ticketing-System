@@ -9,6 +9,6 @@
 | **P4** | sla_policies, sla_tracking, APScheduler job, breach detection, on_hold pause | ✅ Done |
 | **P5** | Escalations table, notification service + email/sms/in-app adapters (SSE deferred) | ✅ Done |
 | **P6** | Audit middleware, immutable trigger, auditor read-only UI | ✅ Done |
-| **P7** | Dashboard KPIs, role-specific views, dark-mode polish, responsive layouts | |
+| **P7** | Dashboard KPIs, role-specific views, dark-mode polish, responsive layouts | ✅ Done |
 | **P8** | Rate limit, MFA enforcement, login-attempt tracking, security headers, structured logs, Prometheus metrics | |
 | **P9** | Docker prod images, GitHub Actions CD, runbook, demo seed | |

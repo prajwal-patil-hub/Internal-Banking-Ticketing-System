@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card } from '@/components/Card';
 import { Button } from '@/components/Button';
 import { Badge } from '@/components/Badge';
+import { useToasts } from '@/components/Toast';
 import { useAuth } from '@/store/auth';
 import { extractError } from '@/lib/api';
 import type { TicketDetail } from '../types';
@@ -17,31 +18,40 @@ interface Props { ticket: TicketDetail }
 export function TicketActions({ ticket }: Props) {
   const qc = useQueryClient();
   const { hasRole } = useAuth();
+  const toast = useToasts((s) => s.push);
   const [reasonOpen, setReasonOpen] = useState<null | 'escalate' | 'resolve' | 'reopen'>(null);
   const [reasonText, setReasonText] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  const onSuccess = () => qc.invalidateQueries({ queryKey: ['ticket', ticket.id] });
+  const onSuccess = (msg: string) => () => {
+    qc.invalidateQueries({ queryKey: ['ticket', ticket.id] });
+    toast({ tone: 'success', message: msg });
+  };
+  const onError = (e: unknown) => {
+    const m = extractError(e).message;
+    setError(m);
+    toast({ tone: 'danger', message: m });
+  };
 
-  const ack    = useMutation({ mutationFn: () => acknowledgeTicket(ticket.id), onSuccess, onError: e => setError(extractError(e).message) });
-  const start  = useMutation({ mutationFn: () => startTicket(ticket.id),       onSuccess, onError: e => setError(extractError(e).message) });
-  const hold   = useMutation({ mutationFn: () => holdTicket(ticket.id),         onSuccess, onError: e => setError(extractError(e).message) });
-  const close_ = useMutation({ mutationFn: () => closeTicket(ticket.id),        onSuccess, onError: e => setError(extractError(e).message) });
+  const ack    = useMutation({ mutationFn: () => acknowledgeTicket(ticket.id), onSuccess: onSuccess('Ticket acknowledged.'), onError });
+  const start  = useMutation({ mutationFn: () => startTicket(ticket.id),       onSuccess: onSuccess('Work started.'),         onError });
+  const hold   = useMutation({ mutationFn: () => holdTicket(ticket.id),         onSuccess: onSuccess('Ticket on hold (SLA paused).'), onError });
+  const close_ = useMutation({ mutationFn: () => closeTicket(ticket.id),        onSuccess: onSuccess('Ticket closed.'),        onError });
 
   const escalate = useMutation({
     mutationFn: () => escalateTicket(ticket.id, reasonText),
-    onSuccess: () => { setReasonOpen(null); setReasonText(''); onSuccess(); },
-    onError: e => setError(extractError(e).message),
+    onSuccess: () => { setReasonOpen(null); setReasonText(''); onSuccess('Escalation raised.')(); },
+    onError,
   });
   const resolve = useMutation({
     mutationFn: () => resolveTicket(ticket.id, reasonText),
-    onSuccess: () => { setReasonOpen(null); setReasonText(''); onSuccess(); },
-    onError: e => setError(extractError(e).message),
+    onSuccess: () => { setReasonOpen(null); setReasonText(''); onSuccess('Ticket resolved.')(); },
+    onError,
   });
   const reopen = useMutation({
     mutationFn: () => reopenTicket(ticket.id, reasonText),
-    onSuccess: () => { setReasonOpen(null); setReasonText(''); onSuccess(); },
-    onError: e => setError(extractError(e).message),
+    onSuccess: () => { setReasonOpen(null); setReasonText(''); onSuccess('Ticket reopened (SLA reset).')(); },
+    onError,
   });
 
   const isAdmin       = hasRole('admin');

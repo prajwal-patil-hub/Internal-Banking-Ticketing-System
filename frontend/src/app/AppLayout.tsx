@@ -1,6 +1,8 @@
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 
 import { Logo } from '@/components/Logo';
+import { ToastViewport } from '@/components/Toast';
 import { useTheme } from '@/store/theme';
 import { cn } from '@/lib/cn';
 import { useAuth, type Role } from '@/store/auth';
@@ -48,6 +50,11 @@ export function AppLayout() {
   const { theme, toggle } = useTheme();
   const { user, refreshToken, clear } = useAuth();
   const nav = useNavigate();
+  const loc = useLocation();
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  // Auto-close the mobile drawer on route change.
+  useEffect(() => { setMobileNavOpen(false); }, [loc.pathname]);
 
   const visibleNav = NAV.filter((i) => !i.roles || (user && i.roles.includes(user.role)));
 
@@ -58,8 +65,15 @@ export function AppLayout() {
   };
 
   return (
-    <div className="min-h-full grid grid-cols-[260px_1fr] bg-surface-muted dark:bg-slate-950">
-      <aside className="bg-brand-600 text-white px-5 py-6 flex flex-col gap-8 dark:bg-brand-700">
+    <div className="min-h-full lg:grid lg:grid-cols-[260px_1fr] bg-surface-muted dark:bg-slate-950">
+      {/* Sidebar (drawer on mobile, static on lg+) */}
+      <aside
+        className={cn(
+          'bg-brand-600 text-white px-5 py-6 flex flex-col gap-8 dark:bg-brand-700',
+          'fixed inset-y-0 left-0 w-[260px] z-40 transform transition-transform lg:translate-x-0',
+          mobileNavOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
+        )}
+      >
         <Logo />
 
         <nav className="flex flex-col gap-1">
@@ -90,16 +104,32 @@ export function AppLayout() {
         </div>
       </aside>
 
-      <div className="flex flex-col">
-        <header className="h-16 px-8 flex items-center justify-between border-b border-slate-200/70 bg-white/60 backdrop-blur dark:bg-slate-900/60 dark:border-slate-800">
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-slate-500 dark:text-slate-400">SUCCESS Bank</span>
-            <span className="text-slate-300">/</span>
-            <span className="text-sm font-medium">Internal Ticketing</span>
+      {/* Mobile backdrop */}
+      {mobileNavOpen && (
+        <button
+          aria-label="Close menu"
+          className="fixed inset-0 z-30 bg-slate-900/40 backdrop-blur-sm lg:hidden"
+          onClick={() => setMobileNavOpen(false)}
+        />
+      )}
+
+      <div className="flex flex-col min-w-0">
+        <header className="h-16 px-4 sm:px-8 flex items-center justify-between border-b border-slate-200/70 bg-white/60 backdrop-blur dark:bg-slate-900/60 dark:border-slate-800">
+          <div className="flex items-center gap-3 min-w-0">
+            <button
+              className="lg:hidden btn-ghost p-2"
+              aria-label="Open menu"
+              onClick={() => setMobileNavOpen(true)}
+            >
+              <Icon d="M4 6h16M4 12h16M4 18h16" />
+            </button>
+            <span className="text-sm text-slate-500 dark:text-slate-400 hidden sm:inline">SUCCESS Bank</span>
+            <span className="text-slate-300 hidden sm:inline">/</span>
+            <span className="text-sm font-medium truncate">Internal Ticketing</span>
           </div>
 
-          <div className="flex items-center gap-3">
-            <input className="input w-72" placeholder="Search tickets, branches, users…" />
+          <div className="flex items-center gap-2 sm:gap-3">
+            <input className="input w-44 sm:w-72 hidden sm:block" placeholder="Search tickets, branches, users…" />
             <NotificationBell />
             <div className="flex items-center gap-2">
               <div className="text-right text-xs hidden md:block">
@@ -109,15 +139,17 @@ export function AppLayout() {
               <div className="h-9 w-9 rounded-full bg-brand-100 flex items-center justify-center text-brand-700 font-semibold">
                 {user ? userInitials(user.full_name) : 'SB'}
               </div>
-              <button onClick={onLogout} className="btn-ghost text-xs">Sign out</button>
+              <button onClick={onLogout} className="btn-ghost text-xs hidden sm:inline-flex">Sign out</button>
             </div>
           </div>
         </header>
 
-        <main className="p-8">
+        <main className="p-4 sm:p-8">
           <Outlet />
         </main>
       </div>
+
+      <ToastViewport />
     </div>
   );
 }

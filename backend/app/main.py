@@ -19,8 +19,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.routes import (
-    audit, auth, branches, categories, escalations, health, notifications, sla,
-    teams, tickets, users,
+    audit, auth, branches, categories, dashboard, escalations, health,
+    notifications, sla, teams, tickets, users,
 )
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
@@ -80,6 +80,7 @@ def create_app() -> FastAPI:
     app.include_router(escalations.router, prefix="/api/v1")
     app.include_router(notifications.router, prefix="/api/v1")
     app.include_router(audit.router, prefix="/api/v1")
+    app.include_router(dashboard.router, prefix="/api/v1")
 
     return app
 
