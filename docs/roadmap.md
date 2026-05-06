@@ -11,4 +11,4 @@
 | **P6** | Audit middleware, immutable trigger, auditor read-only UI | ✅ Done |
 | **P7** | Dashboard KPIs, role-specific views, dark-mode polish, responsive layouts | ✅ Done |
 | **P8** | Rate limit, MFA enforcement, login-attempt tracking, security headers, structured logs, Prometheus metrics | ✅ Done |
-| **P9** | Docker prod images, GitHub Actions CD, runbook, demo seed | |
+| **P9** | Docker prod images, prod compose + nginx, CI image build, Makefile, runbook | ✅ Done |
