@@ -28,6 +28,7 @@ from app.repositories.ticket_history_repo import (
     TicketCommentRepository,
 )
 from app.repositories.ticket_repo import TicketRepository
+from app.services.audit_service import AuditService
 from app.services.escalation_service import EscalationService
 from app.services.notification_service import (
     NotificationChannel,
@@ -46,6 +47,17 @@ class WorkflowService:
         self.sla = SLAEngine(db)
         self.notifications = NotificationService(db)
         self.escalations = EscalationService(db)
+        self.audit = AuditService(db)
+
+    async def _log_status_change(self, actor: User, t: Ticket, prev: str, action: str) -> None:
+        await self.audit.log(
+            actor=actor,
+            entity_type="ticket",
+            entity_id=t.id,
+            action=action,
+            old_value={"status": prev},
+            new_value={"status": t.status, "ticket_no": t.ticket_no},
+        )
 
     # ---- helpers ---------------------------------------------------------
 
@@ -72,8 +84,10 @@ class WorkflowService:
 
     async def acknowledge(self, actor: User, ticket_id: uuid.UUID) -> Ticket:
         t = await self._load_for(actor, ticket_id)
+        prev = t.status
         self._assert_transition(t.status, TicketStatus.ACKNOWLEDGED)
         t.status = TicketStatus.ACKNOWLEDGED.value
+        await self._log_status_change(actor, t, prev, "ticket.acknowledged")
         return t
 
     async def assign(
@@ -126,26 +140,43 @@ class WorkflowService:
                 payload={"ticket_id": str(t.id), "ticket_no": t.ticket_no},
                 channels=[NotificationChannel.IN_APP, NotificationChannel.EMAIL],
             )
+        await self.audit.log(
+            actor=actor,
+            entity_type="ticket",
+            entity_id=t.id,
+            action="ticket.assigned",
+            new_value={
+                "user_id": str(user_id) if user_id else None,
+                "team_id": str(team_id) if team_id else None,
+                "reason": reason,
+                "status": t.status,
+            },
+        )
         return t
 
     async def start(self, actor: User, ticket_id: uuid.UUID) -> Ticket:
         t = await self._load_for(actor, ticket_id)
+        prev = t.status
         was_on_hold = t.status == TicketStatus.ON_HOLD.value
         self._assert_transition(t.status, TicketStatus.IN_PROGRESS)
         t.status = TicketStatus.IN_PROGRESS.value
         if was_on_hold:
             await self.sla.on_resumed(t)
+        await self._log_status_change(actor, t, prev, "ticket.started")
         return t
 
     async def hold(self, actor: User, ticket_id: uuid.UUID) -> Ticket:
         t = await self._load_for(actor, ticket_id)
+        prev = t.status
         self._assert_transition(t.status, TicketStatus.ON_HOLD)
         t.status = TicketStatus.ON_HOLD.value
         await self.sla.on_paused(t)
+        await self._log_status_change(actor, t, prev, "ticket.held")
         return t
 
     async def escalate(self, actor: User, ticket_id: uuid.UUID, *, reason: str = "") -> Ticket:
         t = await self._load_for(actor, ticket_id)
+        prev = t.status
         self._assert_transition(t.status, TicketStatus.ESCALATED)
         t.status = TicketStatus.ESCALATED.value
         if reason:
@@ -155,10 +186,19 @@ class WorkflowService:
                 )
             )
         await self.escalations.raise_manual(ticket_id=t.id, triggered_by=actor, reason=reason)
+        await self.audit.log(
+            actor=actor,
+            entity_type="ticket",
+            entity_id=t.id,
+            action="ticket.escalated",
+            old_value={"status": prev},
+            new_value={"status": t.status, "reason": reason},
+        )
         return t
 
     async def resolve(self, actor: User, ticket_id: uuid.UUID, *, notes: str = "") -> Ticket:
         t = await self._load_for(actor, ticket_id)
+        prev = t.status
         self._assert_transition(t.status, TicketStatus.RESOLVED)
         t.status = TicketStatus.RESOLVED.value
         t.resolved_at = datetime.now(timezone.utc)
@@ -176,17 +216,28 @@ class WorkflowService:
             payload={"ticket_id": str(t.id), "ticket_no": t.ticket_no},
             channels=[NotificationChannel.IN_APP, NotificationChannel.EMAIL],
         )
+        await self.audit.log(
+            actor=actor,
+            entity_type="ticket",
+            entity_id=t.id,
+            action="ticket.resolved",
+            old_value={"status": prev},
+            new_value={"status": t.status, "notes": notes},
+        )
         return t
 
     async def close(self, actor: User, ticket_id: uuid.UUID) -> Ticket:
         t = await self._load_for(actor, ticket_id)
+        prev = t.status
         self._assert_transition(t.status, TicketStatus.CLOSED)
         t.status = TicketStatus.CLOSED.value
         t.closed_at = datetime.now(timezone.utc)
+        await self._log_status_change(actor, t, prev, "ticket.closed")
         return t
 
     async def reopen(self, actor: User, ticket_id: uuid.UUID, *, reason: str = "") -> Ticket:
         t = await self._load_for(actor, ticket_id)
+        prev = t.status
         self._assert_transition(t.status, TicketStatus.REOPENED)
         t.status = TicketStatus.REOPENED.value
         t.reopened_count += 1
@@ -199,6 +250,14 @@ class WorkflowService:
                     ticket_id=t.id, author_id=actor.id, body=f"[Reopened] {reason}", is_internal=False
                 )
             )
+        await self.audit.log(
+            actor=actor,
+            entity_type="ticket",
+            entity_id=t.id,
+            action="ticket.reopened",
+            old_value={"status": prev},
+            new_value={"status": t.status, "reopened_count": t.reopened_count, "reason": reason},
+        )
         return t
 
     # ---- comments --------------------------------------------------------
@@ -223,4 +282,16 @@ class WorkflowService:
         c = TicketComment(
             ticket_id=t.id, author_id=actor.id, body=body.strip(), is_internal=is_internal
         )
-        return await self.comments.add(c)
+        await self.comments.add(c)
+        await self.audit.log(
+            actor=actor,
+            entity_type="ticket_comment",
+            entity_id=c.id,
+            action="comment.posted",
+            new_value={
+                "ticket_id": str(t.id),
+                "is_internal": is_internal,
+                "length": len(c.body),
+            },
+        )
+        return c

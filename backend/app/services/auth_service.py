@@ -85,6 +85,16 @@ class AuthService:
 
         await self._record_attempt(email, ip, user_agent, success=True, reason="ok")
 
+        # Audit: successful authentication is a compliance event.
+        from app.services.audit_service import AuditService  # local import avoids cycle
+        await AuditService(self.users.db).log(
+            actor=user,
+            entity_type="user",
+            entity_id=user.id,
+            action="auth.login",
+            new_value={"email": user.email, "role": user.role.name},
+        )
+
         access, access_exp = create_access_token(subject=str(user.id), role=user.role.name)
         refresh_raw, refresh_exp = await self._issue_refresh(user.id, ip, user_agent)
         return user, access, access_exp, refresh_raw, refresh_exp

@@ -12,6 +12,7 @@ import { BranchesPage } from '@/pages/BranchesPage';
 import { UsersPage } from '@/pages/UsersPage';
 import { SlaPage } from '@/pages/SlaPage';
 import { EscalationsPage } from '@/pages/EscalationsPage';
+import { AuditPage } from '@/pages/AuditPage';
 
 export default function App() {
   return (
@@ -65,7 +66,7 @@ export default function App() {
           path="/audit"
           element={
             <RequireAuth roles={['admin', 'auditor']}>
-              <PlaceholderPage title="Audit Log" phase="P6" />
+              <AuditPage />
             </RequireAuth>
           }
         />

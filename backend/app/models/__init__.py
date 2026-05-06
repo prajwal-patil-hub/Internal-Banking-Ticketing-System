@@ -1,5 +1,6 @@
 """Aggregate model imports — Alembic introspects this package for metadata."""
 
+from app.models.audit import AuditLog  # noqa: F401
 from app.models.auth import LoginAttempt, RefreshToken  # noqa: F401
 from app.models.branch import Branch  # noqa: F401
 from app.models.category import Category  # noqa: F401

@@ -20,6 +20,7 @@ from sqlalchemy import select
 
 from app.models.role import Role as RoleModel
 from app.repositories.ticket_repo import TicketFilter, TicketRepository
+from app.services.audit_service import AuditService
 from app.services.notification_service import (
     NotificationChannel,
     NotificationService,
@@ -68,6 +69,17 @@ class TicketService:
         )
         await self.repo.create(t)
         await SLAEngine(self.db).on_ticket_created(t)
+        await AuditService(self.db).log(
+            actor=actor,
+            entity_type="ticket",
+            entity_id=t.id,
+            action="ticket.created",
+            new_value={
+                "ticket_no": t.ticket_no, "branch_id": str(t.branch_id),
+                "category_id": str(t.category_id), "priority": t.priority,
+                "title": t.title, "status": t.status,
+            },
+        )
         await self._notify_admins_of_new(t)
         return t
 
