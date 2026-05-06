@@ -54,8 +54,36 @@ class SLATrackingRepository:
         )
         return list((await self.db.execute(stmt)).scalars().all())
 
+    async def find_response_due_unbreached(
+        self, *, now: datetime, limit: int = 500
+    ) -> list[SLATracking]:
+        """Tickets whose response SLA expired without an agent reply yet."""
+        stmt = (
+            select(SLATracking)
+            .join(Ticket, Ticket.id == SLATracking.ticket_id)
+            .where(
+                and_(
+                    SLATracking.response_breached.is_(False),
+                    SLATracking.response_due_at.is_not(None),
+                    SLATracking.response_due_at <= now,
+                    Ticket.first_response_at.is_(None),
+                    Ticket.status.notin_(["resolved", "closed"]),
+                )
+            )
+            .limit(limit)
+        )
+        return list((await self.db.execute(stmt)).scalars().all())
+
     async def count_breached(self) -> int:
         stmt = select(func.count()).select_from(SLATracking).where(SLATracking.breached.is_(True))
+        return (await self.db.execute(stmt)).scalar_one()
+
+    async def count_response_breached(self) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(SLATracking)
+            .where(SLATracking.response_breached.is_(True))
+        )
         return (await self.db.execute(stmt)).scalar_one()
 
     async def list_breached(self, *, limit: int = 100) -> list[SLATracking]:

@@ -3,6 +3,7 @@ import { api } from '@/lib/api';
 export interface DashboardKpis {
   open: number;
   breached: number;
+  response_breached: number;
   critical_open: number;
   resolved: number;
   open_escalations: number;

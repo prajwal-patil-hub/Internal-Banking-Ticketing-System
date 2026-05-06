@@ -15,6 +15,7 @@ from app.models.escalation import Escalation
 from app.models.sla import SLATracking
 from app.models.ticket import Ticket
 from app.models.user import User
+from app.repositories.sla_repo import SLATrackingRepository
 
 OPEN_STATUSES = (
     "new", "acknowledged", "assigned", "in_progress",
@@ -69,9 +70,13 @@ class DashboardService:
 
         sla_health = self._compute_health(open_count, breached)
 
+        # First-response SLA breach count (banks track this separately).
+        response_breached = await SLATrackingRepository(self.db).count_response_breached()
+
         return {
             "open": open_count,
             "breached": breached,
+            "response_breached": response_breached,
             "critical_open": critical_open,
             "resolved": resolved_or_closed,
             "open_escalations": open_escalations,

@@ -272,12 +272,14 @@ class WorkflowService:
             raise ValidationError("Branch users cannot post internal comments.")
 
         # First-response time: first comment by an agent / supervisor / admin.
-        if (
+        first_agent_response = (
             t.first_response_at is None
             and actor.role.name in {Role.AGENT.value, Role.SUPERVISOR.value, Role.ADMIN.value}
             and not is_internal
-        ):
+        )
+        if first_agent_response:
             t.first_response_at = datetime.now(timezone.utc)
+            await self.sla.on_first_response(t)
 
         c = TicketComment(
             ticket_id=t.id, author_id=actor.id, body=body.strip(), is_internal=is_internal

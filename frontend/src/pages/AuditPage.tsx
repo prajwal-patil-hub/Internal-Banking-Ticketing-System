@@ -110,6 +110,26 @@ export function AuditPage() {
           />
           <Button onClick={apply}>Apply</Button>
           <Button variant="ghost" onClick={reset}>Reset</Button>
+          <Button
+            variant="ghost"
+            onClick={async () => {
+              const params = new URLSearchParams();
+              if (filters.entity_type) params.set('entity_type', filters.entity_type);
+              if (filters.action) params.set('action', filters.action);
+              if (filters.actor_user_id) params.set('actor_user_id', filters.actor_user_id);
+              if (filters.date_from) params.set('date_from', filters.date_from);
+              if (filters.date_to) params.set('date_to', filters.date_to);
+              const resp = await api.get(`/audit-logs/export.csv?${params.toString()}`, { responseType: 'blob' });
+              const url = URL.createObjectURL(resp.data as Blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = 'audit.csv';
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+          >
+            ⬇ CSV
+          </Button>
         </div>
       </Card>
 

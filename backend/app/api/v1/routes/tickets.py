@@ -7,12 +7,14 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Header, Query, UploadFile
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.storage_adapter import StorageAdapter
 from app.api.v1.deps import get_current_user, get_session, require_permissions
-from app.core.exceptions import NotFoundError, ValidationError
+from app.core import idempotency
+from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.core.rbac import Role
 from app.models.ticket_history import Attachment
 from app.models.user import User
@@ -94,17 +96,95 @@ async def create_ticket(
     payload: TicketCreate,
     db: AsyncSession = Depends(get_session),
     user: User = Depends(require_permissions("ticket.create")),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> dict:
-    t = await TicketService(db).create(
-        actor=user,
-        branch_id=payload.branch_id,
-        category_id=payload.category_id,
-        title=payload.title,
-        description=payload.description,
-        priority=payload.priority,
+    # Idempotency: if the client retries with the same key we return the
+    # cached response and do NOT create a duplicate ticket.
+    actor_id = str(user.id)
+    if idempotency_key:
+        cached = await idempotency.lookup(actor_id, idempotency_key)
+        if cached is not None:
+            return cached
+        if not await idempotency.reserve(actor_id, idempotency_key):
+            # Another request with the same key is in flight.
+            raise ConflictError("Duplicate request — retry shortly.")
+
+    try:
+        t = await TicketService(db).create(
+            actor=user,
+            branch_id=payload.branch_id,
+            category_id=payload.category_id,
+            title=payload.title,
+            description=payload.description,
+            priority=payload.priority,
+        )
+        await db.commit()
+        response = ok(TicketPublic.model_validate(t).model_dump(mode="json"))
+    except Exception:
+        if idempotency_key:
+            await idempotency.release(actor_id, idempotency_key)
+        raise
+
+    if idempotency_key:
+        await idempotency.store(actor_id, idempotency_key, response)
+    return response
+
+
+def _csv_quote(v: object) -> str:
+    s = "" if v is None else str(v)
+    needs = any(c in s for c in (",", "\"", "\n", "\r"))
+    if needs:
+        return "\"" + s.replace("\"", "\"\"") + "\""
+    return s
+
+
+@router.get("/export.csv")
+async def export_tickets_csv(
+    status: list[str] | None = Query(default=None),
+    priority: list[str] | None = Query(default=None),
+    branch_id: uuid.UUID | None = Query(default=None),
+    assigned_user_id: uuid.UUID | None = Query(default=None),
+    breached: bool | None = Query(default=None),
+    q: str | None = Query(default=None),
+    date_from: datetime | None = Query(default=None),
+    date_to: datetime | None = Query(default=None),
+    db: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> StreamingResponse:
+    f = TicketFilter(
+        status=status, priority=priority, branch_id=branch_id,
+        assigned_user_id=assigned_user_id, breached=breached, q=q,
+        date_from=date_from, date_to=date_to,
     )
-    await db.commit()
-    return ok(TicketPublic.model_validate(t).model_dump(mode="json"))
+    items, _ = await TicketService(db).list_for(user, f=f, offset=0, limit=10_000)
+
+    header = [
+        "ticket_no", "title", "status", "priority", "branch_id",
+        "raised_by", "assigned_user_id", "assigned_team_id",
+        "sla_due_at", "first_response_at", "resolved_at", "closed_at",
+        "reopened_count", "created_at",
+    ]
+
+    def gen():
+        yield ",".join(header) + "\n"
+        for t in items:
+            row = [
+                t.ticket_no, t.title, t.status, t.priority,
+                t.branch_id, t.raised_by, t.assigned_user_id, t.assigned_team_id,
+                t.sla_due_at.isoformat() if t.sla_due_at else "",
+                t.first_response_at.isoformat() if t.first_response_at else "",
+                t.resolved_at.isoformat() if t.resolved_at else "",
+                t.closed_at.isoformat() if t.closed_at else "",
+                t.reopened_count,
+                t.created_at.isoformat(),
+            ]
+            yield ",".join(_csv_quote(c) for c in row) + "\n"
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="tickets.csv"'},
+    )
 
 
 # ---- transitions ---------------------------------------------------------

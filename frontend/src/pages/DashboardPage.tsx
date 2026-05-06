@@ -19,10 +19,11 @@ export function DashboardPage() {
   });
 
   const tiles = [
-    { label: 'Open tickets',     value: data?.kpis.open,            tone: 'info' as const },
-    { label: 'SLA breached',     value: data?.kpis.breached,        tone: 'danger' as const },
-    { label: 'Critical, open',   value: data?.kpis.critical_open,   tone: 'warning' as const },
-    { label: 'Resolved / closed', value: data?.kpis.resolved,        tone: 'success' as const },
+    { label: 'Open tickets',          value: data?.kpis.open,               tone: 'info' as const },
+    { label: 'Resolution breached',   value: data?.kpis.breached,           tone: 'danger' as const },
+    { label: 'First-response missed', value: data?.kpis.response_breached,  tone: 'warning' as const },
+    { label: 'Critical, open',        value: data?.kpis.critical_open,      tone: 'warning' as const },
+    { label: 'Resolved / closed',     value: data?.kpis.resolved,           tone: 'success' as const },
   ];
 
   return (

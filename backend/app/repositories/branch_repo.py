@@ -14,9 +14,19 @@ class BranchRepository:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
-    async def list(self, *, q: str | None, offset: int, limit: int) -> tuple[list[Branch], int]:
+    async def list(
+        self,
+        *,
+        q: str | None,
+        offset: int,
+        limit: int,
+        include_inactive: bool = False,
+    ) -> tuple[list[Branch], int]:
         stmt = select(Branch).order_by(Branch.created_at.desc())
         count_stmt = select(func.count()).select_from(Branch)
+        if not include_inactive:
+            stmt = stmt.where(Branch.is_active.is_(True))
+            count_stmt = count_stmt.where(Branch.is_active.is_(True))
         if q:
             like = f"%{q.lower()}%"
             stmt = stmt.where(func.lower(Branch.name).like(like) | func.lower(Branch.code).like(like))

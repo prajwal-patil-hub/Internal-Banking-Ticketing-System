@@ -6,6 +6,7 @@ import { Card } from '@/components/Card';
 import { Badge } from '@/components/Badge';
 import { Button } from '@/components/Button';
 import { listTickets, type TicketFilters } from '@/features/tickets/api';
+import { api } from '@/lib/api';
 import { PriorityBadge, StatusBadge } from '@/features/tickets/components/StatusBadge';
 import { formatRelative, isBreached } from '@/lib/format';
 import { useAuth } from '@/store/auth';
@@ -79,6 +80,25 @@ export function TicketsPage() {
             <option value="false">On time</option>
           </select>
           <Button variant="ghost" onClick={() => refetch()}>Refresh</Button>
+          <Button
+            variant="ghost"
+            onClick={async () => {
+              const params = new URLSearchParams();
+              status?.forEach((s) => params.append('status', s));
+              priority?.forEach((p) => params.append('priority', p));
+              if (breached != null) params.set('breached', String(breached));
+              if (q) params.set('q', q);
+              const resp = await api.get(`/tickets/export.csv?${params.toString()}`, { responseType: 'blob' });
+              const url = URL.createObjectURL(resp.data as Blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = 'tickets.csv';
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+          >
+            ⬇ CSV
+          </Button>
         </div>
 
         <div className="mt-3 flex flex-wrap gap-1.5">

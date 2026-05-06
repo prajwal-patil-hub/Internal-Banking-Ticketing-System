@@ -36,6 +36,16 @@ class SLATracking(UUIDPKMixin, Base):
     breach_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     total_paused_seconds: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # First-response SLA — set on create, cleared on first agent reply.
+    response_due_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    response_breached: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, index=True
+    )
+    response_breach_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
