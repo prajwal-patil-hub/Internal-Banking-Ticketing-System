@@ -1,24 +1,33 @@
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+
 import { Logo } from '@/components/Logo';
 import { useTheme } from '@/store/theme';
 import { cn } from '@/lib/cn';
+import { useAuth, type Role } from '@/store/auth';
+import { logout as apiLogout } from '@/features/auth/api';
 
 interface NavItem {
   to: string;
   label: string;
   icon: string;
-  badge?: number;
+  roles?: Role[];
 }
 
-// Phase P0 ships a static nav; later phases gate items by role.
+// Server-side checks are authoritative; this just hides nav items the user
+// has no right to use.
 const NAV: NavItem[] = [
   { to: '/dashboard',    label: 'Dashboard',    icon: 'M3 12l9-9 9 9M5 10v10h14V10' },
   { to: '/tickets',      label: 'Tickets',      icon: 'M4 7h16M4 12h16M4 17h10' },
-  { to: '/sla',          label: 'SLA Monitor',  icon: 'M12 8v4l3 2M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
-  { to: '/escalations',  label: 'Escalations',  icon: 'M12 9v4M12 17h.01M4.93 19h14.14L12 5z' },
-  { to: '/branches',     label: 'Branches',     icon: 'M3 21V8l9-5 9 5v13M9 21V12h6v9' },
-  { to: '/users',        label: 'Users',        icon: 'M16 11a4 4 0 10-8 0 4 4 0 008 0zM2 21a8 8 0 1116 0' },
-  { to: '/audit',        label: 'Audit Log',    icon: 'M9 12h6M9 16h6M5 4h14v16H5z' },
+  { to: '/sla',          label: 'SLA Monitor',  icon: 'M12 8v4l3 2M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
+    roles: ['admin', 'supervisor'] },
+  { to: '/escalations',  label: 'Escalations',  icon: 'M12 9v4M12 17h.01M4.93 19h14.14L12 5z',
+    roles: ['admin', 'supervisor'] },
+  { to: '/branches',     label: 'Branches',     icon: 'M3 21V8l9-5 9 5v13M9 21V12h6v9',
+    roles: ['admin'] },
+  { to: '/users',        label: 'Users',        icon: 'M16 11a4 4 0 10-8 0 4 4 0 008 0zM2 21a8 8 0 1116 0',
+    roles: ['admin'] },
+  { to: '/audit',        label: 'Audit Log',    icon: 'M9 12h6M9 16h6M5 4h14v16H5z',
+    roles: ['auditor', 'admin'] },
 ];
 
 function Icon({ d, className }: { d: string; className?: string }) {
@@ -30,17 +39,30 @@ function Icon({ d, className }: { d: string; className?: string }) {
   );
 }
 
+function userInitials(name: string): string {
+  return name.split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase()).join('') || '?';
+}
+
 export function AppLayout() {
   const { theme, toggle } = useTheme();
+  const { user, refreshToken, clear } = useAuth();
+  const nav = useNavigate();
+
+  const visibleNav = NAV.filter((i) => !i.roles || (user && i.roles.includes(user.role)));
+
+  const onLogout = async () => {
+    try { await apiLogout(refreshToken); } catch { /* network errors are fine on logout */ }
+    clear();
+    nav('/login', { replace: true });
+  };
 
   return (
     <div className="min-h-full grid grid-cols-[260px_1fr] bg-surface-muted dark:bg-slate-950">
-      {/* Sidebar */}
       <aside className="bg-brand-600 text-white px-5 py-6 flex flex-col gap-8 dark:bg-brand-700">
         <Logo />
 
         <nav className="flex flex-col gap-1">
-          {NAV.map((item) => (
+          {visibleNav.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -55,9 +77,6 @@ export function AppLayout() {
             >
               <Icon d={item.icon} />
               <span className="flex-1">{item.label}</span>
-              {item.badge != null && (
-                <span className="text-xs font-semibold opacity-80">{item.badge}</span>
-              )}
             </NavLink>
           ))}
         </nav>
@@ -70,7 +89,6 @@ export function AppLayout() {
         </div>
       </aside>
 
-      {/* Main */}
       <div className="flex flex-col">
         <header className="h-16 px-8 flex items-center justify-between border-b border-slate-200/70 bg-white/60 backdrop-blur dark:bg-slate-900/60 dark:border-slate-800">
           <div className="flex items-center gap-3">
@@ -80,12 +98,16 @@ export function AppLayout() {
           </div>
 
           <div className="flex items-center gap-3">
-            <input
-              className="input w-72"
-              placeholder="Search tickets, branches, users…"
-            />
-            <div className="h-9 w-9 rounded-full bg-brand-100 flex items-center justify-center text-brand-700 font-semibold">
-              SB
+            <input className="input w-72" placeholder="Search tickets, branches, users…" />
+            <div className="flex items-center gap-2">
+              <div className="text-right text-xs hidden md:block">
+                <div className="font-medium leading-tight">{user?.full_name}</div>
+                <div className="text-slate-500 leading-tight capitalize">{user?.role.replace('_', ' ')}</div>
+              </div>
+              <div className="h-9 w-9 rounded-full bg-brand-100 flex items-center justify-center text-brand-700 font-semibold">
+                {user ? userInitials(user.full_name) : 'SB'}
+              </div>
+              <button onClick={onLogout} className="btn-ghost text-xs">Sign out</button>
             </div>
           </div>
         </header>
