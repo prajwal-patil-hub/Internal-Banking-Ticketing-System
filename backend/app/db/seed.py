@@ -26,6 +26,7 @@ from app.models.branch import Branch
 from app.models.category import Category
 from app.models.role import Permission as PermissionModel
 from app.models.role import Role as RoleModel
+from app.models.role import RolePermission
 from app.models.sla import SLAPolicy, SLATracking
 from app.models.ticket import Ticket
 from app.models.user import User
@@ -104,13 +105,24 @@ async def main() -> None:
         for p in Permission:
             perms_by_code[p.value] = await _ensure_permission(session, p)
 
-        # 3. Grants
+        # 3. Grants — insert into the join table directly to avoid touching
+        # the lazy-loaded `.permissions` collection from async context.
         for role_enum, perm_set in ROLE_PERMISSIONS.items():
             role = roles_by_name[role_enum.value]
-            current = {p.code for p in role.permissions}
+            existing_perm_ids = set(
+                (
+                    await session.execute(
+                        select(RolePermission.permission_id).where(
+                            RolePermission.role_id == role.id
+                        )
+                    )
+                ).scalars().all()
+            )
             for perm_enum in perm_set:
-                if perm_enum.value not in current:
-                    role.permissions.append(perms_by_code[perm_enum.value])
+                perm = perms_by_code[perm_enum.value]
+                if perm.id not in existing_perm_ids:
+                    session.add(RolePermission(role_id=role.id, permission_id=perm.id))
+            await session.flush()
 
         # 4. Demo branches
         branches_by_code: dict[str, Branch] = {}
