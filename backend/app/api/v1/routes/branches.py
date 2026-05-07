@@ -12,7 +12,7 @@ from app.core.exceptions import ConflictError, NotFoundError
 from app.models.branch import Branch
 from app.models.user import User
 from app.repositories.branch_repo import BranchRepository
-from app.schemas.branch import BranchCreate, BranchPublic
+from app.schemas.branch import BranchCreate, BranchPublic, BranchUpdate
 from app.schemas.envelope import ok, paginated
 from app.utils.pagination import PageParams, page_params
 
@@ -67,6 +67,29 @@ async def create_branch(
         contact_phone=payload.contact_phone,
     )
     await repo.create(b)
+    await db.commit()
+    return ok(BranchPublic.model_validate(b).model_dump(mode="json"))
+
+
+@router.patch("/{branch_id}")
+async def update_branch(
+    branch_id: uuid.UUID,
+    payload: BranchUpdate,
+    db: AsyncSession = Depends(get_session),
+    _user: User = Depends(require_permissions("branch.manage")),
+) -> dict:
+    b = await BranchRepository(db).get(branch_id)
+    if b is None:
+        raise NotFoundError("Branch not found.")
+    fields = payload.model_dump(exclude_unset=True)
+    for field, value in fields.items():
+        if value is None:
+            continue
+        if field == "ifsc":
+            value = (value or "").upper().strip()
+        if field == "name":
+            value = (value or "").strip()
+        setattr(b, field, value)
     await db.commit()
     return ok(BranchPublic.model_validate(b).model_dump(mode="json"))
 

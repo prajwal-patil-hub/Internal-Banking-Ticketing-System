@@ -9,9 +9,6 @@ from pydantic import BaseModel, Field
 
 
 class LoginRequest(BaseModel):
-    # Plain str (not EmailStr) — login is a credential check, not a
-    # registration form. Strict EmailStr rejects valid intranet TLDs like
-    # `.local`, which doesn't add security and breaks legitimate logins.
     email: str = Field(min_length=3, max_length=255)
     password: str = Field(min_length=8, max_length=200)
 
@@ -22,6 +19,11 @@ class RefreshRequest(BaseModel):
 
 class LogoutRequest(BaseModel):
     refresh_token: str | None = None
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=8, max_length=200)
+    new_password: str = Field(min_length=8, max_length=200)
 
 
 class TokenPair(BaseModel):
@@ -39,6 +41,7 @@ class UserPublic(BaseModel):
     role: str
     branch_id: uuid.UUID | None
     mfa_enabled: bool
+    is_active: bool = True
 
     model_config = {"from_attributes": True}
 
@@ -46,3 +49,24 @@ class UserPublic(BaseModel):
 class LoginResponse(BaseModel):
     user: UserPublic
     tokens: TokenPair
+
+
+class UserCreate(BaseModel):
+    email: str = Field(min_length=3, max_length=255)
+    full_name: str = Field(min_length=2, max_length=150)
+    role: str = Field(min_length=2, max_length=50)
+    branch_id: uuid.UUID | None = None
+    # If omitted the server generates one and returns it once.
+    password: str | None = Field(default=None, min_length=8, max_length=200)
+
+
+class UserUpdate(BaseModel):
+    full_name: str | None = Field(default=None, min_length=2, max_length=150)
+    role: str | None = Field(default=None, min_length=2, max_length=50)
+    branch_id: uuid.UUID | None = None
+    is_active: bool | None = None
+
+
+class PasswordResetResponse(BaseModel):
+    user: UserPublic
+    new_password: str

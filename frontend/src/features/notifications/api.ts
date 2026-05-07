@@ -37,3 +37,8 @@ export async function markRead(id: string): Promise<NotificationItem> {
   const { data } = await api.post<{ data: NotificationItem }>(`/notifications/${id}/read`);
   return data.data;
 }
+
+export async function markAllRead(): Promise<number> {
+  const { data } = await api.post<{ data: { marked: number } }>('/notifications/mark-all-read');
+  return data.data.marked;
+}

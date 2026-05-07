@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { LogOut, Moon, Sun } from 'lucide-react';
+import { LogOut, Moon, Sun, UserCircle2 } from 'lucide-react';
 
 import { useAuth } from '@/store/auth';
 import { useTheme } from '@/store/theme';
@@ -87,6 +87,15 @@ export function UserMenu() {
                   {user?.role.replace('_', ' ')}
                 </div>
               </div>
+
+              <Link
+                to="/profile"
+                onClick={() => setOpen(false)}
+                className="w-full px-3 py-2.5 text-sm flex items-center gap-3 rounded-2xl hover:bg-white/60 transition-colors text-ink"
+              >
+                <UserCircle2 className="h-4 w-4 text-brand-600" />
+                <span className="flex-1 text-left">Your profile</span>
+              </Link>
 
               <button
                 onClick={() => toggle()}

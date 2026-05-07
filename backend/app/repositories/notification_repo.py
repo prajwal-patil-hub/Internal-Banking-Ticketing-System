@@ -50,3 +50,14 @@ class NotificationRepository:
             .where(Notification.user_id == user_id, Notification.read_at.is_(None))
         )
         return (await self.db.execute(stmt)).scalar_one()
+
+    async def mark_all_read(self, user_id: uuid.UUID) -> int:
+        stmt = (
+            select(Notification)
+            .where(Notification.user_id == user_id, Notification.read_at.is_(None))
+        )
+        rows = (await self.db.execute(stmt)).scalars().all()
+        now = datetime.now(timezone.utc)
+        for r in rows:
+            r.read_at = now
+        return len(rows)

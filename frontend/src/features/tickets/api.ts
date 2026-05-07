@@ -59,8 +59,10 @@ export async function createTicket(input: CreateTicketInput) {
   return data.data;
 }
 
-export async function listBranches(page = 1, size = 100) {
-  const { data } = await api.get<ListEnvelope<Branch>>(`/branches?page=${page}&size=${size}`);
+export async function listBranches(page = 1, size = 100, includeInactive = false) {
+  const params = new URLSearchParams({ page: String(page), size: String(size) });
+  if (includeInactive) params.set('include_inactive', 'true');
+  const { data } = await api.get<ListEnvelope<Branch>>(`/branches?${params.toString()}`);
   return { items: data.data, meta: data.meta.pagination };
 }
 

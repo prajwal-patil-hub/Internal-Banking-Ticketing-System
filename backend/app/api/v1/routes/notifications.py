@@ -57,3 +57,13 @@ async def mark_read(
     await repo.mark_read(n)
     await db.commit()
     return ok(NotificationPublic.model_validate(n).model_dump(mode="json"))
+
+
+@router.post("/mark-all-read")
+async def mark_all_read(
+    db: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> dict:
+    count = await NotificationRepository(db).mark_all_read(user.id)
+    await db.commit()
+    return ok({"marked": count})

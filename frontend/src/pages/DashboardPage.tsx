@@ -91,27 +91,48 @@ function KpiStrip({
   data: DashboardOverview | undefined;
   isLoading: boolean;
 }) {
+  const OPEN = ['new', 'acknowledged', 'assigned', 'in_progress', 'on_hold', 'escalated', 'reopened'];
+
+  const linkFor = (key: string) => {
+    const params = new URLSearchParams();
+    switch (key) {
+      case 'open':
+        OPEN.forEach((s) => params.append('status', s));
+        break;
+      case 'breached':
+        params.set('breached', 'true');
+        break;
+      case 'response_breached':
+        // No backend filter for response-breach yet; deep-link to all open
+        // and surface a label so the user knows where they came from.
+        OPEN.forEach((s) => params.append('status', s));
+        break;
+      case 'critical_open':
+        OPEN.forEach((s) => params.append('status', s));
+        params.append('priority', 'critical');
+        break;
+      case 'resolved':
+        params.append('status', 'resolved');
+        params.append('status', 'closed');
+        break;
+    }
+    return `/tickets?${params.toString()}`;
+  };
+
   const tiles = [
-    { label: 'Open tickets',          value: data?.kpis.open,              icon: Inbox,         tone: 'info' as const,    delta: '+12%' },
-    { label: 'Resolution breached',   value: data?.kpis.breached,          icon: AlertTriangle, tone: 'danger' as const,  delta: '-5%' },
-    { label: 'First-response missed', value: data?.kpis.response_breached, icon: Clock4,        tone: 'warning' as const, delta: '—' },
-    { label: 'Critical, open',        value: data?.kpis.critical_open,     icon: Flame,         tone: 'warning' as const, delta: 'live' },
-    { label: 'Resolved / closed',     value: data?.kpis.resolved,          icon: CheckCircle2,  tone: 'success' as const, delta: '+8%' },
+    { key: 'open',              label: 'Open tickets',          value: data?.kpis.open,              icon: Inbox,         tone: 'info' as const,    delta: 'view' },
+    { key: 'breached',          label: 'Resolution breached',   value: data?.kpis.breached,          icon: AlertTriangle, tone: 'danger' as const,  delta: 'view' },
+    { key: 'response_breached', label: 'First-response missed', value: data?.kpis.response_breached, icon: Clock4,        tone: 'warning' as const, delta: 'view' },
+    { key: 'critical_open',     label: 'Critical, open',        value: data?.kpis.critical_open,     icon: Flame,         tone: 'warning' as const, delta: 'view' },
+    { key: 'resolved',          label: 'Resolved / closed',     value: data?.kpis.resolved,          icon: CheckCircle2,  tone: 'success' as const, delta: 'view' },
   ];
 
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-4">
       {tiles.map((t, i) => {
         const Icon = t.icon;
-        return (
-          <motion.div
-            key={t.label}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.35, delay: 0.04 * i, ease: [0.22, 1, 0.36, 1] }}
-            whileHover={{ y: -2 }}
-            className="glass rounded-4xl p-5 hover:shadow-glassLg transition-shadow"
-          >
+        const inner = (
+          <>
             <div className="flex items-start justify-between gap-3">
               <span
                 className={cn(
@@ -134,6 +155,23 @@ function KpiStrip({
                 {t.value ?? 0}
               </div>
             )}
+          </>
+        );
+        return (
+          <motion.div
+            key={t.label}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.35, delay: 0.04 * i, ease: [0.22, 1, 0.36, 1] }}
+            whileHover={{ y: -2 }}
+          >
+            <Link
+              to={linkFor(t.key)}
+              className="glass rounded-4xl p-5 hover:shadow-glassLg transition-shadow block focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-300"
+              aria-label={`${t.label}: ${t.value ?? 0}. View matching tickets.`}
+            >
+              {inner}
+            </Link>
           </motion.div>
         );
       })}

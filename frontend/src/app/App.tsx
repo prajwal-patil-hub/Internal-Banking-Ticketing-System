@@ -13,6 +13,7 @@ import { UsersPage } from '@/pages/UsersPage';
 import { SlaPage } from '@/pages/SlaPage';
 import { EscalationsPage } from '@/pages/EscalationsPage';
 import { AuditPage } from '@/pages/AuditPage';
+import { ProfilePage } from '@/pages/ProfilePage';
 
 export default function App() {
   return (
@@ -70,6 +71,7 @@ export default function App() {
             </RequireAuth>
           }
         />
+        <Route path="/profile" element={<ProfilePage />} />
         <Route path="/forbidden" element={<ForbiddenPage />} />
       </Route>
 

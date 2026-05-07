@@ -3,7 +3,7 @@ import { useForm } from 'react-hook-form';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { z } from 'zod';
 import { motion } from 'framer-motion';
-import { Mail, Lock, ArrowRight, ShieldCheck } from 'lucide-react';
+import { Mail, Lock, ArrowRight, ShieldCheck, Eye, EyeOff } from 'lucide-react';
 
 import { Logo } from '@/components/Logo';
 import { Badge } from '@/components/Badge';
@@ -23,6 +23,7 @@ export function LoginPage() {
   const loc = useLocation();
   const setSession = useAuth((s) => s.setSession);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
 
   const {
     register,
@@ -140,12 +141,21 @@ export function LoginPage() {
               <div className="relative">
                 <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-subtle pointer-events-none" />
                 <input
-                  className="input pl-10"
-                  type="password"
+                  className="input pl-10 pr-11"
+                  type={showPassword ? 'text' : 'password'}
                   autoComplete="current-password"
                   placeholder="••••••••"
                   {...register('password')}
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  aria-pressed={showPassword}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 grid place-items-center rounded-pill text-ink-muted hover:text-ink hover:bg-white/70 transition-colors"
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
               </div>
               {errors.password && (
                 <span className="text-2xs text-danger-deep">{errors.password.message}</span>

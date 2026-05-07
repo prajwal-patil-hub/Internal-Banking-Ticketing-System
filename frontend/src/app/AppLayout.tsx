@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   LayoutDashboard,
@@ -41,7 +41,9 @@ const NAV: NavItem[] = [
 export function AppLayout() {
   const { user } = useAuth();
   const loc = useLocation();
+  const nav = useNavigate();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [searchValue, setSearchValue] = useState('');
 
   useEffect(() => { setMobileNavOpen(false); }, [loc.pathname]);
 
@@ -148,16 +150,27 @@ export function AppLayout() {
               <Menu className="h-5 w-5" />
             </button>
 
-            <div className="relative flex-1 max-w-xl">
+            <form
+              className="relative flex-1 max-w-xl"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const v = searchValue.trim();
+                if (!v) return;
+                nav(`/tickets?q=${encodeURIComponent(v)}`);
+              }}
+            >
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-subtle pointer-events-none" />
               <input
                 className="input pl-9 py-2 rounded-2xl bg-white/40 border-white/40"
-                placeholder="Search tickets, branches, users…"
+                placeholder="Search tickets by number or title…"
+                value={searchValue}
+                onChange={(e) => setSearchValue(e.target.value)}
+                aria-label="Search tickets"
               />
               <kbd className="hidden md:inline-flex absolute right-2 top-1/2 -translate-y-1/2 items-center text-2xs font-medium text-ink-muted bg-white/70 border border-white/60 rounded-md px-1.5 py-0.5">
-                ⌘K
+                ↵
               </kbd>
-            </div>
+            </form>
 
             <div className="flex items-center gap-2 sm:gap-3 shrink-0 ml-auto">
               <NotificationBell />

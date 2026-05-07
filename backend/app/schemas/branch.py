@@ -16,6 +16,15 @@ class BranchCreate(BaseModel):
     contact_phone: str = Field(default="", max_length=40)
 
 
+class BranchUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=150)
+    region: str | None = Field(default=None, max_length=100)
+    address: str | None = Field(default=None, max_length=255)
+    ifsc: str | None = Field(default=None, max_length=20)
+    contact_email: str | None = Field(default=None, max_length=255)
+    contact_phone: str | None = Field(default=None, max_length=40)
+
+
 class BranchPublic(BaseModel):
     id: uuid.UUID
     code: str

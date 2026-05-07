@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   Plus,
@@ -30,13 +30,39 @@ const STATUSES: TicketFilters['status'] = [
 const PRIORITIES: TicketFilters['priority'] = ['critical', 'high', 'medium', 'low'];
 
 export function TicketsPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Hydrate filter state from URL on first render so deep-links work
+  // (e.g. dashboard tile -> /tickets?status=new&priority=critical).
   const [page, setPage] = useState(1);
   const [size] = useState(20);
-  const [q, setQ] = useState('');
-  const [status, setStatus] = useState<TicketFilters['status']>([]);
-  const [priority, setPriority] = useState<TicketFilters['priority']>([]);
-  const [breached, setBreached] = useState<boolean | undefined>(undefined);
+  const [q, setQ] = useState(() => searchParams.get('q') ?? '');
+  const [status, setStatus] = useState<TicketFilters['status']>(
+    () => (searchParams.getAll('status') as TicketFilters['status']) ?? [],
+  );
+  const [priority, setPriority] = useState<TicketFilters['priority']>(
+    () => (searchParams.getAll('priority') as TicketFilters['priority']) ?? [],
+  );
+  const [breached, setBreached] = useState<boolean | undefined>(() => {
+    const v = searchParams.get('breached');
+    if (v === 'true') return true;
+    if (v === 'false') return false;
+    return undefined;
+  });
   const [openCreate, setOpenCreate] = useState(false);
+
+  // Keep the URL in sync as the user changes filters — makes the list
+  // shareable/back-button-friendly without triggering re-renders.
+  useEffect(() => {
+    const next = new URLSearchParams();
+    if (q) next.set('q', q);
+    status?.forEach((s) => next.append('status', s));
+    priority?.forEach((p) => next.append('priority', p));
+    if (breached === true) next.set('breached', 'true');
+    if (breached === false) next.set('breached', 'false');
+    setSearchParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, status, priority, breached]);
 
   const { hasRole } = useAuth();
   const canCreate = hasRole('branch_user');

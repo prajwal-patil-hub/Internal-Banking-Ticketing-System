@@ -2,10 +2,16 @@ import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Bell } from 'lucide-react';
+import { Bell, CheckCheck } from 'lucide-react';
 
 import { Badge } from '@/components/Badge';
-import { listNotifications, markRead, unreadCount, type NotificationItem } from './api';
+import {
+  listNotifications,
+  markAllRead,
+  markRead,
+  unreadCount,
+  type NotificationItem,
+} from './api';
 import { formatRelative } from '@/lib/format';
 import { cn } from '@/lib/cn';
 
@@ -31,6 +37,14 @@ export function NotificationBell() {
 
   const read = useMutation({
     mutationFn: (id: string) => markRead(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['notifications', 'unread'] });
+      qc.invalidateQueries({ queryKey: ['notifications', 'recent'] });
+    },
+  });
+
+  const allRead = useMutation({
+    mutationFn: markAllRead,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['notifications', 'unread'] });
       qc.invalidateQueries({ queryKey: ['notifications', 'recent'] });
@@ -92,9 +106,20 @@ export function NotificationBell() {
             className="absolute right-0 mt-2 w-96 max-h-[480px] overflow-hidden z-40 origin-top-right"
           >
             <div className="glass-strong rounded-3xl flex flex-col">
-              <div className="px-4 py-3 border-b border-white/40 flex items-center justify-between">
+              <div className="px-4 py-3 border-b border-white/40 flex items-center justify-between gap-2">
                 <div className="font-semibold text-ink">Notifications</div>
-                <span className="text-xs text-ink-muted">{unread} unread</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-ink-muted">{unread} unread</span>
+                  <button
+                    onClick={() => allRead.mutate()}
+                    disabled={unread === 0 || allRead.isPending}
+                    className="btn-ghost px-2 py-1 text-xs disabled:opacity-50"
+                    title="Mark all as read"
+                  >
+                    <CheckCheck className="h-3.5 w-3.5" />
+                    Mark all read
+                  </button>
+                </div>
               </div>
 
               <div className="overflow-auto max-h-[400px]">
