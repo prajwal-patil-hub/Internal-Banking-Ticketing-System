@@ -8,9 +8,12 @@ interface ThemeState {
   set: (t: Theme) => void;
 }
 
+// Default to light unless the user has explicitly chosen dark before.
+// We intentionally do NOT honour `prefers-color-scheme: dark` on first visit —
+// this is an enterprise app for branch staff who often work under bright
+// fluorescent lighting and were surprised to land in a dark UI.
 const initial: Theme =
-  (localStorage.getItem('theme') as Theme | null) ??
-  (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  (localStorage.getItem('theme') as Theme | null) ?? 'light';
 
 document.documentElement.classList.toggle('dark', initial === 'dark');
 

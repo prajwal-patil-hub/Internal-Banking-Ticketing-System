@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react';
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
 
 import { Logo } from '@/components/Logo';
 import { ToastViewport } from '@/components/Toast';
-import { useTheme } from '@/store/theme';
+import { UserMenu } from '@/components/UserMenu';
 import { cn } from '@/lib/cn';
 import { useAuth, type Role } from '@/store/auth';
-import { logout as apiLogout } from '@/features/auth/api';
 import { NotificationBell } from '@/features/notifications/NotificationBell';
 
 interface NavItem {
@@ -42,31 +41,18 @@ function Icon({ d, className }: { d: string; className?: string }) {
   );
 }
 
-function userInitials(name: string): string {
-  return name.split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase()).join('') || '?';
-}
-
 export function AppLayout() {
-  const { theme, toggle } = useTheme();
-  const { user, refreshToken, clear } = useAuth();
-  const nav = useNavigate();
+  const { user } = useAuth();
   const loc = useLocation();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
-  // Auto-close the mobile drawer on route change.
   useEffect(() => { setMobileNavOpen(false); }, [loc.pathname]);
 
   const visibleNav = NAV.filter((i) => !i.roles || (user && i.roles.includes(user.role)));
 
-  const onLogout = async () => {
-    try { await apiLogout(refreshToken); } catch { /* network errors are fine on logout */ }
-    clear();
-    nav('/login', { replace: true });
-  };
-
   return (
     <div className="min-h-full lg:grid lg:grid-cols-[260px_1fr] bg-surface-muted dark:bg-slate-950">
-      {/* Sidebar (drawer on mobile, static on lg+) */}
+      {/* Sidebar */}
       <aside
         className={cn(
           'bg-brand-600 text-white px-5 py-6 flex flex-col gap-8 dark:bg-brand-700',
@@ -96,11 +82,8 @@ export function AppLayout() {
           ))}
         </nav>
 
-        <div className="mt-auto flex items-center justify-between text-white/80 text-xs">
-          <span>v0.1.0</span>
-          <button onClick={toggle} className="rounded-lg bg-white/10 hover:bg-white/20 px-3 py-1.5">
-            {theme === 'dark' ? 'Light' : 'Dark'}
-          </button>
+        <div className="mt-auto text-white/60 text-xs">
+          v0.1.0 · SUCCESS Bank
         </div>
       </aside>
 
@@ -114,7 +97,7 @@ export function AppLayout() {
       )}
 
       <div className="flex flex-col min-w-0">
-        <header className="h-16 px-4 sm:px-8 flex items-center justify-between border-b border-slate-200/70 bg-white/60 backdrop-blur dark:bg-slate-900/60 dark:border-slate-800">
+        <header className="h-16 px-4 sm:px-8 flex items-center justify-between gap-3 border-b border-slate-200/70 bg-white/70 backdrop-blur dark:bg-slate-900/70 dark:border-slate-800 sticky top-0 z-20">
           <div className="flex items-center gap-3 min-w-0">
             <button
               className="lg:hidden btn-ghost p-2"
@@ -124,27 +107,21 @@ export function AppLayout() {
               <Icon d="M4 6h16M4 12h16M4 18h16" />
             </button>
             <span className="text-sm text-slate-500 dark:text-slate-400 hidden sm:inline">SUCCESS Bank</span>
-            <span className="text-slate-300 hidden sm:inline">/</span>
+            <span className="text-slate-300 dark:text-slate-600 hidden sm:inline">/</span>
             <span className="text-sm font-medium truncate">Internal Ticketing</span>
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-3">
-            <input className="input w-44 sm:w-72 hidden sm:block" placeholder="Search tickets, branches, users…" />
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            <input
+              className="input w-44 lg:w-72 hidden md:block"
+              placeholder="Search…"
+            />
             <NotificationBell />
-            <div className="flex items-center gap-2">
-              <div className="text-right text-xs hidden md:block">
-                <div className="font-medium leading-tight">{user?.full_name}</div>
-                <div className="text-slate-500 leading-tight capitalize">{user?.role.replace('_', ' ')}</div>
-              </div>
-              <div className="h-9 w-9 rounded-full bg-brand-100 flex items-center justify-center text-brand-700 font-semibold">
-                {user ? userInitials(user.full_name) : 'SB'}
-              </div>
-              <button onClick={onLogout} className="btn-ghost text-xs hidden sm:inline-flex">Sign out</button>
-            </div>
+            <UserMenu />
           </div>
         </header>
 
-        <main className="p-4 sm:p-8">
+        <main className="p-4 sm:p-8 max-w-[1600px] w-full mx-auto">
           <Outlet />
         </main>
       </div>

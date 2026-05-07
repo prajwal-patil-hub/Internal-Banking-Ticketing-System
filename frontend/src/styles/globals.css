@@ -2,13 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Tokens that need CSS-var form for animations & gradients */
 :root {
   --brand-grad: linear-gradient(180deg, #4F36DC 0%, #3F2FBE 100%);
   --accent-grad: linear-gradient(135deg, #B89AFF 0%, #7E4DFF 100%);
 }
 
 html, body, #root { height: 100%; }
+body { @apply bg-surface-muted text-slate-900 antialiased; }
 
 /* Subtle scrollbar to match enterprise feel */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -17,6 +17,8 @@ html, body, #root { height: 100%; }
   border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover { background: rgba(63, 47, 190, 0.45); }
+.dark ::-webkit-scrollbar-thumb { background: rgba(184, 154, 255, 0.25); }
+.dark ::-webkit-scrollbar-thumb:hover { background: rgba(184, 154, 255, 0.45); }
 
 @layer components {
   .card {
@@ -35,16 +37,20 @@ html, body, #root { height: 100%; }
   }
   .btn-ghost {
     @apply inline-flex items-center justify-center gap-2 rounded-xl bg-transparent
-           hover:bg-surface-subtle text-slate-700 px-4 py-2 text-sm font-medium;
+           hover:bg-surface-subtle text-slate-700 px-4 py-2 text-sm font-medium
+           dark:text-slate-200 dark:hover:bg-slate-800;
   }
   .input {
-    @apply w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm
+    @apply w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900
            placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-200
            outline-none transition-colors;
   }
 }
 
-/* Dark mode overrides */
-.dark body { @apply bg-slate-950 text-slate-100; }
-.dark .card { @apply bg-slate-900 shadow-none border border-slate-800; }
-.dark .input { @apply bg-slate-900 border-slate-700 text-slate-100 placeholder:text-slate-500; }
+/* Dark mode overrides — bumped contrast on cards, inputs, borders. */
+.dark body              { @apply bg-slate-950 text-slate-100; }
+.dark .card             { @apply bg-slate-900 shadow-none border border-slate-800; }
+.dark .input            { @apply bg-slate-900 border-slate-700 text-slate-100 placeholder:text-slate-500
+                                 focus:border-brand-400 focus:ring-brand-900; }
+.dark select.input      { @apply bg-slate-900; }
+.dark textarea.input    { @apply bg-slate-900; }
