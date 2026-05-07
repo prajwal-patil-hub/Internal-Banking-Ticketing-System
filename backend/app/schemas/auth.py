@@ -5,11 +5,14 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    # Plain str (not EmailStr) — login is a credential check, not a
+    # registration form. Strict EmailStr rejects valid intranet TLDs like
+    # `.local`, which doesn't add security and breaks legitimate logins.
+    email: str = Field(min_length=3, max_length=255)
     password: str = Field(min_length=8, max_length=200)
 
 
@@ -31,7 +34,7 @@ class TokenPair(BaseModel):
 
 class UserPublic(BaseModel):
     id: uuid.UUID
-    email: EmailStr
+    email: str
     full_name: str
     role: str
     branch_id: uuid.UUID | None
