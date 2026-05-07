@@ -15,8 +15,6 @@ interface NavItem {
   roles?: Role[];
 }
 
-// Server-side checks are authoritative; this just hides nav items the user
-// has no right to use.
 const NAV: NavItem[] = [
   { to: '/dashboard',    label: 'Dashboard',    icon: 'M3 12l9-9 9 9M5 10v10h14V10' },
   { to: '/tickets',      label: 'Tickets',      icon: 'M4 7h16M4 12h16M4 17h10' },
@@ -46,18 +44,37 @@ export function AppLayout() {
   const loc = useLocation();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
+  // Close the mobile drawer whenever the route changes.
   useEffect(() => { setMobileNavOpen(false); }, [loc.pathname]);
+
+  // Lock body scroll when the mobile drawer is open.
+  useEffect(() => {
+    if (mobileNavOpen) {
+      const prev = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => { document.body.style.overflow = prev; };
+    }
+  }, [mobileNavOpen]);
 
   const visibleNav = NAV.filter((i) => !i.roles || (user && i.roles.includes(user.role)));
 
   return (
-    <div className="min-h-full lg:grid lg:grid-cols-[260px_1fr] bg-surface-muted dark:bg-slate-950">
-      {/* Sidebar */}
+    <div className="min-h-screen flex bg-surface-muted dark:bg-slate-950">
+      {/*
+        Sidebar.
+        - lg+   : static flex item, occupies a real 260px column. Content
+                  renders next to it via flex-1.
+        - <lg   : fixed drawer that slides in from the left.
+      */}
       <aside
         className={cn(
-          'bg-brand-600 text-white px-5 py-6 flex flex-col gap-8 dark:bg-brand-700',
-          'fixed inset-y-0 left-0 w-[260px] z-40 transform transition-transform lg:translate-x-0',
-          mobileNavOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
+          'bg-brand-600 dark:bg-brand-700 text-white px-5 py-6',
+          'flex flex-col gap-8 w-[260px] shrink-0',
+          // Mobile: fixed drawer.
+          'fixed inset-y-0 left-0 z-40 transition-transform',
+          mobileNavOpen ? 'translate-x-0' : '-translate-x-full',
+          // Desktop: flow with the page, always visible.
+          'lg:static lg:translate-x-0 lg:transition-none',
         )}
       >
         <Logo />
@@ -91,13 +108,14 @@ export function AppLayout() {
       {mobileNavOpen && (
         <button
           aria-label="Close menu"
-          className="fixed inset-0 z-30 bg-slate-900/40 backdrop-blur-sm lg:hidden"
+          className="fixed inset-0 z-30 bg-slate-900/50 backdrop-blur-sm lg:hidden"
           onClick={() => setMobileNavOpen(false)}
         />
       )}
 
-      <div className="flex flex-col min-w-0">
-        <header className="h-16 px-4 sm:px-8 flex items-center justify-between gap-3 border-b border-slate-200/70 bg-white/70 backdrop-blur dark:bg-slate-900/70 dark:border-slate-800 sticky top-0 z-20">
+      {/* Main column — flex-1 so it always fills the remaining width. */}
+      <div className="flex flex-col min-w-0 flex-1">
+        <header className="h-16 px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-3 border-b border-slate-200/70 bg-white/70 backdrop-blur dark:bg-slate-900/70 dark:border-slate-800 sticky top-0 z-20">
           <div className="flex items-center gap-3 min-w-0">
             <button
               className="lg:hidden btn-ghost p-2"
@@ -112,16 +130,13 @@ export function AppLayout() {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-            <input
-              className="input w-44 lg:w-72 hidden md:block"
-              placeholder="Search…"
-            />
+            <input className="input w-44 lg:w-72 hidden md:block" placeholder="Search…" />
             <NotificationBell />
             <UserMenu />
           </div>
         </header>
 
-        <main className="p-4 sm:p-8 max-w-[1600px] w-full mx-auto">
+        <main className="p-4 sm:p-6 lg:p-8 max-w-[1600px] w-full mx-auto">
           <Outlet />
         </main>
       </div>
