@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  Check, Play, Pause, AlertTriangle, CheckCircle2, Lock, RotateCcw,
+} from 'lucide-react';
 
 import { Card } from '@/components/Card';
-import { Button } from '@/components/Button';
 import { Badge } from '@/components/Badge';
 import { useToasts } from '@/components/Toast';
 import { useAuth } from '@/store/auth';
@@ -60,8 +62,6 @@ export function TicketActions({ ticket }: Props) {
   const isBranchUser  = hasRole('branch_user');
 
   const s = ticket.status;
-
-  // Visibility map keeps the JSX readable.
   const can = {
     ack:      isAdmin && s === 'new',
     start:    (isAgent || isSupervisor) && (s === 'acknowledged' || s === 'assigned' || s === 'on_hold' || s === 'escalated' || s === 'reopened'),
@@ -71,54 +71,75 @@ export function TicketActions({ ticket }: Props) {
     close:    isAdmin && s === 'resolved',
     reopen:   (isBranchUser || isAdmin) && (s === 'resolved' || s === 'closed'),
   };
-
   const anyAvailable = Object.values(can).some(Boolean);
 
   return (
     <Card>
-      <h3 className="font-semibold">Actions</h3>
+      <h3 className="h-card">Actions</h3>
       {!anyAvailable && (
-        <p className="mt-2 text-sm text-slate-500">No actions available for your role at this status.</p>
+        <p className="mt-2 text-sm text-ink-muted">No actions available for your role at this status.</p>
       )}
 
       {error && <Badge tone="danger" className="mt-3">{error}</Badge>}
 
-      {reasonOpen && (
+      {reasonOpen ? (
         <div className="mt-4 space-y-2">
           <textarea
-            className="input min-h-[90px]"
+            className="input min-h-[100px] resize-y"
             placeholder={
               reasonOpen === 'resolve' ? 'Resolution notes (visible to branch user)…'
               : reasonOpen === 'reopen' ? 'Why are you reopening this ticket?'
               : 'Why are you escalating?'
             }
             value={reasonText}
-            onChange={e => setReasonText(e.target.value)}
+            onChange={(e) => setReasonText(e.target.value)}
           />
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => { setReasonOpen(null); setReasonText(''); }}>Cancel</Button>
-            <Button onClick={() => {
-              if (reasonOpen === 'resolve') resolve.mutate();
-              else if (reasonOpen === 'reopen') reopen.mutate();
-              else escalate.mutate();
-            }}>
+            <button className="btn-secondary" onClick={() => { setReasonOpen(null); setReasonText(''); }}>
+              Cancel
+            </button>
+            <button
+              className="btn-primary"
+              onClick={() => {
+                if (reasonOpen === 'resolve') resolve.mutate();
+                else if (reasonOpen === 'reopen') reopen.mutate();
+                else escalate.mutate();
+              }}
+            >
               Confirm
-            </Button>
+            </button>
           </div>
         </div>
-      )}
-
-      {!reasonOpen && (
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          {can.ack      && <Button variant="ghost" onClick={() => ack.mutate()}>Acknowledge</Button>}
-          {can.start    && <Button variant="ghost" onClick={() => start.mutate()}>Start work</Button>}
-          {can.hold     && <Button variant="ghost" onClick={() => hold.mutate()}>Put on hold</Button>}
-          {can.escalate && <Button variant="ghost" onClick={() => { setError(null); setReasonOpen('escalate'); }}>Escalate…</Button>}
-          {can.resolve  && <Button onClick={() => { setError(null); setReasonOpen('resolve'); }}>Resolve…</Button>}
-          {can.close    && <Button onClick={() => close_.mutate()}>Close</Button>}
-          {can.reopen   && <Button variant="ghost" onClick={() => { setError(null); setReasonOpen('reopen'); }}>Reopen…</Button>}
+      ) : (
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          {can.ack      && <ActionBtn icon={<Check className="h-4 w-4" />}        onClick={() => ack.mutate()}>Acknowledge</ActionBtn>}
+          {can.start    && <ActionBtn icon={<Play className="h-4 w-4" />}         onClick={() => start.mutate()}>Start work</ActionBtn>}
+          {can.hold     && <ActionBtn icon={<Pause className="h-4 w-4" />}        onClick={() => hold.mutate()}>Put on hold</ActionBtn>}
+          {can.escalate && <ActionBtn icon={<AlertTriangle className="h-4 w-4" />} onClick={() => { setError(null); setReasonOpen('escalate'); }}>Escalate…</ActionBtn>}
+          {can.resolve  && <ActionBtn icon={<CheckCircle2 className="h-4 w-4" />}  onClick={() => { setError(null); setReasonOpen('resolve'); }} primary>Resolve…</ActionBtn>}
+          {can.close    && <ActionBtn icon={<Lock className="h-4 w-4" />}          onClick={() => close_.mutate()} primary>Close</ActionBtn>}
+          {can.reopen   && <ActionBtn icon={<RotateCcw className="h-4 w-4" />}     onClick={() => { setError(null); setReasonOpen('reopen'); }}>Reopen…</ActionBtn>}
         </div>
       )}
     </Card>
+  );
+}
+
+function ActionBtn({
+  icon,
+  onClick,
+  primary,
+  children,
+}: {
+  icon: React.ReactNode;
+  onClick: () => void;
+  primary?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button onClick={onClick} className={primary ? 'btn-primary' : 'btn-secondary'}>
+      {icon}
+      <span>{children}</span>
+    </button>
   );
 }

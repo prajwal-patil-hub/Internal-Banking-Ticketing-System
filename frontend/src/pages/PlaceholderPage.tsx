@@ -1,3 +1,4 @@
+import { Sparkles } from 'lucide-react';
 import { Card } from '@/components/Card';
 
 interface Props {
@@ -6,16 +7,25 @@ interface Props {
   description?: string;
 }
 
-/** Generic stub used for routes whose feature lands in a later phase. */
 export function PlaceholderPage({ title, phase, description }: Props) {
   return (
-    <div className="flex flex-col gap-4">
-      <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+    <div className="flex flex-col gap-6 max-w-2xl mx-auto py-8">
+      <div>
+        <span className="label">Coming soon</span>
+        <h1 className="text-4xl font-semibold tracking-tight text-ink mt-1">{title}</h1>
+      </div>
       <Card>
-        <p className="text-sm text-slate-600 dark:text-slate-300">
-          {description ?? 'This screen is part of an upcoming phase.'}
-        </p>
-        <p className="mt-2 text-xs uppercase tracking-wider text-brand-600">Arrives in {phase}</p>
+        <div className="flex items-start gap-4">
+          <span className="h-11 w-11 rounded-2xl grid place-items-center bg-brand-50 text-brand-700">
+            <Sparkles className="h-5 w-5" />
+          </span>
+          <div>
+            <p className="text-sm text-ink leading-relaxed">
+              {description ?? 'This screen is part of an upcoming phase.'}
+            </p>
+            <p className="mt-2 text-2xs uppercase tracking-wider text-brand-700">Arrives in {phase}</p>
+          </div>
+        </div>
       </Card>
     </div>
   );

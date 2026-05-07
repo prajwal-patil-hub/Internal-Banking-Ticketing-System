@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { Modal } from '@/components/Modal';
-import { Button } from '@/components/Button';
 import { Badge } from '@/components/Badge';
 import { api, extractError } from '@/lib/api';
 import { useAuth } from '@/store/auth';
@@ -57,41 +56,54 @@ export function AssignDialog({ ticket, open, onClose }: Props) {
   });
 
   return (
-    <Modal open={open} onClose={onClose} title="Assign ticket">
-      {error && <Badge tone="danger" className="mb-3">{error}</Badge>}
-      <div className="grid grid-cols-1 gap-3">
-        <label className="text-sm">
-          <span className="block mb-1 font-medium">Assign to user</span>
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Assign ticket"
+      description="Pick a user, a team, or both. The ticket moves to ‘assigned’ status."
+    >
+      {error && <Badge tone="danger" className="mb-4">{error}</Badge>}
+      <div className="grid grid-cols-1 gap-4">
+        <Field label="Assign to user">
           <select className="input" value={userId} onChange={(e) => setUserId(e.target.value)}>
             <option value="">(none)</option>
             {agents.data?.map((u) => (
               <option key={u.id} value={u.id}>{u.full_name} — {u.role}</option>
             ))}
           </select>
-        </label>
-
-        <label className="text-sm">
-          <span className="block mb-1 font-medium">Assign to team</span>
+        </Field>
+        <Field label="Assign to team">
           <select className="input" value={teamId} onChange={(e) => setTeamId(e.target.value)}>
             <option value="">(none)</option>
             {teams.data?.map((t) => (
               <option key={t.id} value={t.id}>{t.name}</option>
             ))}
           </select>
-        </label>
-
-        <label className="text-sm">
-          <span className="block mb-1 font-medium">Reason (optional)</span>
+        </Field>
+        <Field label="Reason (optional)">
           <input className="input" value={reason} onChange={(e) => setReason(e.target.value)} />
-        </label>
+        </Field>
 
         <div className="flex justify-end gap-2 mt-2">
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button disabled={submit.isPending || (!userId && !teamId)} onClick={() => { setError(null); submit.mutate(); }}>
+          <button className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button
+            className="btn-primary"
+            disabled={submit.isPending || (!userId && !teamId)}
+            onClick={() => { setError(null); submit.mutate(); }}
+          >
             {submit.isPending ? 'Saving…' : 'Save assignment'}
-          </Button>
+          </button>
         </div>
       </div>
     </Modal>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="flex flex-col gap-1.5">
+      <span className="label">{label}</span>
+      {children}
+    </label>
   );
 }

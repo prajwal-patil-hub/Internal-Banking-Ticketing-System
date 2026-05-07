@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import { AnimatePresence, motion } from 'framer-motion';
+import { Bell } from 'lucide-react';
 
 import { Badge } from '@/components/Badge';
 import { listNotifications, markRead, unreadCount, type NotificationItem } from './api';
@@ -13,6 +15,7 @@ export function NotificationBell() {
   const qc = useQueryClient();
   const nav = useNavigate();
   const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
 
   const count = useQuery({
     queryKey: ['notifications', 'unread'],
@@ -34,6 +37,20 @@ export function NotificationBell() {
     },
   });
 
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
   const handleClick = (n: NotificationItem) => {
     if (!n.read_at) read.mutate(n.id);
     const tid = (n.payload as { ticket_id?: string }).ticket_id;
@@ -41,58 +58,77 @@ export function NotificationBell() {
     setOpen(false);
   };
 
+  const unread = count.data ?? 0;
+
   return (
-    <div className="relative">
+    <div ref={ref} className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="relative h-9 w-9 rounded-full bg-surface-muted hover:bg-surface-subtle dark:bg-slate-800 flex items-center justify-center"
+        className={cn(
+          'relative h-10 w-10 rounded-pill grid place-items-center transition-colors',
+          'text-ink hover:text-brand-600 hover:bg-white/70',
+        )}
         aria-label="Notifications"
       >
-        <svg className="h-5 w-5 text-slate-700 dark:text-slate-200" viewBox="0 0 24 24" fill="none"
-             stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
-          <path d="M13.73 21a2 2 0 01-3.46 0" />
-        </svg>
-        {(count.data ?? 0) > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
-            {(count.data ?? 0) > 99 ? '99+' : count.data}
-          </span>
+        <Bell className="h-[18px] w-[18px]" />
+        {unread > 0 && (
+          <motion.span
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
+            className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-pill bg-danger text-white text-[10px] font-bold grid place-items-center shadow-soft"
+          >
+            {unread > 99 ? '99+' : unread}
+          </motion.span>
         )}
       </button>
 
-      {open && (
-        <div className="absolute right-0 mt-2 w-96 max-h-[480px] overflow-auto bg-surface dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-cardLg z-40">
-          <div className="p-3 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
-            <span className="font-semibold">Notifications</span>
-            <span className="text-xs text-slate-500">{count.data ?? 0} unread</span>
-          </div>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: -4, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -4, scale: 0.98, transition: { duration: 0.12 } }}
+            transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+            className="absolute right-0 mt-2 w-96 max-h-[480px] overflow-hidden z-40 origin-top-right"
+          >
+            <div className="glass-strong rounded-3xl flex flex-col">
+              <div className="px-4 py-3 border-b border-white/40 flex items-center justify-between">
+                <div className="font-semibold text-ink">Notifications</div>
+                <span className="text-xs text-ink-muted">{unread} unread</span>
+              </div>
 
-          {list.isLoading && <p className="p-4 text-sm text-slate-400">Loading…</p>}
-          {!list.isLoading && (list.data?.items.length ?? 0) === 0 && (
-            <p className="p-6 text-sm text-slate-400 text-center">You're all caught up.</p>
-          )}
-          <ul className="divide-y divide-slate-100 dark:divide-slate-800">
-            {list.data?.items.map((n) => (
-              <li key={n.id}>
-                <button
-                  onClick={() => handleClick(n)}
-                  className={cn(
-                    'w-full text-left p-3 hover:bg-surface-muted dark:hover:bg-slate-800/50',
-                    !n.read_at && 'bg-brand-50 dark:bg-brand-900/10',
-                  )}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-medium truncate">{n.subject}</span>
-                    {!n.read_at && <Badge tone="info">new</Badge>}
-                  </div>
-                  <p className="text-xs text-slate-500 mt-1 line-clamp-2">{n.body}</p>
-                  <p className="text-[11px] text-slate-400 mt-1">{formatRelative(n.created_at)}</p>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+              <div className="overflow-auto max-h-[400px]">
+                {list.isLoading && (
+                  <p className="p-6 text-sm text-ink-muted text-center">Loading…</p>
+                )}
+                {!list.isLoading && (list.data?.items.length ?? 0) === 0 && (
+                  <p className="p-8 text-sm text-ink-muted text-center">You're all caught up.</p>
+                )}
+                <ul className="divide-y divide-white/40">
+                  {list.data?.items.map((n) => (
+                    <li key={n.id}>
+                      <button
+                        onClick={() => handleClick(n)}
+                        className={cn(
+                          'w-full text-left p-4 transition-colors',
+                          !n.read_at ? 'bg-brand-50/50 hover:bg-brand-50' : 'hover:bg-white/60',
+                        )}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="text-sm font-semibold text-ink truncate">{n.subject}</span>
+                          {!n.read_at && <Badge tone="info">new</Badge>}
+                        </div>
+                        <p className="text-xs text-ink-muted mt-1 line-clamp-2">{n.body}</p>
+                        <p className="text-2xs text-ink-subtle mt-1.5">{formatRelative(n.created_at)}</p>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

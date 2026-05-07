@@ -20,8 +20,37 @@ const PRIORITY_TONE: Record<Priority, Parameters<typeof Badge>[0]['tone']> = {
   low: 'neutral',
 };
 
+const STATUS_LABEL: Record<TicketStatus, string> = {
+  new: 'New',
+  acknowledged: 'Acknowledged',
+  assigned: 'Assigned',
+  in_progress: 'In progress',
+  on_hold: 'On hold',
+  escalated: 'Escalated',
+  resolved: 'Resolved',
+  closed: 'Closed',
+  reopened: 'Reopened',
+};
+
+const STATUS_DOT: Record<TicketStatus, string> = {
+  new:          'bg-info',
+  acknowledged: 'bg-info',
+  assigned:     'bg-accent-500',
+  in_progress:  'bg-warning',
+  on_hold:      'bg-warning',
+  escalated:    'bg-danger',
+  resolved:     'bg-success',
+  closed:       'bg-slate-500',
+  reopened:     'bg-pink-500',
+};
+
 export function StatusBadge({ status }: { status: TicketStatus }) {
-  return <Badge tone={STATUS_TONE[status]}>{status.replace('_', ' ')}</Badge>;
+  return (
+    <Badge tone={STATUS_TONE[status]}>
+      <span className={`h-1.5 w-1.5 rounded-pill ${STATUS_DOT[status]}`} aria-hidden />
+      {STATUS_LABEL[status]}
+    </Badge>
+  );
 }
 
 export function PriorityBadge({ priority }: { priority: Priority }) {

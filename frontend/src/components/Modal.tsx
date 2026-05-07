@@ -1,52 +1,78 @@
 import { useEffect } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
+import { X } from 'lucide-react';
 import { cn } from '@/lib/cn';
 
 interface Props {
   open: boolean;
   onClose: () => void;
   title: string;
+  description?: string;
   children: React.ReactNode;
   className?: string;
 }
 
-export function Modal({ open, onClose, title, children, className }: Props) {
+export function Modal({ open, onClose, title, description, children, className }: Props) {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = '';
+    };
   }, [open, onClose]);
 
-  if (!open) return null;
-
   return (
-    <div
-      className="fixed inset-0 z-50 grid place-items-center bg-slate-900/50 backdrop-blur-sm p-4"
-      onClick={onClose}
-    >
-      <div
-        className={cn(
-          'w-full max-w-lg rounded-2xl shadow-cardLg p-6',
-          'bg-surface text-slate-900',
-          'dark:bg-slate-900 dark:text-slate-100 dark:border dark:border-slate-800',
-          className,
-        )}
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-      >
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">{title}</h2>
-          <button
-            onClick={onClose}
-            className="h-8 w-8 rounded-full text-slate-500 hover:text-slate-900 hover:bg-surface-muted dark:hover:bg-slate-800 dark:hover:text-white inline-flex items-center justify-center"
-            aria-label="Close"
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          key="backdrop"
+          className="fixed inset-0 z-50 grid place-items-center p-4"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.18 }}
+          onClick={onClose}
+          style={{ background: 'rgba(17,24,39,0.32)', backdropFilter: 'blur(8px)' }}
+        >
+          <motion.div
+            key="card"
+            initial={{ opacity: 0, y: 12, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 8, scale: 0.98 }}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="modal-title"
+            className={cn(
+              'glass-strong w-full max-w-lg rounded-4xl p-6 sm:p-7',
+              className,
+            )}
           >
-            ✕
-          </button>
-        </div>
-        {children}
-      </div>
-    </div>
+            <div className="flex items-start justify-between gap-4 mb-5">
+              <div className="min-w-0">
+                <h2 id="modal-title" className="text-xl font-semibold tracking-tightish text-ink truncate">
+                  {title}
+                </h2>
+                {description && (
+                  <p className="text-sm text-ink-muted mt-1">{description}</p>
+                )}
+              </div>
+              <button
+                onClick={onClose}
+                aria-label="Close"
+                className="h-9 w-9 -mr-1 -mt-1 grid place-items-center rounded-pill text-ink-muted hover:text-ink hover:bg-white/70 transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            {children}
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }

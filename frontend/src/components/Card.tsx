@@ -1,23 +1,42 @@
+import { motion, type HTMLMotionProps } from 'framer-motion';
 import { cn } from '@/lib/cn';
 
-interface Props extends React.HTMLAttributes<HTMLDivElement> {
+type Variant = 'glass' | 'plain';
+
+interface Props extends Omit<HTMLMotionProps<'div'>, 'ref'> {
   padded?: boolean;
+  variant?: Variant;
+  hover?: boolean;
 }
 
 /**
- * Surface primitive. Light = white card with brand-tinted shadow.
- * Dark  = slate-900 with a 1px slate-800 border (no shadow).
+ * Glassmorphic surface primitive. Default = `glass` (blurred, translucent),
+ * `plain` for tightly nested sub-surfaces that shouldn't compound blur.
  */
-export function Card({ className, padded = true, ...rest }: Props) {
+export function Card({
+  className,
+  padded = true,
+  variant = 'glass',
+  hover = false,
+  children,
+  ...rest
+}: Props) {
   return (
-    <div
+    <motion.div
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+      whileHover={hover ? { y: -2 } : undefined}
       className={cn(
-        'bg-surface rounded-2xl shadow-card text-slate-900',
-        'dark:bg-slate-900 dark:text-slate-100 dark:shadow-none dark:border dark:border-slate-800',
+        'rounded-4xl text-ink',
+        variant === 'glass' ? 'glass' : 'bg-white/60 border border-white/40',
         padded && 'p-6',
+        hover && 'hover:shadow-glassLg transition-shadow duration-300',
         className,
       )}
       {...rest}
-    />
+    >
+      {children}
+    </motion.div>
   );
 }
