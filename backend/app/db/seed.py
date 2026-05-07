@@ -175,6 +175,10 @@ async def main() -> None:
             await session.flush()
             users_by_email[email] = user
             log.info("seed_user_created", email=email, role=role_enum.value, password=password)
+            # Belt-and-braces: also print the credential cleanly to stdout so
+            # `make seed > seed-output.txt` always yields a file the operator
+            # can read in Notepad regardless of structlog config.
+            print(f"DEMO_USER  email={email}  role={role_enum.value}  password={password}", flush=True)
 
         # 7. SLA policies — banking-standard defaults.
         for prio, response_min, resolution_min in SLA_DEFAULTS:
