@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 import jwt
@@ -47,7 +47,7 @@ TokenType = Literal["access"]
 def create_access_token(
     *, subject: str, role: str, extra: dict[str, Any] | None = None
 ) -> tuple[str, datetime]:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     exp = now + timedelta(minutes=settings.JWT_ACCESS_TTL_MINUTES)
     payload: dict[str, Any] = {
         "sub": subject,
@@ -73,7 +73,7 @@ def generate_refresh_token() -> tuple[str, str, datetime]:
     """Return (raw_token_for_client, sha256_hash_for_db, expiry)."""
     raw = secrets.token_urlsafe(48)
     digest = hashlib.sha256(raw.encode()).hexdigest()
-    expiry = datetime.now(timezone.utc) + timedelta(days=settings.JWT_REFRESH_TTL_DAYS)
+    expiry = datetime.now(UTC) + timedelta(days=settings.JWT_REFRESH_TTL_DAYS)
     return raw, digest, expiry
 
 

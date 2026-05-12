@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     SLA_MEDIUM_MINUTES: int = 1440
     SLA_LOW_MINUTES: int = 4320
 
+    # --- Scheduler ---
+    # Disable during tests by setting SCHEDULER_ENABLED=false.
+    SCHEDULER_ENABLED: bool = True
+
     @field_validator("CORS_ORIGINS")
     @classmethod
     def _strip_origins(cls, v: str) -> str:

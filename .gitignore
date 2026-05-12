@@ -27,6 +27,10 @@ pnpm-debug.log*
 .next/
 .turbo/
 
+# ---- TypeScript build artefacts ----
+*.tsbuildinfo
+frontend/vite.config.d.ts
+
 # ---- Build outputs ----
 frontend/dist/
 frontend/build/

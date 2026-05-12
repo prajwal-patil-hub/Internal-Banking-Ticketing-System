@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,7 +26,7 @@ class TicketAssignmentRepository:
             TicketAssignment.unassigned_at.is_(None),
         )
         rows = (await self.db.execute(stmt)).scalars().all()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for r in rows:
             r.unassigned_at = now
 

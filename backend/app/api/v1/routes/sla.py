@@ -6,8 +6,8 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import get_session, require_permissions
-from app.repositories.sla_repo import SLAPolicyRepository, SLATrackingRepository
 from app.models.user import User
+from app.repositories.sla_repo import SLAPolicyRepository, SLATrackingRepository
 from app.schemas.envelope import ok
 from app.schemas.sla import SLAPolicyPublic, SLATrackingPublic
 

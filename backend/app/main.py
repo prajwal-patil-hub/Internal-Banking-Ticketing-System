@@ -19,8 +19,19 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.routes import (
-    audit, auth, branches, categories, dashboard, escalations, health,
-    mfa, notifications, sla, teams, tickets, users,
+    audit,
+    auth,
+    branches,
+    categories,
+    dashboard,
+    escalations,
+    health,
+    mfa,
+    notifications,
+    sla,
+    teams,
+    tickets,
+    users,
 )
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
@@ -37,15 +48,30 @@ log = get_logger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
+async def lifespan(app: FastAPI):
     configure_logging()
     log.info("app_starting", env=settings.APP_ENV, name=settings.APP_NAME)
-    sla_scheduler.start()
+    scheduler_started = False
+    if settings.SCHEDULER_ENABLED:
+        try:
+            sla_scheduler.start()
+            scheduler_started = True
+        except Exception:
+            # TestClient and one-off scripts can run without an active
+            # asyncio loop; log and continue rather than failing boot.
+            log.exception("sla_scheduler_start_failed")
     try:
         yield
     finally:
-        await sla_scheduler.stop()
-        await rate_limit_aclose()
+        if scheduler_started:
+            try:
+                await sla_scheduler.stop()
+            except Exception:
+                log.exception("sla_scheduler_stop_failed")
+        try:
+            await rate_limit_aclose()
+        except Exception:
+            log.exception("rate_limit_aclose_failed")
         log.info("app_stopped")
 
 

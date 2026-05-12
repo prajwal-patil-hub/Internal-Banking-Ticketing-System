@@ -9,12 +9,16 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDPKMixin
+
+if TYPE_CHECKING:
+    from app.models.role import Role
 
 
 class User(UUIDPKMixin, TimestampMixin, Base):
@@ -44,4 +48,4 @@ class User(UUIDPKMixin, TimestampMixin, Base):
     failed_login_count: Mapped[int] = mapped_column(default=0, nullable=False)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    role: Mapped["Role"] = relationship(lazy="selectin")  # type: ignore[name-defined]
+    role: Mapped[Role] = relationship(lazy="selectin")

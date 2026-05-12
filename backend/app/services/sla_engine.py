@@ -17,7 +17,7 @@ won't double-flag a ticket because of the `*breached.is_(False)` filter.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -64,7 +64,7 @@ class SLAEngine:
 
     async def on_ticket_created(self, ticket: Ticket) -> SLATracking:
         response_min, resolution_min = await self._minutes_for(ticket.priority)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         due_at = now + timedelta(minutes=resolution_min)
         response_due_at = now + timedelta(minutes=response_min)
         ticket.sla_due_at = due_at
@@ -90,13 +90,13 @@ class SLAEngine:
         row = await self.tracking.get_by_ticket(ticket.id)
         if row is None or row.paused_at is not None:
             return
-        row.paused_at = datetime.now(timezone.utc)
+        row.paused_at = datetime.now(UTC)
 
     async def on_resumed(self, ticket: Ticket) -> None:
         row = await self.tracking.get_by_ticket(ticket.id)
         if row is None or row.paused_at is None:
             return
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         elapsed = int((now - row.paused_at).total_seconds())
         row.total_paused_seconds += max(elapsed, 0)
         row.due_at = row.due_at + timedelta(seconds=elapsed)
@@ -106,7 +106,7 @@ class SLAEngine:
     async def on_reopened(self, ticket: Ticket) -> None:
         row = await self.tracking.get_by_ticket(ticket.id)
         response_min, resolution_min = await self._minutes_for(ticket.priority)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         new_due = now + timedelta(minutes=resolution_min)
         new_response_due = now + timedelta(minutes=response_min)
         if row is None:
@@ -138,7 +138,7 @@ class SLAEngine:
         breaches are recorded but don't auto-escalate (banks usually
         prefer a softer signal there — supervisor pings only).
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Resolution breaches
         resolution = await self.tracking.find_due_unbreached(now=now)

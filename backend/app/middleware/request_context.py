@@ -16,7 +16,7 @@ from starlette.responses import Response
 
 
 class RequestContextMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
+    async def dispatch(self, request: Request, call_next):
         request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
         client_ip = request.client.host if request.client else "unknown"
         user_agent = request.headers.get("user-agent", "")

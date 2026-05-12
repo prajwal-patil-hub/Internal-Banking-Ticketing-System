@@ -19,7 +19,7 @@ def current_audit_context() -> dict[str, Any]:
 
 
 class AuditContextMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
+    async def dispatch(self, request: Request, call_next):
         token = _audit_ctx.set(
             {
                 "ip": getattr(request.state, "client_ip", ""),

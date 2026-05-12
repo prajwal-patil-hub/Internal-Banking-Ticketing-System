@@ -13,6 +13,7 @@ level-1 escalations" stay one query away.
 from __future__ import annotations
 
 import uuid
+from datetime import UTC
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -88,9 +89,9 @@ class EscalationService:
         return e
 
     async def resolve(self, *, escalation_id: uuid.UUID) -> Escalation | None:
-        from datetime import datetime, timezone
+        from datetime import datetime
         e = await self.repo.get(escalation_id)
         if e is None or e.resolved_at is not None:
             return e
-        e.resolved_at = datetime.now(timezone.utc)
+        e.resolved_at = datetime.now(UTC)
         return e

@@ -13,7 +13,7 @@ That makes the audit story (P6) trivial: one chokepoint to instrument.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -201,7 +201,7 @@ class WorkflowService:
         prev = t.status
         self._assert_transition(t.status, TicketStatus.RESOLVED)
         t.status = TicketStatus.RESOLVED.value
-        t.resolved_at = datetime.now(timezone.utc)
+        t.resolved_at = datetime.now(UTC)
         if notes:
             await self.comments.add(
                 TicketComment(
@@ -231,7 +231,7 @@ class WorkflowService:
         prev = t.status
         self._assert_transition(t.status, TicketStatus.CLOSED)
         t.status = TicketStatus.CLOSED.value
-        t.closed_at = datetime.now(timezone.utc)
+        t.closed_at = datetime.now(UTC)
         await self._log_status_change(actor, t, prev, "ticket.closed")
         return t
 
@@ -278,7 +278,7 @@ class WorkflowService:
             and not is_internal
         )
         if first_agent_response:
-            t.first_response_at = datetime.now(timezone.utc)
+            t.first_response_at = datetime.now(UTC)
             await self.sla.on_first_response(t)
 
         c = TicketComment(

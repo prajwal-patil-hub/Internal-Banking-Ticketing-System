@@ -44,7 +44,7 @@ class SLAScheduler:
                     log.info("sla_tick", breached=len(breached))
                 else:
                     await session.rollback()
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.exception("sla_tick_failed")
 
     def start(self) -> None:

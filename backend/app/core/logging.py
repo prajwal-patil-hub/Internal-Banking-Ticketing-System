@@ -33,18 +33,17 @@ def configure_logging() -> None:
         structlog.processors.StackInfoRenderer(),
     ]
 
+    renderers: list = []
     if settings.is_production:
-        renderers = [structlog.processors.JSONRenderer()]
+        renderers.append(structlog.processors.JSONRenderer())
     else:
         # Disable ANSI colors when stdout isn't a TTY (e.g. when piped to a
         # file or to docker logs without a tty). Otherwise the file ends up
         # full of `\x1b[...m` escape codes that Notepad can't render.
-        colors = sys.stdout.isatty()
-        renderers = [structlog.dev.ConsoleRenderer(colors=colors)]
+        renderers.append(structlog.dev.ConsoleRenderer(colors=sys.stdout.isatty()))
 
     structlog.configure(
-        processors=shared_processors
-        + [structlog.processors.format_exc_info, *renderers],
+        processors=[*shared_processors, structlog.processors.format_exc_info, *renderers],
         wrapper_class=structlog.make_filtering_bound_logger(log_level),
         context_class=dict,
         logger_factory=structlog.PrintLoggerFactory(),

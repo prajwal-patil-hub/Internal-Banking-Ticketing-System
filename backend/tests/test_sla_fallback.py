@@ -11,7 +11,7 @@ import os
 os.environ.setdefault("JWT_SECRET", "test_secret_must_be_at_least_32_characters_long")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test.db")
 
-from app.services.sla_engine import _fallback_minutes  # noqa: E402
+from app.services.sla_engine import _fallback_minutes
 
 
 def test_fallback_minutes_ordering() -> None:

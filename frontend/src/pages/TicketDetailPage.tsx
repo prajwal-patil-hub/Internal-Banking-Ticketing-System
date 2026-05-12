@@ -5,7 +5,6 @@ import { motion } from 'framer-motion';
 import { ArrowLeft, Clock, MapPin, User as UserIcon } from 'lucide-react';
 
 import { Card } from '@/components/Card';
-import { Badge } from '@/components/Badge';
 import { getTicket } from '@/features/tickets/api';
 import { PriorityBadge, StatusBadge } from '@/features/tickets/components/StatusBadge';
 import { TicketActions } from '@/features/tickets/components/TicketActions';

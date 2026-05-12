@@ -12,7 +12,7 @@ Security policies enforced here:
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.core.exceptions import AuthenticationError
 from app.core.security import (
@@ -62,14 +62,14 @@ class AuthService:
             await self._record_attempt(email, ip, user_agent, success=False, reason="inactive")
             raise AuthenticationError("Account inactive.")
 
-        if user.locked_until and user.locked_until > datetime.now(timezone.utc):
+        if user.locked_until and user.locked_until > datetime.now(UTC):
             await self._record_attempt(email, ip, user_agent, success=False, reason="locked")
             raise AuthenticationError("Account temporarily locked.")
 
         if not verify_password(password, user.password_hash):
             user.failed_login_count += 1
             if user.failed_login_count >= LOCK_THRESHOLD:
-                user.locked_until = datetime.now(timezone.utc) + LOCK_DURATION
+                user.locked_until = datetime.now(UTC) + LOCK_DURATION
                 user.failed_login_count = 0
             await self.users.update(user)
             await self._record_attempt(email, ip, user_agent, success=False, reason="bad_password")
@@ -78,7 +78,7 @@ class AuthService:
         # Success — reset counters, optionally rehash.
         user.failed_login_count = 0
         user.locked_until = None
-        user.last_login_at = datetime.now(timezone.utc)
+        user.last_login_at = datetime.now(UTC)
         if needs_rehash(user.password_hash):
             user.password_hash = hash_password(password)
         await self.users.update(user)
@@ -115,7 +115,7 @@ class AuthService:
             await self.tokens.revoke_all_for_user(record.user_id)
             raise AuthenticationError("Refresh token reuse detected. Re-authenticate.")
 
-        if record.expires_at <= datetime.now(timezone.utc):
+        if record.expires_at <= datetime.now(UTC):
             raise AuthenticationError("Refresh token expired.")
 
         user = await self.users.get_by_id(record.user_id)

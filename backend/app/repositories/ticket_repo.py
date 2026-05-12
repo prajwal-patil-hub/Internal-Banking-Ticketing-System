@@ -7,8 +7,8 @@ Filter support: status, priority, branch_id, assigned_user_id, breached
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable
 from datetime import datetime
-from typing import Iterable
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -93,7 +93,8 @@ class TicketRepository:
 
         # `sort` is a comma-or-leading-dash field like "-created_at" or
         # "priority,sla_due_at". Unknown fields are silently ignored.
-        order_cols = []
+        from typing import Any
+        order_cols: list[Any] = []
         if sort:
             for part in (s.strip() for s in sort.split(",")):
                 if not part:
@@ -105,7 +106,7 @@ class TicketRepository:
                     continue
                 order_cols.append(col.desc() if descending else col.asc())
         if not order_cols:
-            order_cols = [Ticket.created_at.desc()]
+            order_cols.append(Ticket.created_at.desc())
         list_stmt = list_stmt.order_by(*order_cols)
 
         total = (await self.db.execute(count_stmt)).scalar_one()

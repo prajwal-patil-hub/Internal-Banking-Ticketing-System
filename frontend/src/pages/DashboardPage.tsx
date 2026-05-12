@@ -40,18 +40,6 @@ const PRIORITY_COLORS: Record<string, string> = {
   low:      '#56616F',  // graphite
 };
 
-const STATUS_COLORS: Record<string, string> = {
-  new:          '#4A6FA5',
-  acknowledged: '#3A5784',
-  assigned:     '#1F3A5F',
-  in_progress:  '#B8860B',
-  on_hold:      '#D9C68B',
-  escalated:    '#8B2635',
-  resolved:     '#4A7C59',
-  closed:       '#56616F',
-  reopened:     '#A55E6E',
-};
-
 const OPEN_STATUSES = ['new', 'acknowledged', 'assigned', 'in_progress', 'on_hold', 'escalated', 'reopened'];
 
 const linkForKpi = (key: string) => {

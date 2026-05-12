@@ -38,6 +38,6 @@ class EmailAdapter:
                 s.send_message(msg)
             log.info("email_sent", to=to, subject=subject)
             return True
-        except Exception:  # noqa: BLE001
+        except Exception:
             log.exception("email_send_failed", to=to, subject=subject)
             return False

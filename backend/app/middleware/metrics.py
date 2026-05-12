@@ -38,7 +38,7 @@ def metrics_response() -> Response:
 
 
 class MetricsMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
+    async def dispatch(self, request: Request, call_next):
         path_template = self._template(request)
         start = time.perf_counter()
         response: Response = await call_next(request)

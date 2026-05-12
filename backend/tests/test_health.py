@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+import os
+
+os.environ.setdefault("JWT_SECRET", "test_secret_must_be_at_least_32_characters_long")
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test.db")
+os.environ.setdefault("SCHEDULER_ENABLED", "false")
+
 from fastapi.testclient import TestClient
 
 from app.main import app

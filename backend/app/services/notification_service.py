@@ -13,8 +13,10 @@ Adding a new channel:
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable
+from datetime import UTC
 from enum import StrEnum
-from typing import Any, Iterable
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -100,5 +102,5 @@ class NotificationService:
 
 
 def _now_naive_aware_safe():
-    from datetime import datetime, timezone
-    return datetime.now(timezone.utc)
+    from datetime import datetime
+    return datetime.now(UTC)

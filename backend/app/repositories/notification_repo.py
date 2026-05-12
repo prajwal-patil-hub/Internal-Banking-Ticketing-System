@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,7 +38,7 @@ class NotificationRepository:
 
     async def mark_read(self, n: Notification) -> None:
         if n.read_at is None:
-            n.read_at = datetime.now(timezone.utc)
+            n.read_at = datetime.now(UTC)
 
     async def get(self, nid: uuid.UUID) -> Notification | None:
         return await self.db.get(Notification, nid)
@@ -57,7 +57,7 @@ class NotificationRepository:
             .where(Notification.user_id == user_id, Notification.read_at.is_(None))
         )
         rows = (await self.db.execute(stmt)).scalars().all()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for r in rows:
             r.read_at = now
         return len(rows)

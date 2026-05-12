@@ -9,16 +9,15 @@ from __future__ import annotations
 
 import uuid
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.rbac import Role
 from app.models.enums import Priority, TicketStatus
+from app.models.role import Role as RoleModel
 from app.models.ticket import Ticket
 from app.models.user import User
-from sqlalchemy import select
-
-from app.models.role import Role as RoleModel
 from app.repositories.ticket_repo import TicketFilter, TicketRepository
 from app.services.audit_service import AuditService
 from app.services.notification_service import (
@@ -51,9 +50,10 @@ class TicketService:
             raise ValidationError("Unknown priority.", details={"priority": priority}) from e
 
         # Branch-user accounts can only raise tickets for their own branch.
-        if actor.role.name == Role.BRANCH_USER.value:
-            if actor.branch_id is None or actor.branch_id != branch_id:
-                raise ValidationError("Branch user can only raise tickets for their own branch.")
+        if actor.role.name == Role.BRANCH_USER.value and (
+            actor.branch_id is None or actor.branch_id != branch_id
+        ):
+            raise ValidationError("Branch user can only raise tickets for their own branch.")
 
         ticket_no = await next_ticket_number(self.db)
 

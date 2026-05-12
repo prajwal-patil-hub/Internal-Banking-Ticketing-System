@@ -6,10 +6,11 @@ import os
 
 os.environ.setdefault("JWT_SECRET", "test_secret_must_be_at_least_32_characters_long")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test.db")
+os.environ.setdefault("SCHEDULER_ENABLED", "false")
 
-from fastapi.testclient import TestClient  # noqa: E402
+from fastapi.testclient import TestClient
 
-from app.main import app  # noqa: E402
+from app.main import app
 
 
 def test_security_headers_present() -> None:

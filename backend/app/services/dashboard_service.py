@@ -7,7 +7,7 @@ Avoids the per-tile fan-out the frontend used in P2. Returns:
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import Float, and_, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -217,7 +217,7 @@ class DashboardService:
         ]
 
         # Daily volume last 14 days
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         start = (now - timedelta(days=13)).replace(hour=0, minute=0, second=0, microsecond=0)
         day_expr = func.date_trunc("day", Ticket.created_at).label("day")
         daily_stmt = (

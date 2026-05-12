@@ -13,10 +13,9 @@ from __future__ import annotations
 
 import asyncio
 import secrets
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
-
-from datetime import datetime, timedelta, timezone
 
 from app.core.logging import configure_logging, get_logger
 from app.core.rbac import ROLE_PERMISSIONS, Permission, Role
@@ -142,11 +141,11 @@ async def main() -> None:
         # 5. Demo categories
         categories_by_name: dict[str, Category] = {}
         for name, desc, prio in DEMO_CATEGORIES:
-            existing = (
+            existing_cat = (
                 await session.execute(select(Category).where(Category.name == name))
             ).scalar_one_or_none()
-            if existing:
-                categories_by_name[name] = existing
+            if existing_cat:
+                categories_by_name[name] = existing_cat
                 continue
             c = Category(name=name, description=desc, default_priority=prio)
             session.add(c)
@@ -157,11 +156,11 @@ async def main() -> None:
         # 6. Demo users (branch_user is bound to BR001)
         users_by_email: dict[str, User] = {}
         for email, name, role_enum in DEMO_USERS:
-            existing = (
+            existing_user = (
                 await session.execute(select(User).where(User.email == email))
             ).scalar_one_or_none()
-            if existing:
-                users_by_email[email] = existing
+            if existing_user:
+                users_by_email[email] = existing_user
                 continue
             password = secrets.token_urlsafe(12)
             user = User(
@@ -182,10 +181,10 @@ async def main() -> None:
 
         # 7. SLA policies — banking-standard defaults.
         for prio, response_min, resolution_min in SLA_DEFAULTS:
-            existing = (
+            existing_policy = (
                 await session.execute(select(SLAPolicy).where(SLAPolicy.priority == prio))
             ).scalar_one_or_none()
-            if existing is None:
+            if existing_policy is None:
                 session.add(SLAPolicy(
                     priority=prio,
                     response_minutes=response_min,
@@ -198,7 +197,7 @@ async def main() -> None:
             await session.execute(select(Ticket))
         ).scalars().first()
         if existing_tickets is None:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             samples = [
                 ("CBS unable to post EOD", "End-of-day batch failed at 22:18.",  "critical", "Core Banking"),
                 ("ATM ID 4421 cash out",    "Front-lobby ATM reporting empty.",   "high",     "ATM / Self-service"),

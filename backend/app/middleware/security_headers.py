@@ -23,7 +23,7 @@ from app.core.config import settings
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
+    async def dispatch(self, request: Request, call_next):
         response: Response = await call_next(request)
 
         response.headers.setdefault("X-Content-Type-Options", "nosniff")

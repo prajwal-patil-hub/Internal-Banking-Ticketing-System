@@ -28,7 +28,11 @@ def _too_many(reset: int) -> JSONResponse:
         content={
             "success": False,
             "data": None,
-            "error": {"code": "RATE_LIMITED", "message": "Too many requests.", "details": {"retry_after_seconds": reset}},
+            "error": {
+                "code": "RATE_LIMITED",
+                "message": "Too many requests.",
+                "details": {"retry_after_seconds": reset},
+            },
             "request_id": None,
         },
         headers={"Retry-After": str(reset)},
@@ -36,7 +40,7 @@ def _too_many(reset: int) -> JSONResponse:
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
+    async def dispatch(self, request: Request, call_next):
         path = request.url.path
         if _exempt(path):
             return await call_next(request)

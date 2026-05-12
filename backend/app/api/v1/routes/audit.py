@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime
-
-import json
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
