@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.auth import LoginAttempt, RefreshToken
-from app.models.role import Permission, Role
+from app.models.role import Permission, Role, RolePermission
 from app.models.user import User
 
 
@@ -38,10 +38,14 @@ class RoleRepository:
         return (await self.db.execute(stmt)).scalar_one_or_none()
 
     async def get_permission_codes(self, role_id: uuid.UUID) -> set[str]:
+        # Join through the explicit association table — using
+        # `join_from(Permission, Role.permissions)` is malformed because
+        # the left side of the `Role.permissions` relationship is Role,
+        # not Permission, and SQLAlchemy raises InvalidRequestError.
         stmt = (
             select(Permission.code)
-            .join_from(Permission, Role.permissions)
-            .where(Role.id == role_id)
+            .join(RolePermission, RolePermission.permission_id == Permission.id)
+            .where(RolePermission.role_id == role_id)
         )
         rows = (await self.db.execute(stmt)).scalars().all()
         return set(rows)
