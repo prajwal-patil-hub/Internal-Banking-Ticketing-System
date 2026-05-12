@@ -20,6 +20,7 @@ import { api, extractError } from '@/lib/api';
 import { Card } from '@/components/Card';
 import { Badge } from '@/components/Badge';
 import { Modal } from '@/components/Modal';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Skeleton } from '@/components/Skeleton';
 import { useToasts } from '@/components/Toast';
 import { listBranches } from '@/features/tickets/api';
@@ -88,6 +89,10 @@ export function UsersPage() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<UserRow | null>(null);
+  const [confirmAction, setConfirmAction] = useState<
+    | { kind: 'deactivate' | 'reset'; user: UserRow }
+    | null
+  >(null);
   const [issued, setIssued] = useState<{ user: UserRow; password: string } | null>(null);
 
   const { data, isLoading } = useQuery({
@@ -223,7 +228,7 @@ export function UsersPage() {
                       <span
                         className="h-9 w-9 rounded-pill grid place-items-center text-white font-semibold text-xs"
                         style={{
-                          background: 'linear-gradient(135deg, #4F46E5, #8B5CF6)',
+                          background: 'linear-gradient(135deg, #1F3A5F 0%, #182D49 60%, #0B1929 100%)',
                         }}
                       >
                         {userInitials(u.full_name)}
@@ -270,11 +275,7 @@ export function UsersPage() {
                       </IconButton>
                       <IconButton
                         title="Reset password"
-                        onClick={() => {
-                          if (window.confirm(`Reset password for ${u.email}?`)) {
-                            resetPwd.mutate(u.id);
-                          }
-                        }}
+                        onClick={() => setConfirmAction({ kind: 'reset', user: u })}
                       >
                         <KeyRound className="h-3.5 w-3.5" />
                       </IconButton>
@@ -283,11 +284,7 @@ export function UsersPage() {
                           title="Deactivate"
                           tone="danger"
                           disabled={u.id === me?.id}
-                          onClick={() => {
-                            if (window.confirm(`Deactivate ${u.email}? They won't be able to log in.`)) {
-                              deactivate.mutate(u.id);
-                            }
-                          }}
+                          onClick={() => setConfirmAction({ kind: 'deactivate', user: u })}
                         >
                           <UserMinus className="h-3.5 w-3.5" />
                         </IconButton>
@@ -349,6 +346,32 @@ export function UsersPage() {
         branches={branches.data?.items ?? []}
         submitting={update.isPending}
         onSubmit={(body) => editTarget && update.mutate({ id: editTarget.id, body })}
+      />
+
+      <ConfirmDialog
+        open={!!confirmAction}
+        onClose={() => setConfirmAction(null)}
+        title={
+          confirmAction?.kind === 'reset'
+            ? `Reset password for ${confirmAction.user.email}?`
+            : confirmAction?.kind === 'deactivate'
+              ? `Deactivate ${confirmAction.user.email}?`
+              : ''
+        }
+        description={
+          confirmAction?.kind === 'reset'
+            ? "We'll generate a new one-time password and revoke all of this user's open sessions. You'll need to share the new password with them via a side channel."
+            : "The user won't be able to sign in. Existing audit history is preserved. You can restore them later."
+        }
+        confirmLabel={confirmAction?.kind === 'reset' ? 'Reset password' : 'Deactivate user'}
+        tone="danger"
+        pending={resetPwd.isPending || deactivate.isPending}
+        onConfirm={() => {
+          if (!confirmAction) return;
+          if (confirmAction.kind === 'reset') resetPwd.mutate(confirmAction.user.id);
+          else deactivate.mutate(confirmAction.user.id);
+          setConfirmAction(null);
+        }}
       />
 
       {/* Issued password */}

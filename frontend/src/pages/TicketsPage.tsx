@@ -10,6 +10,12 @@ import {
   ChevronLeft,
   ChevronRight,
   Filter,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
+  Rows3,
+  LayoutGrid,
+  Hourglass,
 } from 'lucide-react';
 
 import { Card } from '@/components/Card';
@@ -29,11 +35,28 @@ const STATUSES: TicketFilters['status'] = [
 ];
 const PRIORITIES: TicketFilters['priority'] = ['critical', 'high', 'medium', 'low'];
 
+const SORTABLE_COLS = ['ticket_no', 'priority', 'status', 'sla_due_at', 'created_at'] as const;
+type SortCol = (typeof SORTABLE_COLS)[number];
+
+function parseSort(sort: string | null): { col: SortCol | null; desc: boolean } {
+  if (!sort) return { col: null, desc: false };
+  const desc = sort.startsWith('-');
+  const col = sort.replace(/^-/, '') as SortCol;
+  if (!SORTABLE_COLS.includes(col)) return { col: null, desc: false };
+  return { col, desc };
+}
+
+function ageFor(iso: string): { label: string; tone: 'neutral' | 'warning' | 'danger' } {
+  const ms = Date.now() - new Date(iso).getTime();
+  const hrs = ms / (1000 * 60 * 60);
+  if (hrs >= 72) return { label: '>3d', tone: 'danger' };
+  if (hrs >= 24) return { label: '>1d', tone: 'warning' };
+  return { label: 'new', tone: 'neutral' };
+}
+
 export function TicketsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // Hydrate filter state from URL on first render so deep-links work
-  // (e.g. dashboard tile -> /tickets?status=new&priority=critical).
   const [page, setPage] = useState(1);
   const [size] = useState(20);
   const [q, setQ] = useState(() => searchParams.get('q') ?? '');
@@ -49,10 +72,15 @@ export function TicketsPage() {
     if (v === 'false') return false;
     return undefined;
   });
+  const [sort, setSort] = useState<string | undefined>(() => searchParams.get('sort') ?? undefined);
+  const [density, setDensity] = useState<'comfortable' | 'compact'>(
+    () => (localStorage.getItem('tickets:density') as 'comfortable' | 'compact') ?? 'comfortable',
+  );
   const [openCreate, setOpenCreate] = useState(false);
 
-  // Keep the URL in sync as the user changes filters — makes the list
-  // shareable/back-button-friendly without triggering re-renders.
+  const { hasRole } = useAuth();
+  const canCreate = hasRole('branch_user');
+
   useEffect(() => {
     const next = new URLSearchParams();
     if (q) next.set('q', q);
@@ -60,16 +88,18 @@ export function TicketsPage() {
     priority?.forEach((p) => next.append('priority', p));
     if (breached === true) next.set('breached', 'true');
     if (breached === false) next.set('breached', 'false');
+    if (sort) next.set('sort', sort);
     setSearchParams(next, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, status, priority, breached]);
+  }, [q, status, priority, breached, sort]);
 
-  const { hasRole } = useAuth();
-  const canCreate = hasRole('branch_user');
+  useEffect(() => {
+    localStorage.setItem('tickets:density', density);
+  }, [density]);
 
   const filters = useMemo<TicketFilters>(
-    () => ({ page, size, q: q || undefined, status, priority, breached }),
-    [page, size, q, status, priority, breached],
+    () => ({ page, size, q: q || undefined, status, priority, breached, sort }),
+    [page, size, q, status, priority, breached, sort],
   );
 
   const { data, isLoading, isError, refetch } = useQuery({
@@ -80,12 +110,20 @@ export function TicketsPage() {
   const toggleArr = <T extends string>(arr: T[] | undefined, v: T) =>
     arr?.includes(v) ? arr.filter((x) => x !== v) : [...(arr ?? []), v];
 
+  const cycleSort = (col: SortCol) => {
+    const { col: cur, desc } = parseSort(sort ?? null);
+    if (cur !== col) { setSort(`-${col}`); return; }
+    if (cur === col && desc) { setSort(col); return; }
+    setSort(undefined);
+  };
+
   const downloadCsv = async () => {
     const params = new URLSearchParams();
     status?.forEach((s) => params.append('status', s));
     priority?.forEach((p) => params.append('priority', p));
     if (breached != null) params.set('breached', String(breached));
     if (q) params.set('q', q);
+    if (sort) params.set('sort', sort);
     const resp = await api.get(`/tickets/export.csv?${params.toString()}`, { responseType: 'blob' });
     const url = URL.createObjectURL(resp.data as Blob);
     const a = document.createElement('a');
@@ -93,9 +131,10 @@ export function TicketsPage() {
     URL.revokeObjectURL(url);
   };
 
+  const parsed = parseSort(sort ?? null);
+
   return (
     <div className="flex flex-col gap-6">
-      {/* Page header */}
       <motion.header
         initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}
         className="flex items-end justify-between gap-4 flex-wrap"
@@ -103,11 +142,18 @@ export function TicketsPage() {
         <div>
           <span className="label">Operations</span>
           <h1 className="text-4xl font-semibold tracking-tight text-ink mt-1">Tickets</h1>
-          <p className="text-sm text-ink-muted mt-1">
-            All tickets visible to your role.
-          </p>
+          <p className="text-sm text-ink-muted mt-1">All tickets visible to your role.</p>
+          <div className="hairline-brass mt-3 max-w-xs" />
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setDensity((d) => d === 'compact' ? 'comfortable' : 'compact')}
+            className="btn-secondary"
+            title={`Density: ${density}`}
+          >
+            {density === 'compact' ? <LayoutGrid className="h-4 w-4" /> : <Rows3 className="h-4 w-4" />}
+            {density === 'compact' ? 'Comfortable' : 'Compact'}
+          </button>
           <button onClick={() => refetch()} className="btn-secondary">
             <RefreshCw className="h-4 w-4" /> Refresh
           </button>
@@ -122,7 +168,6 @@ export function TicketsPage() {
         </div>
       </motion.header>
 
-      {/* Filters */}
       <Card className="p-5">
         <div className="grid gap-3 md:grid-cols-[1fr_auto] items-center">
           <div className="relative">
@@ -171,61 +216,72 @@ export function TicketsPage() {
               active={!!priority?.includes(p)}
               onClick={() => { setPage(1); setPriority(toggleArr(priority, p)); }}
               label={p}
-              tone="accent"
+              tone="claret"
             />
           ))}
         </div>
       </Card>
 
-      {/* Table */}
       <Card padded={false} className="overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="data-table">
+          <table className={cn('data-table', density === 'compact' && 'compact')}>
             <thead>
               <tr>
-                <th>Ticket</th>
+                <Th label="Ticket"   col="ticket_no"   parsed={parsed} onClick={cycleSort} />
                 <th>Title</th>
-                <th>Status</th>
-                <th>Priority</th>
-                <th>SLA</th>
-                <th>Created</th>
+                <Th label="Status"   col="status"      parsed={parsed} onClick={cycleSort} />
+                <Th label="Priority" col="priority"    parsed={parsed} onClick={cycleSort} />
+                <Th label="SLA"      col="sla_due_at"  parsed={parsed} onClick={cycleSort} />
+                <Th label="Age"      col="created_at"  parsed={parsed} onClick={cycleSort} />
               </tr>
             </thead>
             <tbody>
-              {isLoading &&
-                Array.from({ length: 8 }).map((_, i) => (
-                  <tr key={i}>
-                    {Array.from({ length: 6 }).map((__, j) => (
-                      <td key={j}><Skeleton className="h-4 w-full max-w-[180px]" /></td>
-                    ))}
-                  </tr>
-                ))}
+              {isLoading && Array.from({ length: 8 }).map((_, i) => (
+                <tr key={i}>
+                  {Array.from({ length: 6 }).map((__, j) => (
+                    <td key={j}><Skeleton className="h-4 w-full max-w-[180px]" /></td>
+                  ))}
+                </tr>
+              ))}
               {isError && (
                 <tr><td colSpan={6} className="py-10 text-center text-danger-deep">Failed to load tickets.</td></tr>
               )}
               {!isLoading && data?.items.length === 0 && (
                 <tr><td colSpan={6} className="py-12 text-center text-ink-muted">No tickets match these filters.</td></tr>
               )}
-              {data?.items.map((t) => (
-                <tr key={t.id}>
-                  <td className="font-mono text-2xs">
-                    <Link to={`/tickets/${t.id}`} className="text-brand-700 hover:text-brand-800 hover:underline">
-                      {t.ticket_no}
-                    </Link>
-                  </td>
-                  <td className="text-ink">{t.title}</td>
-                  <td><StatusBadge status={t.status} /></td>
-                  <td><PriorityBadge priority={t.priority} /></td>
-                  <td>
-                    {t.sla_due_at ? (
-                      <Badge tone={isBreached(t.sla_due_at) ? 'danger' : 'success'}>
-                        {formatRelative(t.sla_due_at)}
-                      </Badge>
-                    ) : <span className="text-ink-subtle">—</span>}
-                  </td>
-                  <td className="text-ink-muted whitespace-nowrap">{formatRelative(t.created_at)}</td>
-                </tr>
-              ))}
+              {data?.items.map((t) => {
+                const age = ageFor(t.created_at);
+                return (
+                  <tr key={t.id}>
+                    <td className="font-mono text-2xs">
+                      <Link to={`/tickets/${t.id}`} className="text-brand-700 hover:text-brand-800 hover:underline">
+                        {t.ticket_no}
+                      </Link>
+                    </td>
+                    <td className="text-ink">{t.title}</td>
+                    <td><StatusBadge status={t.status} /></td>
+                    <td><PriorityBadge priority={t.priority} /></td>
+                    <td>
+                      {t.sla_due_at ? (
+                        <Badge tone={isBreached(t.sla_due_at) ? 'danger' : 'success'}>
+                          {formatRelative(t.sla_due_at)}
+                        </Badge>
+                      ) : <span className="text-ink-subtle">—</span>}
+                    </td>
+                    <td className="text-ink-muted whitespace-nowrap">
+                      <span className="inline-flex items-center gap-1.5">
+                        <Hourglass className={cn(
+                          'h-3.5 w-3.5',
+                          age.tone === 'danger'  && 'text-danger',
+                          age.tone === 'warning' && 'text-warning-deep',
+                          age.tone === 'neutral' && 'text-ink-subtle',
+                        )} />
+                        {formatRelative(t.created_at)}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -256,6 +312,34 @@ export function TicketsPage() {
   );
 }
 
+function Th({
+  label,
+  col,
+  parsed,
+  onClick,
+}: {
+  label: string;
+  col: SortCol;
+  parsed: { col: SortCol | null; desc: boolean };
+  onClick: (c: SortCol) => void;
+}) {
+  const active = parsed.col === col;
+  return (
+    <th>
+      <button
+        onClick={() => onClick(col)}
+        className="inline-flex items-center gap-1.5 hover:text-ink transition-colors"
+        title={`Sort by ${label}`}
+      >
+        <span>{label}</span>
+        {!active && <ArrowUpDown className="h-3 w-3 opacity-50" />}
+        {active && parsed.desc && <ArrowDown className="h-3 w-3 text-brand-600" />}
+        {active && !parsed.desc && <ArrowUp className="h-3 w-3 text-brand-600" />}
+      </button>
+    </th>
+  );
+}
+
 function FilterChip({
   active,
   onClick,
@@ -265,9 +349,9 @@ function FilterChip({
   active: boolean;
   onClick: () => void;
   label: string;
-  tone?: 'brand' | 'accent';
+  tone?: 'brand' | 'claret';
 }) {
-  const activeClass = tone === 'accent'
+  const activeClass = tone === 'claret'
     ? 'bg-accent-500 text-white border-accent-500 shadow-soft'
     : 'bg-brand-600 text-white border-brand-600 shadow-soft';
   return (
@@ -275,9 +359,7 @@ function FilterChip({
       onClick={onClick}
       className={cn(
         'pill border transition-all duration-150 capitalize',
-        active
-          ? activeClass
-          : 'bg-white/60 text-ink-muted border-white/60 hover:border-brand-200 hover:text-ink',
+        active ? activeClass : 'bg-canvas-raised text-ink-muted border-white/60 hover:border-brand-200 hover:text-ink',
       )}
     >
       {label}

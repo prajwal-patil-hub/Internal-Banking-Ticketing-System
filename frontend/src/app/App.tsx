@@ -14,6 +14,8 @@ import { SlaPage } from '@/pages/SlaPage';
 import { EscalationsPage } from '@/pages/EscalationsPage';
 import { AuditPage } from '@/pages/AuditPage';
 import { ProfilePage } from '@/pages/ProfilePage';
+import { CategoriesPage } from '@/pages/CategoriesPage';
+import { TeamsPage } from '@/pages/TeamsPage';
 
 export default function App() {
   return (
@@ -60,6 +62,22 @@ export default function App() {
           element={
             <RequireAuth roles={['admin']}>
               <UsersPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/categories"
+          element={
+            <RequireAuth roles={['admin']}>
+              <CategoriesPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/teams"
+          element={
+            <RequireAuth roles={['admin', 'supervisor']}>
+              <TeamsPage />
             </RequireAuth>
           }
         />

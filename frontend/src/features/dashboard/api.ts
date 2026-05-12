@@ -31,3 +31,17 @@ export async function dashboardOverview(): Promise<DashboardOverview> {
   const { data } = await api.get<{ data: DashboardOverview }>('/dashboard/overview');
   return data.data;
 }
+
+export interface DashboardAnalytics {
+  by_status: Record<string, number>;
+  by_priority: Record<string, number>;
+  by_category: { name: string; total: number; open: number }[];
+  daily_volume: { date: string; total: number; critical: number }[];
+  top_branches: { code: string; name: string; count: number }[];
+  avg_resolution_minutes: { priority: string; minutes: number | null; n: number }[];
+}
+
+export async function dashboardAnalytics(): Promise<DashboardAnalytics> {
+  const { data } = await api.get<{ data: DashboardAnalytics }>('/dashboard/analytics');
+  return data.data;
+}

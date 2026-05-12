@@ -11,6 +11,8 @@ import {
   ScrollText,
   Search,
   Menu,
+  Tag,
+  Users2,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -35,6 +37,8 @@ const NAV: NavItem[] = [
   { to: '/escalations',  label: 'Escalations',  icon: AlertTriangle,   roles: ['admin', 'supervisor'] },
   { to: '/branches',     label: 'Branches',     icon: Building2,       roles: ['admin'] },
   { to: '/users',        label: 'Users',        icon: Users,           roles: ['admin'] },
+  { to: '/categories',   label: 'Categories',   icon: Tag,             roles: ['admin'] },
+  { to: '/teams',        label: 'Teams',        icon: Users2,          roles: ['admin', 'supervisor'] },
   { to: '/audit',        label: 'Audit Log',    icon: ScrollText,      roles: ['auditor', 'admin'] },
 ];
 

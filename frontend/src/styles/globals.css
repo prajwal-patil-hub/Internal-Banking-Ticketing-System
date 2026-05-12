@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 /* ============================================================
-   SUCCESS Bank — global base
+   SUCCESS Bank — global base · Old-money palette
    ============================================================ */
 
 html, body, #root { height: 100%; }
@@ -13,28 +13,41 @@ body {
   font-family: 'Inter', 'SF Pro Display', ui-sans-serif, system-ui, sans-serif;
   font-feature-settings: 'cv11', 'ss01', 'ss03';
   letter-spacing: -0.011em;
-  background: radial-gradient(circle at 8% 0%, rgba(99,102,241,0.10), transparent 38%),
-              radial-gradient(circle at 95% 100%, rgba(16,185,129,0.07), transparent 36%),
-              radial-gradient(circle at 60% 18%, rgba(167,139,250,0.06), transparent 30%),
-              linear-gradient(180deg, #F7F9FE 0%, #F5F7FB 100%);
+  background:
+    radial-gradient(circle at 8% 0%, rgba(31,58,95,0.07), transparent 38%),
+    radial-gradient(circle at 95% 100%, rgba(184,150,90,0.08), transparent 36%),
+    radial-gradient(circle at 60% 18%, rgba(107,39,55,0.04), transparent 30%),
+    linear-gradient(180deg, #FBF7EE 0%, #F5F1E8 100%);
   background-attachment: fixed;
 }
 
-/* Soft custom scrollbar */
+/* Subtle parchment grain — barely perceptible, adds warmth */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.35;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.85  0 0 0 0 0.78  0 0 0 0 0.62  0 0 0 0.06 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+}
+#root { position: relative; z-index: 1; }
+
+/* Soft custom scrollbar — brass-tinted */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: rgba(99,102,241,0.18);
+  background: rgba(184,150,90,0.30);
   border-radius: 999px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
-::-webkit-scrollbar-thumb:hover { background: rgba(99,102,241,0.32); border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: rgba(31,58,95,0.40); border: 2px solid transparent; background-clip: padding-box; }
 
 /* Focus rings, accessible but soft */
 :focus-visible {
   outline: none;
-  box-shadow: 0 0 0 4px rgba(99,102,241,0.16);
+  box-shadow: 0 0 0 4px rgba(31,58,95,0.18);
   border-radius: 12px;
 }
 
@@ -43,47 +56,33 @@ body {
    ============================================================ */
 
 @layer components {
-  /* Glass card — the workhorse surface */
   .glass {
-    background: rgba(255, 255, 255, 0.72);
-    backdrop-filter: blur(18px) saturate(140%);
-    -webkit-backdrop-filter: blur(18px) saturate(140%);
-    border: 1px solid rgba(255, 255, 255, 0.55);
-    box-shadow: 0 8px 32px rgba(31, 38, 135, 0.06);
+    background: rgba(255, 252, 245, 0.72);
+    backdrop-filter: blur(18px) saturate(130%);
+    -webkit-backdrop-filter: blur(18px) saturate(130%);
+    border: 1px solid rgba(31, 58, 95, 0.10);
+    box-shadow: 0 8px 32px rgba(31, 58, 95, 0.08);
   }
   .glass-strong {
-    background: rgba(255, 255, 255, 0.85);
-    backdrop-filter: blur(24px) saturate(160%);
-    -webkit-backdrop-filter: blur(24px) saturate(160%);
-    border: 1px solid rgba(255, 255, 255, 0.6);
-    box-shadow: 0 12px 40px rgba(31, 38, 135, 0.08);
+    background: rgba(255, 252, 245, 0.88);
+    backdrop-filter: blur(24px) saturate(150%);
+    -webkit-backdrop-filter: blur(24px) saturate(150%);
+    border: 1px solid rgba(31, 58, 95, 0.12);
+    box-shadow: 0 12px 40px rgba(31, 58, 95, 0.10);
   }
   .glass-subtle {
-    background: rgba(255, 255, 255, 0.55);
-    backdrop-filter: blur(12px) saturate(140%);
-    -webkit-backdrop-filter: blur(12px) saturate(140%);
-    border: 1px solid rgba(255, 255, 255, 0.45);
+    background: rgba(255, 252, 245, 0.55);
+    backdrop-filter: blur(12px) saturate(130%);
+    -webkit-backdrop-filter: blur(12px) saturate(130%);
+    border: 1px solid rgba(31, 58, 95, 0.08);
   }
 
-  /* The "card" alias keeps existing markup compatible while picking up
-     the new glass treatment. */
-  .card {
-    @apply glass rounded-4xl p-6;
-  }
+  .card { @apply glass rounded-4xl p-6; }
+  .kpi  { @apply card flex flex-col gap-2; }
 
-  .kpi {
-    @apply card flex flex-col gap-2;
-  }
-
-  /* Pills */
   .pill {
     @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-pill text-xs font-medium;
     letter-spacing: 0;
-  }
-  .pill-soft {
-    @apply pill;
-    background: rgba(99,102,241,0.08);
-    color: #4F46E5;
   }
 
   /* Buttons */
@@ -92,13 +91,13 @@ body {
            text-sm font-semibold text-white
            transition-all duration-200 ease-smooth
            disabled:opacity-50 disabled:cursor-not-allowed;
-    background: linear-gradient(135deg, #4F46E5 0%, #6366F1 100%);
-    box-shadow: 0 4px 14px rgba(79, 70, 229, 0.22);
+    background: linear-gradient(135deg, #1F3A5F 0%, #2A4366 100%);
+    box-shadow: 0 4px 14px rgba(31, 58, 95, 0.22);
   }
   .btn-primary:hover:not(:disabled) {
-    background: linear-gradient(135deg, #4338CA 0%, #4F46E5 100%);
+    background: linear-gradient(135deg, #182D49 0%, #1F3A5F 100%);
     transform: translateY(-1px);
-    box-shadow: 0 8px 24px rgba(79, 70, 229, 0.28);
+    box-shadow: 0 8px 24px rgba(31, 58, 95, 0.28);
   }
 
   .btn-secondary {
@@ -106,16 +105,16 @@ body {
            text-sm font-semibold text-ink
            transition-all duration-200 ease-smooth
            disabled:opacity-50 disabled:cursor-not-allowed;
-    background: rgba(255, 255, 255, 0.55);
-    border: 1px solid rgba(255, 255, 255, 0.5);
-    box-shadow: 0 1px 2px rgba(17,24,39,0.04);
+    background: rgba(255, 252, 245, 0.55);
+    border: 1px solid rgba(31, 58, 95, 0.10);
+    box-shadow: 0 1px 2px rgba(27,31,42,0.04);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
   }
   .btn-secondary:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.85);
+    background: rgba(255, 252, 245, 0.85);
     transform: translateY(-1px);
-    box-shadow: 0 8px 20px rgba(17,24,39,0.06);
+    box-shadow: 0 8px 20px rgba(27,31,42,0.06);
   }
 
   .btn-ghost {
@@ -124,8 +123,8 @@ body {
            transition-colors duration-150;
   }
   .btn-ghost:hover {
-    background: rgba(99, 102, 241, 0.06);
-    color: #4F46E5;
+    background: rgba(31, 58, 95, 0.06);
+    color: #1F3A5F;
   }
 
   .btn-danger {
@@ -133,12 +132,12 @@ body {
            text-sm font-semibold text-white
            transition-all duration-200 ease-smooth
            disabled:opacity-50;
-    background: linear-gradient(135deg, #EF4444 0%, #F87171 100%);
-    box-shadow: 0 4px 14px rgba(239,68,68,0.22);
+    background: linear-gradient(135deg, #6B2737 0%, #8B2635 100%);
+    box-shadow: 0 4px 14px rgba(139, 38, 53, 0.22);
   }
   .btn-danger:hover:not(:disabled) {
     transform: translateY(-1px);
-    box-shadow: 0 8px 24px rgba(239,68,68,0.28);
+    box-shadow: 0 8px 24px rgba(139, 38, 53, 0.28);
   }
 
   /* Inputs */
@@ -146,95 +145,88 @@ body {
     @apply w-full rounded-2xl px-4 py-3 text-sm text-ink
            placeholder:text-ink-subtle
            transition-all duration-200;
-    background: rgba(255, 255, 255, 0.7);
-    border: 1px solid rgba(17,24,39,0.06);
+    background: rgba(255, 252, 245, 0.7);
+    border: 1px solid rgba(31, 58, 95, 0.10);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
   }
-  .input::placeholder { letter-spacing: 0; }
-  .input:hover { background: rgba(255,255,255,0.82); }
-  .input:focus,
-  .input:focus-visible {
+  .input:hover { background: rgba(255, 252, 245, 0.85); }
+  .input:focus, .input:focus-visible {
     outline: none;
-    border-color: #6366F1;
-    background: rgba(255,255,255,0.95);
-    box-shadow: 0 0 0 4px rgba(99,102,241,0.10);
+    border-color: #1F3A5F;
+    background: rgba(255, 252, 245, 0.96);
+    box-shadow: 0 0 0 4px rgba(31, 58, 95, 0.10);
   }
   textarea.input { @apply leading-relaxed; }
 
-  /* Section heading helpers */
-  .h-section {
-    @apply text-xl font-semibold text-ink tracking-tightish;
-  }
-  .h-card {
-    @apply text-md font-semibold text-ink;
-  }
-  .label {
-    @apply text-xs font-medium uppercase tracking-wider text-ink-muted;
-  }
+  /* Typography helpers */
+  .h-section { @apply text-xl font-semibold text-ink tracking-tightish; }
+  .h-card    { @apply text-md font-semibold text-ink; }
+  .label     { @apply text-xs font-medium uppercase tracking-wider text-ink-muted; }
 
-  /* Subtle divider */
+  /* Brass hairline — perfect for old-money rules under headings */
+  .hairline-brass {
+    background: linear-gradient(90deg, transparent, rgba(184,150,90,0.45), transparent);
+    height: 1px;
+  }
   .hairline {
-    background: linear-gradient(90deg, transparent, rgba(17,24,39,0.08), transparent);
+    background: linear-gradient(90deg, transparent, rgba(31,58,95,0.10), transparent);
     height: 1px;
   }
 
-  /* Generic table polish */
-  .data-table {
-    @apply w-full text-sm;
-  }
+  /* Table polish */
+  .data-table { @apply w-full text-sm; }
   .data-table thead th {
     @apply px-4 py-3 text-left text-2xs font-semibold uppercase tracking-wider text-ink-muted;
+    border-bottom: 1px solid rgba(31,58,95,0.10);
   }
-  .data-table tbody tr {
-    @apply transition-colors duration-150;
-  }
-  .data-table tbody tr:hover {
-    background: rgba(99,102,241,0.04);
-  }
-  .data-table tbody td {
-    @apply px-4 py-3 text-sm text-ink;
-  }
+  .data-table tbody tr { @apply transition-colors duration-150; }
+  .data-table tbody tr:hover { background: rgba(31,58,95,0.04); }
+  .data-table tbody td { @apply px-4 py-3 text-sm text-ink; }
   .data-table tbody tr + tr td {
-    border-top: 1px solid rgba(17,24,39,0.05);
+    border-top: 1px solid rgba(31,58,95,0.06);
   }
+
+  /* Density variants */
+  .data-table.compact tbody td,
+  .data-table.compact thead th { @apply px-3 py-2; }
 }
 
 /* ============================================================
-   Dark mode (kept minimal — light is the canonical theme)
+   Dark mode (kept minimal — parchment is canonical)
    ============================================================ */
 .dark body {
   background:
-    radial-gradient(circle at 8% 0%, rgba(99,102,241,0.18), transparent 38%),
-    radial-gradient(circle at 95% 100%, rgba(16,185,129,0.10), transparent 36%),
-    linear-gradient(180deg, #0B1020 0%, #0A0F1E 100%);
+    radial-gradient(circle at 8% 0%, rgba(31,58,95,0.30), transparent 38%),
+    radial-gradient(circle at 95% 100%, rgba(184,150,90,0.10), transparent 36%),
+    linear-gradient(180deg, #0B1929 0%, #112236 100%);
   color: #E5E7EB;
 }
 .dark .glass {
-  background: rgba(17,24,39,0.55);
-  border-color: rgba(255,255,255,0.06);
+  background: rgba(17,28,46,0.55);
+  border-color: rgba(184,150,90,0.10);
   box-shadow: 0 8px 32px rgba(0,0,0,0.35);
 }
 .dark .glass-strong {
-  background: rgba(17,24,39,0.7);
-  border-color: rgba(255,255,255,0.08);
+  background: rgba(17,28,46,0.75);
+  border-color: rgba(184,150,90,0.14);
 }
 .dark .input {
-  background: rgba(17,24,39,0.6);
+  background: rgba(17,28,46,0.6);
   color: #E5E7EB;
-  border-color: rgba(255,255,255,0.06);
+  border-color: rgba(184,150,90,0.10);
 }
 .dark .btn-secondary {
-  background: rgba(17,24,39,0.6);
+  background: rgba(17,28,46,0.6);
   color: #E5E7EB;
-  border-color: rgba(255,255,255,0.08);
+  border-color: rgba(184,150,90,0.10);
 }
 .dark .btn-ghost { color: #9CA3AF; }
-.dark .data-table tbody tr + tr td { border-top-color: rgba(255,255,255,0.05); }
-.dark .data-table tbody tr:hover { background: rgba(99,102,241,0.10); }
-.dark .hairline { background: linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent); }
+.dark .data-table tbody tr + tr td { border-top-color: rgba(184,150,90,0.10); }
+.dark .data-table tbody tr:hover { background: rgba(31,58,95,0.18); }
+.dark .hairline { background: linear-gradient(90deg, transparent, rgba(184,150,90,0.18), transparent); }
+.dark .hairline-brass { background: linear-gradient(90deg, transparent, rgba(184,150,90,0.35), transparent); }
 
-/* Reduced motion respect */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.001ms !important;

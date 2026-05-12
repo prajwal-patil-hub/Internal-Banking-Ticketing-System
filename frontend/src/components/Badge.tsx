@@ -3,27 +3,25 @@ import { cn } from '@/lib/cn';
 type Tone =
   | 'new' | 'ack' | 'assigned' | 'progress' | 'hold'
   | 'escalated' | 'resolved' | 'closed' | 'reopened'
-  | 'neutral' | 'success' | 'warning' | 'danger' | 'info';
+  | 'neutral' | 'success' | 'warning' | 'danger' | 'info' | 'brass';
 
-/**
- * Soft tinted status pill. Each tone is a translucent colored fill with a
- * deep text colour — readable on any glass surface.
- */
+// Old-money soft pills — translucent fills, deep ink type.
 const toneClass: Record<Tone, string> = {
   new:        'bg-info-soft text-info-deep',
   ack:        'bg-info-soft text-info-deep',
-  assigned:   'bg-accent-100 text-accent-500',
+  assigned:   'bg-brand-50 text-brand-700',
   progress:   'bg-warning-soft text-warning-deep',
   hold:       'bg-warning-soft text-warning-deep',
   escalated:  'bg-danger-soft text-danger-deep',
   resolved:   'bg-success-soft text-success-deep',
-  closed:     'bg-slate-200/70 text-slate-700',
-  reopened:   'bg-pink-100 text-pink-700',
-  neutral:    'bg-slate-100/80 text-slate-700',
+  closed:     'bg-canvas-alt text-ink-muted',
+  reopened:   'bg-accent-50 text-accent-500',
+  neutral:    'bg-canvas-alt text-ink-muted',
   success:    'bg-success-soft text-success-deep',
   warning:    'bg-warning-soft text-warning-deep',
   danger:     'bg-danger-soft text-danger-deep',
   info:       'bg-info-soft text-info-deep',
+  brass:      'bg-brass-soft text-brass-600',
 };
 
 interface Props {

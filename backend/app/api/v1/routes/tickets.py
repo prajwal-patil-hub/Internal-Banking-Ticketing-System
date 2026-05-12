@@ -66,6 +66,7 @@ async def list_tickets(
     q: str | None = Query(default=None),
     date_from: datetime | None = Query(default=None),
     date_to: datetime | None = Query(default=None),
+    sort: str | None = Query(default=None, description="e.g. -created_at, sla_due_at, priority"),
     db: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> dict:
@@ -74,7 +75,9 @@ async def list_tickets(
         assigned_user_id=assigned_user_id, breached=breached, q=q,
         date_from=date_from, date_to=date_to,
     )
-    items, total = await TicketService(db).list_for(user, f=f, offset=p.offset, limit=p.limit)
+    items, total = await TicketService(db).list_for(
+        user, f=f, offset=p.offset, limit=p.limit, sort=sort,
+    )
     return paginated(
         [TicketSummary.model_validate(t).model_dump(mode="json") for t in items],
         page=p.page, size=p.size, total=total,

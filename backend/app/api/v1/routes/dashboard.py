@@ -1,4 +1,4 @@
-"""Dashboard endpoint — one round trip, role-aware."""
+"""Dashboard endpoints — overview + analytics."""
 
 from __future__ import annotations
 
@@ -26,3 +26,14 @@ async def overview(
             "role_specific": await svc.role_specific(user),
         }
     )
+
+
+@router.get("/analytics")
+async def analytics(
+    db: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Premium analytics: by-status, by-priority, by-category, daily
+    volume last 14 days, top branches last 30 days, average resolution
+    minutes by priority last 30 days. Branch-scoped for branch_user."""
+    return ok(await DashboardService(db).analytics(user))

@@ -109,9 +109,12 @@ class TicketService:
         f: TicketFilter,
         offset: int,
         limit: int,
+        sort: str | None = None,
     ) -> tuple[list[Ticket], int]:
         scoped_branch = actor.branch_id if actor.role.name == Role.BRANCH_USER.value else None
-        return await self.repo.list(f=f, offset=offset, limit=limit, scoped_branch_id=scoped_branch)
+        return await self.repo.list(
+            f=f, offset=offset, limit=limit, scoped_branch_id=scoped_branch, sort=sort,
+        )
 
     async def get_for(self, actor: User, ticket_id: uuid.UUID) -> Ticket:
         t = await self.repo.get(ticket_id)

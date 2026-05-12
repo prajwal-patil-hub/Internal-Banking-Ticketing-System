@@ -7,10 +7,14 @@ Avoids the per-tile fan-out the frontend used in P2. Returns:
 
 from __future__ import annotations
 
-from sqlalchemy import and_, func, select
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import Float, and_, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.rbac import Role
+from app.models.branch import Branch
+from app.models.category import Category
 from app.models.escalation import Escalation
 from app.models.sla import SLATracking
 from app.models.ticket import Ticket
@@ -161,3 +165,139 @@ class DashboardService:
         if open_count == 0:
             return 100
         return max(0, round(100 * (1 - breached / open_count)))
+
+    # ────────────────────────── Analytics ──────────────────────────
+
+    async def analytics(self, actor: User) -> dict:
+        """Premium analytics payload — by status, priority, category,
+        daily volume (last 14 days), top branches, and avg resolution
+        time by priority. Branch-scoped for branch_user."""
+        scope = self._branch_scope(actor)
+
+        # By status (all)
+        by_status_stmt = (
+            select(Ticket.status, func.count())
+            .group_by(Ticket.status)
+        )
+        if scope:
+            by_status_stmt = by_status_stmt.where(and_(*scope))
+        by_status_rows = (await self.db.execute(by_status_stmt)).all()
+        by_status = {s: int(c) for (s, c) in by_status_rows}
+
+        # By priority (open only)
+        by_prio_stmt = (
+            select(Ticket.priority, func.count())
+            .where(Ticket.status.in_(OPEN_STATUSES))
+            .group_by(Ticket.priority)
+        )
+        if scope:
+            by_prio_stmt = by_prio_stmt.where(and_(*scope))
+        by_prio_rows = (await self.db.execute(by_prio_stmt)).all()
+        by_priority = {p: int(c) for (p, c) in by_prio_rows}
+
+        # By category — return name, count, open_count
+        by_cat_stmt = (
+            select(
+                Category.name,
+                func.count(Ticket.id),
+                func.sum(
+                    func.case((Ticket.status.in_(OPEN_STATUSES), 1), else_=0)
+                ).label("open_count"),
+            )
+            .join(Category, Category.id == Ticket.category_id, isouter=True)
+            .group_by(Category.name)
+            .order_by(func.count(Ticket.id).desc())
+        )
+        if scope:
+            by_cat_stmt = by_cat_stmt.where(and_(*scope))
+        by_cat_rows = (await self.db.execute(by_cat_stmt)).all()
+        by_category = [
+            {"name": (n or "(uncategorized)"), "total": int(t), "open": int(o or 0)}
+            for (n, t, o) in by_cat_rows
+        ]
+
+        # Daily volume last 14 days
+        now = datetime.now(timezone.utc)
+        start = (now - timedelta(days=13)).replace(hour=0, minute=0, second=0, microsecond=0)
+        day_expr = func.date_trunc("day", Ticket.created_at).label("day")
+        daily_stmt = (
+            select(
+                day_expr,
+                func.count(),
+                func.sum(
+                    func.case(
+                        (Ticket.priority == "critical", 1), else_=0,
+                    )
+                ),
+            )
+            .where(Ticket.created_at >= start)
+            .group_by(day_expr)
+            .order_by(day_expr)
+        )
+        if scope:
+            daily_stmt = daily_stmt.where(and_(*scope))
+        daily_rows = (await self.db.execute(daily_stmt)).all()
+        # Build a contiguous series, zero-filling missing days
+        by_day: dict[str, tuple[int, int]] = {
+            (d.date().isoformat() if hasattr(d, 'date') else str(d)[:10]): (int(c), int(cr or 0))
+            for (d, c, cr) in daily_rows
+        }
+        daily_volume: list[dict] = []
+        for i in range(14):
+            day = (start + timedelta(days=i)).date().isoformat()
+            total, critical = by_day.get(day, (0, 0))
+            daily_volume.append({"date": day, "total": total, "critical": critical})
+
+        # Top branches by volume in last 30 days
+        top_branches: list[dict] = []
+        if not scope:
+            since = now - timedelta(days=30)
+            tb_stmt = (
+                select(Branch.code, Branch.name, func.count(Ticket.id))
+                .join(Ticket, Ticket.branch_id == Branch.id)
+                .where(Ticket.created_at >= since)
+                .group_by(Branch.code, Branch.name)
+                .order_by(func.count(Ticket.id).desc())
+                .limit(5)
+            )
+            tb_rows = (await self.db.execute(tb_stmt)).all()
+            top_branches = [
+                {"code": code, "name": name, "count": int(count)}
+                for (code, name, count) in tb_rows
+            ]
+
+        # Average resolution minutes by priority (last 30 days)
+        since = now - timedelta(days=30)
+        avg_res_stmt = (
+            select(
+                Ticket.priority,
+                func.avg(
+                    cast(
+                        (func.extract("epoch", Ticket.resolved_at - Ticket.created_at) / 60.0),
+                        Float,
+                    )
+                ),
+                func.count(),
+            )
+            .where(
+                Ticket.resolved_at.is_not(None),
+                Ticket.resolved_at >= since,
+            )
+            .group_by(Ticket.priority)
+        )
+        if scope:
+            avg_res_stmt = avg_res_stmt.where(and_(*scope))
+        avg_res_rows = (await self.db.execute(avg_res_stmt)).all()
+        avg_resolution_minutes = [
+            {"priority": p, "minutes": round(float(m), 1) if m is not None else None, "n": int(c)}
+            for (p, m, c) in avg_res_rows
+        ]
+
+        return {
+            "by_status": by_status,
+            "by_priority": by_priority,
+            "by_category": by_category,
+            "daily_volume": daily_volume,
+            "top_branches": top_branches,
+            "avg_resolution_minutes": avg_resolution_minutes,
+        }

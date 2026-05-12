@@ -17,6 +17,7 @@ import { api, extractError } from '@/lib/api';
 import { Card } from '@/components/Card';
 import { Badge } from '@/components/Badge';
 import { Modal } from '@/components/Modal';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Skeleton } from '@/components/Skeleton';
 import { useToasts } from '@/components/Toast';
 import { listBranches } from '@/features/tickets/api';
@@ -52,6 +53,7 @@ export function BranchesPage() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<BranchRow | null>(null);
+  const [confirmTarget, setConfirmTarget] = useState<BranchRow | null>(null);
   const [page, setPage] = useState(1);
   const [includeInactive, setIncludeInactive] = useState(false);
   const size = 20;
@@ -190,11 +192,7 @@ export function BranchesPage() {
                         <IconButton
                           title="Deactivate"
                           tone="danger"
-                          onClick={() => {
-                            if (window.confirm(`Deactivate branch ${b.code} – ${b.name}?`)) {
-                              deactivate.mutate(b.id);
-                            }
-                          }}
+                          onClick={() => setConfirmTarget(b)}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </IconButton>
@@ -254,6 +252,22 @@ export function BranchesPage() {
         submitting={update.isPending}
         onSubmit={(v) => editTarget && update.mutate({ id: editTarget.id, body: { ...v, code: undefined } })}
         codeReadOnly
+      />
+
+      <ConfirmDialog
+        open={!!confirmTarget}
+        onClose={() => setConfirmTarget(null)}
+        title={confirmTarget ? `Deactivate ${confirmTarget.code} — ${confirmTarget.name}?` : ''}
+        description="Branches with active tickets keep their references intact; the branch just disappears from the active directory until you restore it."
+        confirmLabel="Deactivate branch"
+        tone="danger"
+        pending={deactivate.isPending}
+        onConfirm={() => {
+          if (confirmTarget) {
+            deactivate.mutate(confirmTarget.id);
+            setConfirmTarget(null);
+          }
+        }}
       />
     </div>
   );

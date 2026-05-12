@@ -22,6 +22,8 @@ export interface TicketFilters {
   q?: string;
   date_from?: string;
   date_to?: string;
+  /** e.g. "-created_at", "priority", "-sla_due_at" */
+  sort?: string;
 }
 
 export async function listTickets(f: TicketFilters = {}) {
@@ -36,6 +38,7 @@ export async function listTickets(f: TicketFilters = {}) {
   if (f.q) params.set('q', f.q);
   if (f.date_from) params.set('date_from', f.date_from);
   if (f.date_to) params.set('date_to', f.date_to);
+  if (f.sort) params.set('sort', f.sort);
 
   const { data } = await api.get<ListEnvelope<TicketSummary>>(`/tickets?${params.toString()}`);
   return { items: data.data, meta: data.meta.pagination };

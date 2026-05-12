@@ -10,7 +10,7 @@ interface Props {
 }
 
 /**
- * Premium SVG progress ring with gradient stroke and inset typography.
+ * SVG progress ring with old-money gradient stroke (sage / brass / claret).
  */
 export function Ring({ value, size = 132, stroke = 12, className, label }: Props) {
   const v = Math.max(0, Math.min(100, value));
@@ -19,25 +19,24 @@ export function Ring({ value, size = 132, stroke = 12, className, label }: Props
   const dash = (v / 100) * c;
   const tone = v >= 80 ? 'good' : v >= 50 ? 'mid' : 'bad';
   const grad = {
-    good: ['#10B981', '#34D399'],
-    mid:  ['#F59E0B', '#FBBF24'],
-    bad:  ['#EF4444', '#F87171'],
+    good: ['#4A7C59', '#6B8E72'],   // sage
+    mid:  ['#B8965A', '#D9C68B'],   // brass
+    bad:  ['#8B2635', '#A55E6E'],   // claret
   }[tone];
 
   return (
     <div className={cn('relative inline-flex flex-col items-center', className)}>
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}
-           className="-rotate-90"
-           style={{ overflow: 'visible' }}>
+           className="-rotate-90" style={{ overflow: 'visible' }}>
         <defs>
           <linearGradient id={`ring-grad-${tone}`} x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%"  stopColor={grad[0]} />
+            <stop offset="0%"   stopColor={grad[0]} />
             <stop offset="100%" stopColor={grad[1]} />
           </linearGradient>
         </defs>
         <circle
           cx={size / 2} cy={size / 2} r={r}
-          stroke="rgba(99,102,241,0.10)" strokeWidth={stroke} fill="none"
+          stroke="rgba(31,58,95,0.10)" strokeWidth={stroke} fill="none"
         />
         <motion.circle
           cx={size / 2} cy={size / 2} r={r}
@@ -53,7 +52,7 @@ export function Ring({ value, size = 132, stroke = 12, className, label }: Props
           {v}<span className="text-sm text-ink-muted ml-0.5">%</span>
         </div>
         {label && (
-          <div className="text-2xs uppercase tracking-wider text-ink-muted mt-0.5">{label}</div>
+          <div className="text-2xs uppercase tracking-[0.18em] text-ink-muted mt-0.5">{label}</div>
         )}
       </div>
     </div>

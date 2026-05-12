@@ -65,9 +65,9 @@ export function LoginPage() {
           className="hidden lg:flex flex-col justify-between glass rounded-4xl p-10 relative overflow-hidden"
         >
           <div className="absolute -top-20 -right-20 h-72 w-72 rounded-full"
-               style={{ background: 'radial-gradient(circle, rgba(99,102,241,0.25), transparent 60%)' }} />
+               style={{ background: 'radial-gradient(circle, rgba(31,58,95,0.18), transparent 60%)' }} />
           <div className="absolute -bottom-32 -left-10 h-72 w-72 rounded-full"
-               style={{ background: 'radial-gradient(circle, rgba(167,139,250,0.18), transparent 60%)' }} />
+               style={{ background: 'radial-gradient(circle, rgba(184,150,90,0.18), transparent 60%)' }} />
 
           <Logo size="md" />
 
@@ -75,8 +75,8 @@ export function LoginPage() {
             <h1 className="text-5xl font-semibold tracking-tight text-ink leading-[1.05]">
               Internal Ticketing
               <br />
-              <span className="bg-clip-text text-transparent" style={{
-                backgroundImage: 'linear-gradient(135deg, #4F46E5 0%, #8B5CF6 60%, #EC4899 100%)',
+              <span className="font-serif italic" style={{
+                color: '#1F3A5F',
               }}>
                 for SUCCESS Bank.
               </span>

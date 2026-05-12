@@ -16,13 +16,16 @@ class CategoryRepository:
         stmt = select(Category).where(Category.is_active.is_(True)).order_by(Category.name)
         return list((await self.db.execute(stmt)).scalars().all())
 
-    async def list(self, *, offset: int, limit: int) -> tuple[list[Category], int]:
-        total = (await self.db.execute(select(func.count()).select_from(Category))).scalar_one()
-        rows = (
-            await self.db.execute(
-                select(Category).order_by(Category.name).offset(offset).limit(limit)
-            )
-        ).scalars().all()
+    async def list(
+        self, *, offset: int, limit: int, include_inactive: bool = False,
+    ) -> tuple[list[Category], int]:
+        stmt = select(Category).order_by(Category.name)
+        count_stmt = select(func.count()).select_from(Category)
+        if not include_inactive:
+            stmt = stmt.where(Category.is_active.is_(True))
+            count_stmt = count_stmt.where(Category.is_active.is_(True))
+        total = (await self.db.execute(count_stmt)).scalar_one()
+        rows = (await self.db.execute(stmt.offset(offset).limit(limit))).scalars().all()
         return list(rows), total
 
     async def get(self, cid: uuid.UUID) -> Category | None:

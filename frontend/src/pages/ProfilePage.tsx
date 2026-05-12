@@ -4,13 +4,14 @@ import { useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { motion } from 'framer-motion';
-import { Eye, EyeOff, KeyRound, Mail, ShieldCheck, Shield, Building2 } from 'lucide-react';
+import { Eye, EyeOff, KeyRound, Mail, ShieldCheck, Shield, Building2, Smartphone, QrCode, Copy as CopyIcon } from 'lucide-react';
 
 import { api, extractError } from '@/lib/api';
 import { Card } from '@/components/Card';
 import { Badge } from '@/components/Badge';
 import { useToasts } from '@/components/Toast';
 import { useAuth } from '@/store/auth';
+import { mfaDisable, mfaEnroll, mfaVerify } from '@/features/auth/mfa';
 
 const schema = z
   .object({
@@ -89,7 +90,7 @@ export function ProfilePage() {
         <div className="flex items-start gap-4">
           <span
             className="h-14 w-14 rounded-pill grid place-items-center text-white font-semibold text-lg shadow-glow"
-            style={{ background: 'linear-gradient(135deg, #4F46E5, #6366F1, #8B5CF6)' }}
+            style={{ background: 'linear-gradient(135deg, #1F3A5F 0%, #182D49 60%, #0B1929 100%)' }}
           >
             {userInitials(user.full_name)}
           </span>
@@ -185,7 +186,182 @@ export function ProfilePage() {
           </div>
         </form>
       </Card>
+
+      <MfaCard />
     </div>
+  );
+}
+
+function MfaCard() {
+  const { user } = useAuth();
+  const toast = useToasts((s) => s.push);
+  const [enrollment, setEnrollment] = useState<{ secret: string; otpauth_uri: string } | null>(null);
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const enrolled = !!user?.mfa_enabled;
+
+  const start = async () => {
+    setBusy(true);
+    try {
+      const data = await mfaEnroll();
+      setEnrollment(data);
+    } catch (e) {
+      toast({ tone: 'danger', message: extractError(e).message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const verify = async () => {
+    if (!/^\d{6}$/.test(code)) {
+      toast({ tone: 'warning', message: 'Enter the 6-digit code from your authenticator.' });
+      return;
+    }
+    setBusy(true);
+    try {
+      await mfaVerify(code);
+      toast({ tone: 'success', message: 'MFA enabled. Sign out and back in for it to take effect.' });
+      setEnrollment(null);
+      setCode('');
+      // Soft reload to refresh mfa_enabled flag.
+      setTimeout(() => location.reload(), 700);
+    } catch (e) {
+      toast({ tone: 'danger', message: extractError(e).message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const disable = async () => {
+    if (!/^\d{6}$/.test(code)) {
+      toast({ tone: 'warning', message: 'Enter a current 6-digit code to disable MFA.' });
+      return;
+    }
+    setBusy(true);
+    try {
+      await mfaDisable(code);
+      toast({ tone: 'success', message: 'MFA disabled.' });
+      setCode('');
+      setTimeout(() => location.reload(), 700);
+    } catch (e) {
+      toast({ tone: 'danger', message: extractError(e).message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="h-section flex items-center gap-2">
+            <Smartphone className="h-4 w-4 text-brand-600" />
+            Two-factor authentication
+          </h2>
+          <p className="text-sm text-ink-muted mt-1">
+            Add a second factor (TOTP) so a stolen password alone isn't enough.
+          </p>
+        </div>
+        {enrolled
+          ? <Badge tone="success">enabled</Badge>
+          : <Badge tone="neutral">disabled</Badge>}
+      </div>
+
+      {!enrolled && !enrollment && (
+        <div className="mt-5">
+          <button onClick={start} className="btn-primary" disabled={busy}>
+            <QrCode className="h-4 w-4" />
+            {busy ? 'Starting…' : 'Start enrolment'}
+          </button>
+          <p className="text-2xs text-ink-muted mt-3">
+            We'll generate a secret you can scan into Google Authenticator,
+            1Password, Authy or any TOTP app.
+          </p>
+        </div>
+      )}
+
+      {enrollment && (
+        <div className="mt-5 space-y-4">
+          <div className="rounded-2xl bg-brass-soft border border-brass-300 p-4">
+            <div className="text-xs font-semibold uppercase tracking-wider text-brass-600 mb-1">
+              Scan or paste this into your authenticator
+            </div>
+            <div className="mt-2 grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-4 items-start">
+              <a
+                href={enrollment.otpauth_uri}
+                className="rounded-2xl bg-white border border-white/60 p-3 text-2xs font-mono text-brand-700 break-all max-w-xs hover:bg-brand-50 transition-colors"
+                title="otpauth URI"
+              >
+                {enrollment.otpauth_uri}
+              </a>
+              <div className="space-y-2">
+                <div className="text-xs text-ink-muted">Manual secret:</div>
+                <div className="flex items-center gap-2">
+                  <code className="font-mono text-sm text-ink bg-white/80 border border-white/60 rounded-xl px-3 py-2">
+                    {enrollment.secret}
+                  </code>
+                  <button
+                    onClick={() => navigator.clipboard.writeText(enrollment.secret)}
+                    className="btn-secondary"
+                  >
+                    <CopyIcon className="h-4 w-4" /> Copy
+                  </button>
+                </div>
+                <p className="text-2xs text-ink-muted">
+                  Tip: most apps let you tap the long otpauth string and import directly.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+            <div className="flex-1">
+              <span className="label">Enter the 6-digit code shown by your app</span>
+              <input
+                className="input mt-1.5 font-mono tracking-[0.4em] text-center text-lg"
+                placeholder="000000"
+                maxLength={6}
+                inputMode="numeric"
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              />
+            </div>
+            <button onClick={verify} className="btn-primary" disabled={busy || code.length !== 6}>
+              {busy ? 'Verifying…' : 'Verify & enable'}
+            </button>
+            <button onClick={() => { setEnrollment(null); setCode(''); }} className="btn-secondary">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {enrolled && (
+        <div className="mt-5 space-y-3">
+          <p className="text-sm text-ink-muted">
+            MFA is currently active. To disable it, enter a current 6-digit code from your
+            authenticator and confirm.
+          </p>
+          <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+            <div className="flex-1">
+              <span className="label">Current 6-digit code</span>
+              <input
+                className="input mt-1.5 font-mono tracking-[0.4em] text-center text-lg"
+                placeholder="000000"
+                maxLength={6}
+                inputMode="numeric"
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              />
+            </div>
+            <button onClick={disable} className="btn-danger" disabled={busy || code.length !== 6}>
+              {busy ? 'Working…' : 'Disable MFA'}
+            </button>
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }
 

@@ -58,7 +58,7 @@ export function UserMenu() {
         )}
         style={{
           background:
-            'linear-gradient(135deg, #4F46E5 0%, #6366F1 50%, #8B5CF6 100%)',
+            'linear-gradient(135deg, #1F3A5F 0%, #182D49 60%, #0B1929 100%)',
         }}
         aria-label="Open user menu"
         aria-expanded={open}

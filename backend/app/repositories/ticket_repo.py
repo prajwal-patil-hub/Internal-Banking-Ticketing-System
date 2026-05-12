@@ -70,6 +70,14 @@ class TicketRepository:
             stmt = stmt.where(and_(*clauses))
         return stmt
 
+    _SORTABLE = {
+        "created_at": Ticket.created_at,
+        "sla_due_at": Ticket.sla_due_at,
+        "priority":   Ticket.priority,
+        "status":     Ticket.status,
+        "ticket_no":  Ticket.ticket_no,
+    }
+
     async def list(
         self,
         *,
@@ -77,10 +85,29 @@ class TicketRepository:
         offset: int,
         limit: int,
         scoped_branch_id: uuid.UUID | None = None,
+        sort: str | None = None,
     ) -> tuple[list[Ticket], int]:
         base = select(Ticket)
         count_stmt = self._apply(select(func.count()).select_from(Ticket), f, scoped_branch_id=scoped_branch_id)
-        list_stmt = self._apply(base, f, scoped_branch_id=scoped_branch_id).order_by(Ticket.created_at.desc())
+        list_stmt = self._apply(base, f, scoped_branch_id=scoped_branch_id)
+
+        # `sort` is a comma-or-leading-dash field like "-created_at" or
+        # "priority,sla_due_at". Unknown fields are silently ignored.
+        order_cols = []
+        if sort:
+            for part in (s.strip() for s in sort.split(",")):
+                if not part:
+                    continue
+                descending = part.startswith("-")
+                key = part.lstrip("-")
+                col = self._SORTABLE.get(key)
+                if col is None:
+                    continue
+                order_cols.append(col.desc() if descending else col.asc())
+        if not order_cols:
+            order_cols = [Ticket.created_at.desc()]
+        list_stmt = list_stmt.order_by(*order_cols)
+
         total = (await self.db.execute(count_stmt)).scalar_one()
         rows = (await self.db.execute(list_stmt.offset(offset).limit(limit))).scalars().all()
         return list(rows), total
