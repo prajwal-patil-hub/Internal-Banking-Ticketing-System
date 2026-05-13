@@ -6,7 +6,6 @@ import { z } from 'zod';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { Card } from '@/components/Card';
 import { Button } from '@/components/Button';
-import { Badge } from '@/components/Badge';
 import { cn } from '@/lib/cn';
 import { createTicket, getCategories } from '@/features/tickets/api';
 import { categorizeText } from '@/features/ai/api';
@@ -20,7 +19,7 @@ const schema = z.object({
   description: z.string().min(20, 'Description must be at least 20 characters').max(10000, 'Description too long'),
   priority: z.enum(['critical', 'high', 'medium', 'low'] as const),
   category_id: z.string().optional(),
-  tags: z.array(z.string()).default([]),
+  tags: z.array(z.string()),
 });
 
 type FormValues = z.infer<typeof schema>;

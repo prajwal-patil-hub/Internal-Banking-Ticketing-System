@@ -2,7 +2,6 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { cn } from '@/lib/cn';
 import { sendChatMessage } from '@/features/ai/api';
-import type { ChatMessage } from '@/features/ai/api';
 
 interface DisplayMessage {
   id: string;

@@ -1,7 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { Card } from '@/components/Card';
-import { Badge } from '@/components/Badge';
 import { Button } from '@/components/Button';
 import { TicketCard } from '@/components/TicketCard';
 import { useAuth } from '@/store/auth';
