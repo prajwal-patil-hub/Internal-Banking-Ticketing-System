@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
+import { Lock } from 'lucide-react';
 
 import { Modal } from '@/components/Modal';
 import { Badge } from '@/components/Badge';
+import { Skeleton } from '@/components/Skeleton';
 import { createTicket, listBranches, listCategories, type CreateTicketInput } from '../api';
 import { extractError } from '@/lib/api';
 import { useAuth } from '@/store/auth';
@@ -32,7 +34,7 @@ export function CreateTicketModal({ open, onClose, onCreated }: Props) {
   const branches = useQuery({ queryKey: ['branches'], queryFn: () => listBranches(1, 100), enabled: open });
   const categories = useQuery({ queryKey: ['categories'], queryFn: () => listCategories(), enabled: open });
 
-  const { register, handleSubmit, formState: { isSubmitting }, reset } = useForm<FormValues>({
+  const { register, handleSubmit, formState: { isSubmitting }, reset, setValue } = useForm<FormValues>({
     defaultValues: {
       branch_id: user?.branch_id ?? '',
       category_id: '',
@@ -41,6 +43,21 @@ export function CreateTicketModal({ open, onClose, onCreated }: Props) {
       priority: 'medium',
     },
   });
+
+  // Branch users are pinned to their assigned branch (backend enforces this
+  // too — a mismatch causes a 422). Other roles pick freely.
+  const isLockedBranch = user?.role === 'branch_user' && !!user.branch_id;
+  const userBranch = user?.branch_id
+    ? branches.data?.items.find((b) => b.id === user.branch_id)
+    : undefined;
+
+  // Re-sync the form whenever the modal opens so a stale value from a prior
+  // session can't slip through (e.g. user was reassigned to a new branch).
+  useEffect(() => {
+    if (open && user?.branch_id) {
+      setValue('branch_id', user.branch_id);
+    }
+  }, [open, user?.branch_id, setValue]);
 
   const submit = async (values: FormValues) => {
     setError(null);
@@ -68,12 +85,38 @@ export function CreateTicketModal({ open, onClose, onCreated }: Props) {
       {error && <Badge tone="danger" className="mb-4">{error}</Badge>}
       <form className="flex flex-col gap-4" onSubmit={handleSubmit(submit)}>
         <Field label="Branch">
-          <select className="input" {...register('branch_id')}>
-            <option value="">Select branch…</option>
-            {branches.data?.items.map((b) => (
-              <option key={b.id} value={b.id}>{b.code} — {b.name}</option>
-            ))}
-          </select>
+          {isLockedBranch ? (
+            <>
+              {branches.isLoading ? (
+                <Skeleton className="h-10 w-full" />
+              ) : userBranch ? (
+                <div
+                  className="input flex items-center justify-between bg-canvas-raised/60 cursor-not-allowed select-none"
+                  aria-readonly="true"
+                  title="Branch users can only raise tickets for their own branch"
+                >
+                  <span className="text-ink">
+                    <span className="font-mono text-2xs text-ink-muted mr-2">{userBranch.code}</span>
+                    {userBranch.name}
+                  </span>
+                  <span className="inline-flex items-center gap-1 text-2xs uppercase tracking-wider text-ink-muted">
+                    <Lock className="h-3 w-3" />
+                    Your branch
+                  </span>
+                </div>
+              ) : (
+                <Badge tone="danger">Your branch is no longer active. Contact an admin.</Badge>
+              )}
+              <input type="hidden" {...register('branch_id')} />
+            </>
+          ) : (
+            <select className="input" {...register('branch_id')}>
+              <option value="">Select branch…</option>
+              {branches.data?.items.map((b) => (
+                <option key={b.id} value={b.id}>{b.code} — {b.name}</option>
+              ))}
+            </select>
+          )}
         </Field>
 
         <Field label="Category">
@@ -108,7 +151,11 @@ export function CreateTicketModal({ open, onClose, onCreated }: Props) {
 
         <div className="flex justify-end gap-2 mt-2">
           <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn-primary" disabled={isSubmitting}>
+          <button
+            type="submit"
+            className="btn-primary"
+            disabled={isSubmitting || (isLockedBranch && branches.isLoading)}
+          >
             {isSubmitting ? 'Creating…' : 'Create ticket'}
           </button>
         </div>
