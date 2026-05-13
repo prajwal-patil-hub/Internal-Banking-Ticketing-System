@@ -6,6 +6,10 @@ import { DashboardPage } from '@/pages/DashboardPage';
 import { LoginPage } from '@/pages/LoginPage';
 import { ForbiddenPage } from '@/pages/ForbiddenPage';
 import { PlaceholderPage } from '@/pages/PlaceholderPage';
+import { TicketsPage } from '@/pages/TicketsPage';
+import { TicketDetailPage } from '@/pages/TicketDetailPage';
+import { CreateTicketPage } from '@/pages/CreateTicketPage';
+import { AuditPage } from '@/pages/AuditPage';
 
 export default function App() {
   return (
@@ -20,8 +24,10 @@ export default function App() {
         }
       >
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        <Route path="/dashboard"   element={<DashboardPage />} />
-        <Route path="/tickets"     element={<PlaceholderPage title="Tickets"      phase="P2" />} />
+        <Route path="/dashboard"      element={<DashboardPage />} />
+        <Route path="/tickets"        element={<TicketsPage />} />
+        <Route path="/tickets/new"    element={<CreateTicketPage />} />
+        <Route path="/tickets/:id"    element={<TicketDetailPage />} />
         <Route
           path="/sla"
           element={
@@ -58,7 +64,7 @@ export default function App() {
           path="/audit"
           element={
             <RequireAuth roles={['admin', 'auditor']}>
-              <PlaceholderPage title="Audit Log" phase="P6" />
+              <AuditPage />
             </RequireAuth>
           }
         />

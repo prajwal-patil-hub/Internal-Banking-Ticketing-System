@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 
 import { Logo } from '@/components/Logo';
+import { AIChatWidget } from '@/components/AIChatWidget';
 import { useTheme } from '@/store/theme';
 import { cn } from '@/lib/cn';
 import { useAuth, type Role } from '@/store/auth';
@@ -11,12 +12,13 @@ interface NavItem {
   label: string;
   icon: string;
   roles?: Role[];
+  badge?: string;
 }
 
 // Server-side checks are authoritative; this just hides nav items the user
 // has no right to use.
 const NAV: NavItem[] = [
-  { to: '/dashboard',    label: 'Dashboard',    icon: 'M3 12l9-9 9 9M5 10v10h14V10' },
+  { to: '/dashboard',    label: 'Dashboard',    icon: 'M3 12l9-9 9 9M5 10v10h14V10', badge: 'AI' },
   { to: '/tickets',      label: 'Tickets',      icon: 'M4 7h16M4 12h16M4 17h10' },
   { to: '/sla',          label: 'SLA Monitor',  icon: 'M12 8v4l3 2M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
     roles: ['admin', 'supervisor'] },
@@ -77,6 +79,11 @@ export function AppLayout() {
             >
               <Icon d={item.icon} />
               <span className="flex-1">{item.label}</span>
+              {item.badge && (
+                <span className="inline-flex items-center justify-center px-1.5 py-0.5 rounded-md bg-accent-500/30 text-accent-100 text-[10px] font-semibold tracking-wide leading-none">
+                  {item.badge}
+                </span>
+              )}
             </NavLink>
           ))}
         </nav>
@@ -98,7 +105,10 @@ export function AppLayout() {
           </div>
 
           <div className="flex items-center gap-3">
-            <input className="input w-72" placeholder="Search tickets, branches, users…" />
+            <input
+              className="input w-72"
+              placeholder="Search tickets, knowledge base, users…"
+            />
             <div className="flex items-center gap-2">
               <div className="text-right text-xs hidden md:block">
                 <div className="font-medium leading-tight">{user?.full_name}</div>
@@ -116,6 +126,9 @@ export function AppLayout() {
           <Outlet />
         </main>
       </div>
+
+      {/* Floating AI chat widget */}
+      <AIChatWidget />
     </div>
   );
 }

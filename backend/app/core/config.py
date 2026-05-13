@@ -63,6 +63,30 @@ class Settings(BaseSettings):
     SLA_MEDIUM_MINUTES: int = 1440
     SLA_LOW_MINUTES: int = 4320
 
+    # --- AI ---
+    ANTHROPIC_API_KEY: str = ""
+    AI_ENABLED: bool = True
+    AI_MAX_TOKENS: int = 1024
+    AI_CONFIDENCE_THRESHOLD: float = 0.7
+
+    # --- Email Ingestion (IMAP) ---
+    IMAP_ENABLED: bool = False
+    IMAP_HOST: str = "localhost"
+    IMAP_PORT: int = 993
+    IMAP_USER: str = ""
+    IMAP_PASSWORD: str = ""
+    IMAP_MAILBOX: str = "INBOX"
+    IMAP_USE_SSL: bool = True
+    SUPPORT_EMAIL: str = "support@successbank.local"
+
+    # --- Notification ---
+    NOTIFICATION_EMAIL_ENABLED: bool = True
+    MANAGER_EMAILS: str = ""  # comma-separated manager emails for SLA breach notifications
+
+    @property
+    def manager_email_list(self) -> list[str]:
+        return [e.strip() for e in self.MANAGER_EMAILS.split(",") if e.strip()]
+
     @field_validator("CORS_ORIGINS")
     @classmethod
     def _strip_origins(cls, v: str) -> str:
