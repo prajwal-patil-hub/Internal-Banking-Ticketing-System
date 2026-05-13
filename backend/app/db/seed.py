@@ -29,6 +29,7 @@ from app.models.role import RolePermission
 from app.models.sla import SLAPolicy, SLATracking
 from app.models.ticket import Ticket
 from app.models.user import User
+from app.utils.ticket_number import next_ticket_number
 
 log = get_logger("seed")
 
@@ -205,11 +206,14 @@ async def main() -> None:
                 ("UPI mandate creation",    "Customer mandates failing.",          "high",     "Cards & Payments"),
                 ("Printer ribbon order",    "Pass-book printer needs ribbon.",     "low",      "HR / Admin"),
             ]
-            for i, (title, desc, prio, cat) in enumerate(samples):
+            for title, desc, prio, cat in samples:
                 resolution = next(r for p, _, r in SLA_DEFAULTS if p == prio)
                 due_at = now + timedelta(minutes=resolution)
+                # Allocate from the same Postgres sequence the API uses so
+                # the first user-created ticket can't collide with seeds.
+                ticket_no = await next_ticket_number(session)
                 t = Ticket(
-                    ticket_no=f"TKT-{now.year}-{i + 1:06d}",
+                    ticket_no=ticket_no,
                     branch_id=branches_by_code["BR001"].id,
                     raised_by=users_by_email["branch@successbank.local"].id,
                     category_id=categories_by_name[cat].id,

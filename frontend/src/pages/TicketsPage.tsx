@@ -79,7 +79,7 @@ export function TicketsPage() {
   const [openCreate, setOpenCreate] = useState(false);
 
   const { hasRole } = useAuth();
-  const canCreate = hasRole('branch_user');
+  const canCreate = hasRole('branch_user', 'admin', 'supervisor', 'agent');
 
   useEffect(() => {
     const next = new URLSearchParams();
@@ -145,23 +145,23 @@ export function TicketsPage() {
           <p className="text-sm text-ink-muted mt-1">All tickets visible to your role.</p>
           <div className="hairline-brass mt-3 max-w-xs" />
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2 min-w-0">
           <button
             onClick={() => setDensity((d) => d === 'compact' ? 'comfortable' : 'compact')}
             className="btn-secondary"
             title={`Density: ${density}`}
           >
             {density === 'compact' ? <LayoutGrid className="h-4 w-4" /> : <Rows3 className="h-4 w-4" />}
-            {density === 'compact' ? 'Comfortable' : 'Compact'}
+            <span className="hidden sm:inline">{density === 'compact' ? 'Comfortable' : 'Compact'}</span>
           </button>
-          <button onClick={() => refetch()} className="btn-secondary">
-            <RefreshCw className="h-4 w-4" /> Refresh
+          <button onClick={() => refetch()} className="btn-secondary" title="Refresh">
+            <RefreshCw className="h-4 w-4" /> <span className="hidden sm:inline">Refresh</span>
           </button>
-          <button onClick={downloadCsv} className="btn-secondary">
-            <Download className="h-4 w-4" /> CSV
+          <button onClick={downloadCsv} className="btn-secondary" title="Export CSV">
+            <Download className="h-4 w-4" /> <span className="hidden sm:inline">CSV</span>
           </button>
           {canCreate && (
-            <button onClick={() => setOpenCreate(true)} className="btn-primary">
+            <button onClick={() => setOpenCreate(true)} className="btn-primary order-first sm:order-none">
               <Plus className="h-4 w-4" /> New ticket
             </button>
           )}

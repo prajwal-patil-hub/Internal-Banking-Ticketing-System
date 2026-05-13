@@ -61,6 +61,7 @@ ROLE_PERMISSIONS: dict[Role, set[Permission]] = {
         Permission.TICKET_REOPEN,
     },
     Role.AGENT: {
+        Permission.TICKET_CREATE,
         Permission.TICKET_READ_ANY,
         Permission.TICKET_UPDATE,
         Permission.TICKET_TRANSITION,
@@ -71,6 +72,7 @@ ROLE_PERMISSIONS: dict[Role, set[Permission]] = {
         Permission.TICKET_ESCALATE,
     },
     Role.ADMIN: {
+        Permission.TICKET_CREATE,
         Permission.TICKET_READ_ANY,
         Permission.TICKET_UPDATE,
         Permission.TICKET_ASSIGN,
@@ -85,6 +87,7 @@ ROLE_PERMISSIONS: dict[Role, set[Permission]] = {
         Permission.SLA_MANAGE,
     },
     Role.SUPERVISOR: {
+        Permission.TICKET_CREATE,
         Permission.TICKET_READ_ANY,
         Permission.TICKET_ASSIGN,
         Permission.TICKET_TRANSITION,
