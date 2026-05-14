@@ -51,10 +51,10 @@ class EscalationRule(UUIDPKMixin, TimestampMixin, Base):
     # Minimum priority level that triggers this rule (e.g. "high" = high + critical)
     priority_threshold: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
-    escalate_to_user: Mapped["User | None"] = relationship(  # type: ignore[name-defined]
+    escalate_to_user: Mapped[User | None] = relationship(  # type: ignore[name-defined]  # noqa: F821
         foreign_keys=[escalate_to_user_id], lazy="selectin"
     )
-    category: Mapped["TicketCategory | None"] = relationship(  # type: ignore[name-defined]
+    category: Mapped[TicketCategory | None] = relationship(  # type: ignore[name-defined]  # noqa: F821
         foreign_keys=[category_id], lazy="selectin"
     )
 
@@ -95,12 +95,12 @@ class EscalationEvent(UUIDPKMixin, Base):
         DateTime(timezone=True), nullable=True
     )
 
-    rule: Mapped["EscalationRule | None"] = relationship(
+    rule: Mapped[EscalationRule | None] = relationship(
         foreign_keys=[rule_id], lazy="selectin"
     )
-    escalated_to: Mapped["User | None"] = relationship(  # type: ignore[name-defined]
+    escalated_to: Mapped[User | None] = relationship(  # type: ignore[name-defined]  # noqa: F821
         foreign_keys=[escalated_to_id], lazy="selectin"
     )
-    escalated_by: Mapped["User | None"] = relationship(  # type: ignore[name-defined]
+    escalated_by: Mapped[User | None] = relationship(  # type: ignore[name-defined]  # noqa: F821
         foreign_keys=[escalated_by_id], lazy="selectin"
     )

@@ -9,8 +9,6 @@ Algorithm (in priority order):
 
 from __future__ import annotations
 
-import uuid
-
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 

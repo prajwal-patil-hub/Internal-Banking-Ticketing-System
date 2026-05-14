@@ -10,9 +10,9 @@ Business rules:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import and_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -102,7 +102,7 @@ class SLAService:
             priority=ticket.priority if isinstance(ticket.priority, str) else ticket.priority.value,
         )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         base_time: datetime = ticket.created_at if ticket.created_at.tzinfo else now
 
         if policy:
@@ -160,7 +160,7 @@ class SLAService:
         Marks ticket.sla_breached = True and SLATracking breach flags for any
         newly breached tickets. Returns the list of newly breached Ticket objects.
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         stmt = (
             select(Ticket)
             .where(
@@ -211,7 +211,7 @@ class SLAService:
             log.debug("sla.already_paused", ticket_id=str(ticket_id))
             return
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         ticket.sla_paused_at = now
 
         # Also record in tracking row
@@ -234,7 +234,7 @@ class SLAService:
             log.debug("sla.not_paused", ticket_id=str(ticket_id))
             return
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         paused_duration = now - ticket.sla_paused_at
 
         # Extend deadlines by paused duration
@@ -270,7 +270,7 @@ class SLAService:
 
     async def get_sla_summary(self) -> dict:
         """Return aggregated SLA compliance statistics across all open tickets."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         open_stmt = select(Ticket).where(Ticket.status.in_(_OPEN_STATUSES))
         open_tickets = list((await self.db.execute(open_stmt)).scalars().all())

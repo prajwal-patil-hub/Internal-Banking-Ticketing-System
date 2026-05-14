@@ -47,9 +47,9 @@ class TicketComment(UUIDPKMixin, TimestampMixin, Base):
     )
     ai_generated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
-    ticket: Mapped["Ticket"] = relationship(  # type: ignore[name-defined]
+    ticket: Mapped[Ticket] = relationship(  # type: ignore[name-defined]  # noqa: F821
         back_populates="comments", lazy="selectin"
     )
-    author: Mapped["User | None"] = relationship(  # type: ignore[name-defined]
+    author: Mapped[User | None] = relationship(  # type: ignore[name-defined]  # noqa: F821
         foreign_keys=[author_id], lazy="selectin"
     )

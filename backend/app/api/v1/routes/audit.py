@@ -17,7 +17,7 @@ from app.api.v1.deps import get_current_user, get_session, require_roles
 from app.core.logging import get_logger
 from app.models.audit import AuditAction, AuditLog
 from app.models.user import User
-from app.schemas.envelope import ok, paginated
+from app.schemas.envelope import paginated
 
 log = get_logger(__name__)
 

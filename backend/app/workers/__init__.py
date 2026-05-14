@@ -9,7 +9,7 @@ from app.workers.sla_worker import setup_sla_worker, shutdown_sla_worker
 
 __all__ = [
     "setup_email_worker",
-    "shutdown_email_worker",
     "setup_sla_worker",
+    "shutdown_email_worker",
     "shutdown_sla_worker",
 ]

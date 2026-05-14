@@ -9,6 +9,7 @@ Branch users see only their own tickets. Agents and admins can see all.
 from __future__ import annotations
 
 import uuid
+from datetime import UTC
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request, status
@@ -20,7 +21,7 @@ from app.core.exceptions import AuthorizationError, NotFoundError, ValidationErr
 from app.core.logging import get_logger
 from app.models.audit import AuditAction, AuditLog
 from app.models.comment import CommentSource, TicketComment
-from app.models.ticket import Ticket, TicketCategory, TicketStatus
+from app.models.ticket import Ticket, TicketStatus
 from app.models.user import User
 from app.schemas.envelope import ok, paginated
 
@@ -246,7 +247,6 @@ async def create_ticket(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> dict:
-    from datetime import datetime, timezone
     from app.models.ticket import TicketPriority, TicketSource, TicketStatus
 
     title = payload.get("title", "").strip()
@@ -433,7 +433,7 @@ async def transition_status(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> dict:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     ticket = await _get_ticket_or_404(ticket_id, db, current_user)
 
@@ -449,7 +449,7 @@ async def transition_status(
     if _is_branch_user(current_user) and new_status not in {TicketStatus.CLOSED, TicketStatus.REOPENED}:
         raise AuthorizationError("Branch users may only close or reopen tickets.")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     old_status = ticket.status
     ticket.status = new_status
 
@@ -583,13 +583,13 @@ async def pause_sla(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> dict:
-    from datetime import datetime, timezone
+    from datetime import datetime
     ticket = await _get_ticket_or_404(ticket_id, db, current_user)
 
     if ticket.sla_paused_at is not None:
         raise ValidationError("SLA is already paused for this ticket.")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     ticket.sla_paused_at = now
 
     await _record_audit(
@@ -618,13 +618,13 @@ async def resume_sla(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> dict:
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime
     ticket = await _get_ticket_or_404(ticket_id, db, current_user)
 
     if ticket.sla_paused_at is None:
         raise ValidationError("SLA is not currently paused for this ticket.")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     paused_duration = now - ticket.sla_paused_at
 
     # Extend due dates by the paused duration
@@ -665,7 +665,7 @@ async def list_comments(
 
     stmt = select(TicketComment).where(TicketComment.ticket_id == ticket.id)
 
-    # Branch users cannot see internal comments
+    # Branch users never see internal comments; agents see them when include_internal=true
     if _is_branch_user(current_user) or not include_internal:
         stmt = stmt.where(TicketComment.is_internal == False)  # noqa: E712
 
@@ -707,8 +707,8 @@ async def add_comment(
 
     # Record first response time
     if not ticket.first_response_at and not _is_branch_user(current_user):
-        from datetime import datetime, timezone
-        ticket.first_response_at = datetime.now(timezone.utc)
+        from datetime import datetime
+        ticket.first_response_at = datetime.now(UTC)
 
     await _record_audit(
         db,

@@ -13,7 +13,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.ticket import TicketPriority, TicketSource, TicketStatus
 
-
 # ---------------------------------------------------------------------------
 # Category / SubCategory
 # ---------------------------------------------------------------------------

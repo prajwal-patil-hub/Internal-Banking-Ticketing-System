@@ -22,7 +22,7 @@ class Role(UUIDPKMixin, TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     description: Mapped[str] = mapped_column(String(255), default="")
 
-    permissions: Mapped[list["Permission"]] = relationship(
+    permissions: Mapped[list[Permission]] = relationship(
         secondary="role_permissions",
         back_populates="roles",
         lazy="selectin",
@@ -35,7 +35,7 @@ class Permission(UUIDPKMixin, TimestampMixin, Base):
     code: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
     description: Mapped[str] = mapped_column(String(255), default="")
 
-    roles: Mapped[list["Role"]] = relationship(
+    roles: Mapped[list[Role]] = relationship(
         secondary="role_permissions",
         back_populates="permissions",
         lazy="selectin",

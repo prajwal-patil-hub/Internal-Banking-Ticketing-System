@@ -27,7 +27,7 @@ async def poll_emails_job() -> None:
     from app.db.session import get_db
 
     try:
-        async for db in get_db():
+        async for _db in get_db():
             try:
                 # Import here to avoid circular imports at module load time.
                 # EmailService and InboundEmail will be implemented in a later phase.
@@ -46,9 +46,9 @@ async def poll_emails_job() -> None:
 
                 log.info("email_poll_completed", processed=processed_count)
 
-            except Exception:  # noqa: BLE001
+            except Exception:
                 log.exception("email_poll_error")
-    except Exception:  # noqa: BLE001
+    except Exception:
         log.exception("email_poll_db_error")
 
 

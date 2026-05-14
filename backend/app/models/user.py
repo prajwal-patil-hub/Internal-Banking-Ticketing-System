@@ -44,4 +44,4 @@ class User(UUIDPKMixin, TimestampMixin, Base):
     failed_login_count: Mapped[int] = mapped_column(default=0, nullable=False)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    role: Mapped["Role"] = relationship(lazy="selectin")  # type: ignore[name-defined]
+    role: Mapped[Role] = relationship(lazy="selectin")  # type: ignore[name-defined]

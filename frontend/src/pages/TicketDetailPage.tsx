@@ -214,7 +214,7 @@ export function TicketDetailPage() {
     next_actions: string[];
   } | null>(null);
 
-  const isAgent = user?.role === 'admin' || user?.role === 'agent' || user?.role === 'supervisor';
+  const isAgent = ['admin', 'agent', 'supervisor', 'auditor'].includes(user?.role ?? '');
 
   const ticketQuery = useQuery({
     queryKey: ['tickets', id],
@@ -224,8 +224,8 @@ export function TicketDetailPage() {
   });
 
   const commentsQuery = useQuery({
-    queryKey: ['tickets', id, 'comments'],
-    queryFn: () => getComments(id!),
+    queryKey: ['tickets', id, 'comments', isAgent],
+    queryFn: () => getComments(id!, isAgent),
     enabled: !!id,
     staleTime: STALE,
   });

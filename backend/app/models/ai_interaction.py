@@ -46,7 +46,7 @@ class ChatSession(UUIDPKMixin, TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    messages: Mapped[list["ChatMessage"]] = relationship(
+    messages: Mapped[list[ChatMessage]] = relationship(
         back_populates="session",
         lazy="selectin",
         cascade="all, delete-orphan",
@@ -74,7 +74,7 @@ class ChatMessage(UUIDPKMixin, TimestampMixin, Base):
     input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    session: Mapped["ChatSession"] = relationship(
+    session: Mapped[ChatSession] = relationship(
         back_populates="messages", lazy="selectin"
     )
 

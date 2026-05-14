@@ -21,7 +21,7 @@ import email
 import imaplib
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from email.header import decode_header as _decode_header
 from email.message import Message
 from typing import Any
@@ -122,9 +122,9 @@ def _parse_raw_email(raw_bytes: bytes) -> dict[str, Any]:
     try:
         import email.utils as _eu
         parsed_date = _eu.parsedate_to_datetime(date_str)
-        received_at: datetime = parsed_date.astimezone(timezone.utc)
+        received_at: datetime = parsed_date.astimezone(UTC)
     except Exception:
-        received_at = datetime.now(timezone.utc)
+        received_at = datetime.now(UTC)
 
     # SPF / DKIM (added by MTA as headers)
     spf_result = msg.get("Received-SPF", "").lower()
@@ -215,7 +215,7 @@ class EmailService:
             subject=raw_email_data.get("subject") or None,
             body_text=raw_email_data.get("body_text"),
             body_html=raw_email_data.get("body_html"),
-            received_at=raw_email_data.get("received_at", datetime.now(timezone.utc)),
+            received_at=raw_email_data.get("received_at", datetime.now(UTC)),
             status=EmailStatus.PENDING.value,  # type: ignore[assignment]
             is_spam=is_spam,
             spam_score=spam_score,
@@ -241,7 +241,7 @@ class EmailService:
         try:
             await self._route_email(record, raw_email_data)
             record.status = EmailStatus.PROCESSED.value  # type: ignore[assignment]
-            record.processed_at = datetime.now(timezone.utc)
+            record.processed_at = datetime.now(UTC)
         except Exception as exc:
             record.status = EmailStatus.FAILED.value  # type: ignore[assignment]
             record.processing_error = str(exc)[:500]

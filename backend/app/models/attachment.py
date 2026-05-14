@@ -55,9 +55,9 @@ class Attachment(UUIDPKMixin, TimestampMixin, Base):
     document_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     # Relationships
-    ticket: Mapped["Ticket"] = relationship(  # type: ignore[name-defined]
+    ticket: Mapped[Ticket] = relationship(  # type: ignore[name-defined]  # noqa: F821
         back_populates="attachments", lazy="selectin"
     )
-    uploader: Mapped["User | None"] = relationship(  # type: ignore[name-defined]
+    uploader: Mapped[User | None] = relationship(  # type: ignore[name-defined]  # noqa: F821
         foreign_keys=[uploader_id], lazy="selectin"
     )

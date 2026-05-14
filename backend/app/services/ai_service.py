@@ -10,20 +10,18 @@ and replay/debugging.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import time
 import uuid
-from datetime import datetime, timezone
 from typing import Any
 
 import anthropic
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.ai_interaction import AIInteractionLog
 from app.schemas.ai import AICategorizationResult, AIEmailExtraction, AIResolutionSuggestion
-from sqlalchemy.ext.asyncio import AsyncSession
 
 log = get_logger(__name__)
 
@@ -93,10 +91,9 @@ class AIService:
         """Persist an AIInteractionLog row for every API call."""
         actor_uuid: uuid.UUID | None = None
         if self.actor_id:
-            try:
+            import contextlib
+            with contextlib.suppress(ValueError):
                 actor_uuid = uuid.UUID(self.actor_id)
-            except ValueError:
-                pass
 
         entry = AIInteractionLog(
             interaction_type=action_type,

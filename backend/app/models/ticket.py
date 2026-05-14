@@ -63,7 +63,7 @@ class TicketCategory(UUIDPKMixin, TimestampMixin, Base):
     description: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
-    subcategories: Mapped[list["TicketSubCategory"]] = relationship(
+    subcategories: Mapped[list[TicketSubCategory]] = relationship(
         back_populates="category", lazy="selectin"
     )
 
@@ -82,7 +82,7 @@ class TicketSubCategory(UUIDPKMixin, TimestampMixin, Base):
     description: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
-    category: Mapped["TicketCategory"] = relationship(
+    category: Mapped[TicketCategory] = relationship(
         back_populates="subcategories", lazy="selectin"
     )
 
@@ -215,24 +215,24 @@ class Ticket(UUIDPKMixin, TimestampMixin, Base):
     internal_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Relationships
-    category: Mapped["TicketCategory | None"] = relationship(
+    category: Mapped[TicketCategory | None] = relationship(
         foreign_keys=[category_id], lazy="selectin"
     )
-    subcategory: Mapped["TicketSubCategory | None"] = relationship(
+    subcategory: Mapped[TicketSubCategory | None] = relationship(
         foreign_keys=[subcategory_id], lazy="selectin"
     )
-    reporter: Mapped["User"] = relationship(  # type: ignore[name-defined]
+    reporter: Mapped[User] = relationship(  # type: ignore[name-defined]  # noqa: F821
         foreign_keys=[reporter_id], lazy="selectin"
     )
-    assignee: Mapped["User | None"] = relationship(  # type: ignore[name-defined]
+    assignee: Mapped[User | None] = relationship(  # type: ignore[name-defined]  # noqa: F821
         foreign_keys=[assignee_id], lazy="selectin"
     )
-    comments: Mapped[list["TicketComment"]] = relationship(  # type: ignore[name-defined]
+    comments: Mapped[list[TicketComment]] = relationship(  # type: ignore[name-defined]  # noqa: F821
         back_populates="ticket", lazy="selectin", cascade="all, delete-orphan"
     )
-    attachments: Mapped[list["Attachment"]] = relationship(  # type: ignore[name-defined]
+    attachments: Mapped[list[Attachment]] = relationship(  # type: ignore[name-defined]  # noqa: F821
         back_populates="ticket", lazy="selectin", cascade="all, delete-orphan"
     )
-    duplicate_of: Mapped["Ticket | None"] = relationship(
+    duplicate_of: Mapped[Ticket | None] = relationship(
         foreign_keys=[duplicate_of_id], remote_side="Ticket.id", lazy="selectin"
     )

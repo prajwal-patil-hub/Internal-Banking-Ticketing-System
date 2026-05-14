@@ -9,7 +9,7 @@ Agents/admins/supervisors see all data. Branch users see branch-scoped data.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy import case, func, select
@@ -18,7 +18,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.deps import get_current_user, get_session, require_roles
 from app.core.logging import get_logger
 from app.models.ai_interaction import AIInteractionLog
-from app.models.audit import AuditLog
 from app.models.sla import SLATracking
 from app.models.ticket import Ticket, TicketCategory, TicketPriority, TicketStatus
 from app.models.user import User
@@ -52,7 +51,7 @@ async def get_kpis(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> dict:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     week_start = today_start - timedelta(days=today_start.weekday())
 
@@ -153,7 +152,7 @@ async def get_sla_status(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> dict:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     open_statuses = [
         TicketStatus.NEW, TicketStatus.ACKNOWLEDGED, TicketStatus.ASSIGNED,
         TicketStatus.IN_PROGRESS, TicketStatus.ESCALATED, TicketStatus.REOPENED,
@@ -243,7 +242,7 @@ async def get_category_distribution(
     if days < 1 or days > 365:
         days = 30
 
-    since = datetime.now(timezone.utc) - timedelta(days=days)
+    since = datetime.now(UTC) - timedelta(days=days)
 
     stmt = (
         select(
@@ -366,7 +365,7 @@ async def get_department_load(
 
     return ok({
         "department_load": sorted(department_load, key=lambda x: x["open_tickets"], reverse=True),
-        "as_of": datetime.now(timezone.utc).isoformat(),
+        "as_of": datetime.now(UTC).isoformat(),
     })
 
 
@@ -417,7 +416,7 @@ async def get_ai_metrics(
     if days < 1 or days > 90:
         days = 7
 
-    since = datetime.now(timezone.utc) - timedelta(days=days)
+    since = datetime.now(UTC) - timedelta(days=days)
 
     # Total AI interactions
     total_stmt = select(func.count(AIInteractionLog.id)).where(
@@ -477,5 +476,5 @@ async def get_ai_metrics(
         "total_input_tokens": total_input_tokens,
         "total_output_tokens": total_output_tokens,
         "by_interaction_type": by_type,
-        "as_of": datetime.now(timezone.utc).isoformat(),
+        "as_of": datetime.now(UTC).isoformat(),
     })

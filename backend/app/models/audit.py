@@ -74,6 +74,6 @@ class AuditLog(UUIDPKMixin, Base):
         nullable=False,
     )
 
-    actor: Mapped["User | None"] = relationship(  # type: ignore[name-defined]
+    actor: Mapped[User | None] = relationship(  # type: ignore[name-defined]  # noqa: F821
         foreign_keys=[actor_id], lazy="selectin"
     )

@@ -6,7 +6,7 @@ breach notifications to managers via NotificationService.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -35,7 +35,7 @@ async def check_sla_breaches_job() -> None:
                 from app.models.sla import SLATracking
                 from app.models.ticket import Ticket, TicketStatus
 
-                now = datetime.now(timezone.utc)
+                now = datetime.now(UTC)
 
                 open_statuses = [
                     TicketStatus.NEW,
@@ -110,9 +110,9 @@ async def check_sla_breaches_job() -> None:
                 else:
                     log.warning("sla_breach_no_manager_emails_configured")
 
-            except Exception:  # noqa: BLE001
+            except Exception:
                 log.exception("sla_check_error")
-    except Exception:  # noqa: BLE001
+    except Exception:
         log.exception("sla_check_db_error")
 
 

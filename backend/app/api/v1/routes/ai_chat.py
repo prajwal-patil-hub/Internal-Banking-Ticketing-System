@@ -10,7 +10,7 @@ and cost tracking.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request, status
@@ -126,8 +126,9 @@ async def _generate_ai_response(user_message: str, history: list[dict]) -> tuple
         )
 
     try:
-        import anthropic  # type: ignore[import-untyped]
         import time
+
+        import anthropic  # type: ignore[import-untyped]
 
         client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
 
@@ -143,14 +144,14 @@ async def _generate_ai_response(user_message: str, history: list[dict]) -> tuple
             system=_build_system_prompt(),
             messages=messages,
         )
-        latency_ms = int((time.monotonic() - start) * 1000)
+        _ = int((time.monotonic() - start) * 1000)  # latency captured for future logging
 
         response_text = response.content[0].text if response.content else ""
         input_tokens = response.usage.input_tokens
         output_tokens = response.usage.output_tokens
         return response_text, input_tokens, output_tokens
 
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         log.warning("ai_api_error", error=str(exc))
         return (
             "I'm sorry, I encountered an issue processing your request. Please try again shortly.",
@@ -344,7 +345,7 @@ async def end_session(
         raise NotFoundError("Chat session not found.")
 
     session.is_active = False
-    session.ended_at = datetime.now(timezone.utc)
+    session.ended_at = datetime.now(UTC)
     await db.commit()
 
     log.info("chat_session_ended", session_id=str(session_id), user_id=str(current_user.id))
@@ -397,8 +398,8 @@ async def categorize_text(
         if json_match:
             parsed = json_lib.loads(json_match.group())
             result_data.update(parsed)
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:
+        log.debug("categorize_json_parse_failed", error=str(exc))
 
     await _log_ai_interaction(
         db,
@@ -472,8 +473,8 @@ async def extract_email(
         if json_match:
             parsed = json_lib.loads(json_match.group())
             extracted.update(parsed)
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:
+        log.debug("extract_email_json_parse_failed", error=str(exc))
 
     await _log_ai_interaction(
         db,
