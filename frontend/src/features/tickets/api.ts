@@ -36,6 +36,7 @@ export interface Ticket {
   ai_sentiment: string | null;
   email_from: string | null;
   sla_breached: boolean;
+  sla_paused_at: string | null;
   response_due_at: string | null;
   resolution_due_at: string | null;
   first_response_at: string | null;

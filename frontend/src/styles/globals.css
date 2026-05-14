@@ -2,49 +2,88 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Tokens that need CSS-var form for animations & gradients */
+/* ── Design Tokens ─────────────────────────────────────────────────────────── */
 :root {
-  --brand-grad: linear-gradient(180deg, #4F36DC 0%, #3F2FBE 100%);
-  --accent-grad: linear-gradient(135deg, #B89AFF 0%, #7E4DFF 100%);
+  --brand-grad:    linear-gradient(180deg, #4F36DC 0%, #3F2FBE 100%);
+  --accent-grad:   linear-gradient(135deg, #B89AFF 0%, #7E4DFF 100%);
+  --sidebar-width: 220px;
+  --header-height: 56px;
 }
 
 html, body, #root { height: 100%; }
 
-/* Subtle scrollbar to match enterprise feel */
-::-webkit-scrollbar { width: 10px; height: 10px; }
+/* ── Scrollbar ─────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: rgba(63, 47, 190, 0.25);
+  background: rgba(63, 47, 190, 0.20);
   border-radius: 999px;
 }
-::-webkit-scrollbar-thumb:hover { background: rgba(63, 47, 190, 0.45); }
+::-webkit-scrollbar-thumb:hover { background: rgba(63, 47, 190, 0.40); }
 
+/* ── Filter drawer animation ──────────────────────────────────────────────── */
+.filter-drawer {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 220ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.filter-drawer.open {
+  grid-template-rows: 1fr;
+}
+.filter-drawer > * {
+  overflow: hidden;
+}
+
+/* ── Component layer ──────────────────────────────────────────────────────── */
 @layer components {
+  /* Cards */
   .card {
-    @apply bg-surface rounded-2xl shadow-card p-6;
+    @apply bg-surface rounded-2xl shadow-card p-5;
   }
-  .kpi {
-    @apply card flex flex-col gap-1;
+  .card-sm {
+    @apply bg-surface rounded-xl shadow-card p-4;
   }
+
+  /* Data pill */
   .pill {
-    @apply inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium;
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium;
   }
+
+  /* Buttons */
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 hover:bg-brand-500
-           text-white px-4 py-2 text-sm font-medium shadow-card transition-colors
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg bg-brand-600 hover:bg-brand-500
+           text-white px-3.5 py-1.5 text-sm font-medium shadow-sm transition-colors
            disabled:opacity-50 disabled:cursor-not-allowed;
   }
   .btn-ghost {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-transparent
-           hover:bg-surface-subtle text-slate-700 px-4 py-2 text-sm font-medium;
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg bg-transparent
+           hover:bg-surface-subtle text-slate-700 dark:text-slate-300 px-3.5 py-1.5 text-sm font-medium transition-colors;
   }
+  .btn-outline {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200
+           dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-surface-subtle
+           text-slate-700 dark:text-slate-300 px-3.5 py-1.5 text-sm font-medium transition-colors
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  /* Form inputs */
   .input {
-    @apply w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm
+    @apply w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm
            placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-200
            outline-none transition-colors;
   }
+
+  /* Filter chip */
+  .filter-chip {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-brand-50 text-brand-700
+           dark:bg-brand-900/30 dark:text-brand-300 text-xs font-medium border border-brand-200
+           dark:border-brand-700/40;
+  }
 }
 
-/* Dark mode overrides */
-.dark body { @apply bg-slate-950 text-slate-100; }
-.dark .card { @apply bg-slate-900 shadow-none border border-slate-800; }
-.dark .input { @apply bg-slate-900 border-slate-700 text-slate-100 placeholder:text-slate-500; }
+/* ── Dark mode overrides ─────────────────────────────────────────────────── */
+.dark body       { @apply bg-slate-950 text-slate-100; }
+.dark .card      { @apply bg-slate-900 shadow-none border border-slate-800; }
+.dark .card-sm   { @apply bg-slate-900 shadow-none border border-slate-800; }
+.dark .input     { @apply bg-slate-900 border-slate-700 text-slate-100 placeholder:text-slate-500; }
+.dark .btn-ghost { @apply hover:bg-slate-800; }
