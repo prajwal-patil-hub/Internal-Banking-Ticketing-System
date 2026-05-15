@@ -55,12 +55,12 @@ export async function getDashboardKPIs(): Promise<KPIData> {
 }
 
 export async function getSLAStatus(): Promise<SLAStatus> {
-  const { data } = await api.get('/dashboard/sla');
+  const { data } = await api.get('/dashboard/sla-status');
   return data.data;
 }
 
 export async function getCategoryDistribution(): Promise<Array<{ category: string; count: number; percentage: number }>> {
-  const { data } = await api.get('/dashboard/categories');
+  const { data } = await api.get('/dashboard/category-distribution');
   return data.data;
 }
 
@@ -70,7 +70,7 @@ export async function getDepartmentLoad(): Promise<Array<{
   breached_count: number;
   avg_age_hours: number;
 }>> {
-  const { data } = await api.get('/dashboard/departments');
+  const { data } = await api.get('/dashboard/department-load');
   return data.data;
 }
 
