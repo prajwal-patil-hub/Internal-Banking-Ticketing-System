@@ -21,6 +21,7 @@ from app.api.v1.deps import get_current_user, get_session
 from app.core.config import settings
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.logging import get_logger
+from app.core.rate_limit import rate_limit
 from app.models.ai_interaction import AIInteractionLog, ChatMessage, ChatRole, ChatSession
 from app.models.user import User
 from app.schemas.envelope import ok, paginated
@@ -163,7 +164,12 @@ async def _generate_ai_response(user_message: str, history: list[dict]) -> tuple
 # Routes
 # ---------------------------------------------------------------------------
 
-@router.post("/chat", status_code=status.HTTP_200_OK, summary="Chat with AI assistant")
+@router.post(
+    "/chat",
+    status_code=status.HTTP_200_OK,
+    summary="Chat with AI assistant",
+    dependencies=[Depends(rate_limit(name="ai_chat", times=20, seconds=60, scope="user"))],
+)
 async def chat(
     payload: dict,
     request: Request,
@@ -351,7 +357,11 @@ async def end_session(
     return ok({"session_id": str(session_id), "ended": True})
 
 
-@router.post("/categorize", summary="Categorize text without creating a ticket")
+@router.post(
+    "/categorize",
+    summary="Categorize text without creating a ticket",
+    dependencies=[Depends(rate_limit(name="ai_categorize", times=20, seconds=60, scope="user"))],
+)
 async def categorize_text(
     payload: dict,
     request: Request,
@@ -420,7 +430,11 @@ async def categorize_text(
     })
 
 
-@router.post("/extract-email", summary="Extract ticket data from email text")
+@router.post(
+    "/extract-email",
+    summary="Extract ticket data from email text",
+    dependencies=[Depends(rate_limit(name="ai_extract_email", times=20, seconds=60, scope="user"))],
+)
 async def extract_email(
     payload: dict,
     request: Request,

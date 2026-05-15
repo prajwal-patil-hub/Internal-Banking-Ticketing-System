@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.deps import get_current_user, get_session, require_roles
 from app.core.exceptions import AuthorizationError, NotFoundError, ValidationError
 from app.core.logging import get_logger
+from app.core.rate_limit import rate_limit
 from app.models.audit import AuditAction, AuditLog
 from app.models.comment import CommentSource, TicketComment
 from app.models.ticket import Ticket, TicketCategory, TicketStatus
@@ -239,7 +240,12 @@ async def list_tickets(
     )
 
 
-@router.post("", status_code=status.HTTP_201_CREATED, summary="Create ticket")
+@router.post(
+    "",
+    status_code=status.HTTP_201_CREATED,
+    summary="Create ticket",
+    dependencies=[Depends(rate_limit(name="ticket_create", times=30, seconds=60, scope="user"))],
+)
 async def create_ticket(
     payload: dict,
     request: Request,
