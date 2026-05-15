@@ -48,6 +48,8 @@ logs/
 infra/data/
 *.sqlite
 *.db
+dump.rdb
+appendonly.aof
 
 # ---- Secrets ----
 *.pem
