@@ -13,7 +13,6 @@ import {
   getAIMetrics,
 } from '@/features/dashboard/api';
 import type { KPIData, SLAStatus, AIMetrics } from '@/features/dashboard/api';
-import type { TicketSummary } from '@/features/tickets/api';
 
 const STALE = 30_000;
 
@@ -272,8 +271,8 @@ export function DashboardPage() {
   const recentQuery   = useQuery({ queryKey: ['dashboard', 'recent'],      queryFn: getRecentTickets,       staleTime: STALE, refetchInterval: STALE });
   const aiQuery       = useQuery({ queryKey: ['dashboard', 'ai-metrics'],  queryFn: getAIMetrics,           staleTime: STALE, refetchInterval: STALE });
 
-  const kpis = kpiQuery.data as KPIData | undefined;
-  const recentTickets = (recentQuery.data ?? []) as TicketSummary[];
+  const kpis: KPIData | undefined = kpiQuery.data;
+  const recentTickets = recentQuery.data ?? [];
   const isRefreshing = kpiQuery.isFetching || slaQuery.isFetching;
 
   return (

@@ -1,4 +1,5 @@
 import { api } from '@/lib/api';
+import type { TicketSummary } from '@/features/tickets/api';
 
 export interface KPIData {
   open_tickets: number;
@@ -73,7 +74,7 @@ export async function getDepartmentLoad(): Promise<Array<{
   return data.data;
 }
 
-export async function getRecentTickets(): Promise<unknown[]> {
+export async function getRecentTickets(): Promise<TicketSummary[]> {
   const { data } = await api.get('/dashboard/recent-tickets');
   return data.data;
 }

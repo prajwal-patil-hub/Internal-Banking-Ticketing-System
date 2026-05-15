@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { z } from 'zod';
 
@@ -29,18 +30,14 @@ export function LoginPage() {
     handleSubmit,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
+    resolver: zodResolver(schema),
     defaultValues: { email: '', password: '' },
   });
 
   const onSubmit = async (values: FormValues) => {
     setSubmitError(null);
-    const parsed = schema.safeParse(values);
-    if (!parsed.success) {
-      setSubmitError(parsed.error.issues[0]?.message ?? 'Invalid input.');
-      return;
-    }
     try {
-      const { user, tokens } = await login(parsed.data.email, parsed.data.password);
+      const { user, tokens } = await login(values.email, values.password);
       setSession({
         user,
         accessToken: tokens.access_token,
