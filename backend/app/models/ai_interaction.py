@@ -65,7 +65,11 @@ class ChatMessage(UUIDPKMixin, TimestampMixin, Base):
         nullable=False,
     )
     role: Mapped[ChatRole] = mapped_column(
-        Enum(ChatRole, name="chatrole"),
+        Enum(
+            ChatRole,
+            name="chatrole",
+            values_callable=lambda x: [e.value for e in x],
+        ),
         nullable=False,
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)

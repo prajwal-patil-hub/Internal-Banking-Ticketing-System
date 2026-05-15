@@ -45,7 +45,12 @@ class AuditLog(UUIDPKMixin, Base):
     entity_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
 
     action: Mapped[AuditAction] = mapped_column(
-        Enum(AuditAction, name="auditaction"), nullable=False
+        Enum(
+            AuditAction,
+            name="auditaction",
+            values_callable=lambda x: [e.value for e in x],
+        ),
+        nullable=False,
     )
 
     actor_id: Mapped[uuid.UUID | None] = mapped_column(

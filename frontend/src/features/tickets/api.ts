@@ -116,9 +116,25 @@ export interface PaginatedResponse<T> {
   total_pages: number;
 }
 
+function unwrapPaginated<T>(body: {
+  data: T[];
+  meta?: { pagination?: { page: number; size: number; total: number; pages: number } };
+}): PaginatedResponse<T> {
+  const p = body.meta?.pagination ?? { page: 1, size: 0, total: 0, pages: 0 };
+  return {
+    items: body.data ?? [],
+    total: p.total,
+    page: p.page,
+    page_size: p.size,
+    total_pages: p.pages,
+  };
+}
+
 export async function listTickets(params?: TicketListParams): Promise<PaginatedResponse<TicketSummary>> {
-  const { data } = await api.get('/tickets', { params });
-  return data.data;
+  const { page_size, ...rest } = params ?? {};
+  const apiParams = { ...rest, ...(page_size != null ? { per_page: page_size } : {}) };
+  const { data } = await api.get('/tickets', { params: apiParams });
+  return unwrapPaginated<TicketSummary>(data);
 }
 
 export async function getTicket(id: string): Promise<Ticket> {
@@ -197,6 +213,8 @@ export async function getAuditLog(params?: {
   page?: number;
   page_size?: number;
 }): Promise<PaginatedResponse<AuditEntry>> {
-  const { data } = await api.get('/audit', { params });
-  return data.data;
+  const { page_size, ...rest } = params ?? {};
+  const apiParams = { ...rest, ...(page_size != null ? { per_page: page_size } : {}) };
+  const { data } = await api.get('/audit', { params: apiParams });
+  return unwrapPaginated<AuditEntry>(data);
 }
