@@ -304,13 +304,17 @@ export function CreateTicketPage() {
               <Button
                 type="button"
                 variant="ghost"
-                disabled={!canAIAssist || aiAssistMutation.isPending}
+                size="sm"
+                disabled={!canAIAssist}
+                loading={aiAssistMutation.isPending}
                 onClick={() => aiAssistMutation.mutate()}
-                className="border border-accent-300 dark:border-accent-500/40 text-accent-600 dark:text-accent-400 hover:bg-accent-50 dark:hover:bg-accent-500/10"
+                className="border border-accent-300 dark:border-accent-500/40 text-accent-500 dark:text-accent-300 hover:bg-accent-50 dark:hover:bg-accent-500/10"
+                leftIcon={
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 2a10 10 0 0 1 0 20M12 2a10 10 0 0 0 0 20M12 8v4M12 16h.01" />
+                  </svg>
+                }
               >
-                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 2a10 10 0 0 1 0 20M12 2a10 10 0 0 0 0 20M12 8v4M12 16h.01" />
-                </svg>
                 {aiAssistMutation.isPending ? 'Analyzing…' : 'AI Assist'}
               </Button>
               {!canAIAssist && (
@@ -406,7 +410,8 @@ export function CreateTicketPage() {
           </Button>
           <Button
             type="submit"
-            disabled={isSubmitting || createMutation.isPending}
+            disabled={isSubmitting}
+            loading={createMutation.isPending}
           >
             {createMutation.isPending ? 'Creating…' : 'Create Ticket'}
           </Button>

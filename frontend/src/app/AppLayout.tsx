@@ -59,8 +59,8 @@ export function AppLayout() {
   };
 
   return (
-    <div className="min-h-full grid grid-cols-[260px_1fr] bg-surface-muted dark:bg-slate-950">
-      <aside className="bg-brand-600 text-white px-5 py-6 flex flex-col gap-8 dark:bg-brand-700">
+    <div className="min-h-full grid grid-cols-[260px_1fr] bg-cream-100 dark:bg-ink-900">
+      <aside className="bg-brand-700 text-cream-50 px-5 py-6 flex flex-col gap-8">
         <Logo />
 
         <nav className="flex flex-col gap-1">
@@ -70,17 +70,17 @@ export function AppLayout() {
               to={item.to}
               className={({ isActive }) =>
                 cn(
-                  'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors',
+                  'flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors',
                   isActive
-                    ? 'bg-white text-brand-700 shadow-card'
-                    : 'text-white/85 hover:bg-white/10',
+                    ? 'bg-cream-50 text-brand-700 shadow-card'
+                    : 'text-cream-50/80 hover:bg-cream-50/10',
                 )
               }
             >
               <Icon d={item.icon} />
               <span className="flex-1">{item.label}</span>
               {item.badge && (
-                <span className="inline-flex items-center justify-center px-1.5 py-0.5 rounded-md bg-accent-500/30 text-accent-100 text-[10px] font-semibold tracking-wide leading-none">
+                <span className="inline-flex items-center justify-center px-1.5 py-0.5 rounded bg-accent-400/25 text-accent-100 text-[10px] font-semibold tracking-wide leading-none">
                   {item.badge}
                 </span>
               )}
@@ -88,36 +88,47 @@ export function AppLayout() {
           ))}
         </nav>
 
-        <div className="mt-auto flex items-center justify-between text-white/80 text-xs">
+        <div className="mt-auto flex items-center justify-between text-cream-50/70 text-xs">
           <span>v0.1.0</span>
-          <button onClick={toggle} className="rounded-lg bg-white/10 hover:bg-white/20 px-3 py-1.5">
+          <button
+            onClick={toggle}
+            aria-label="Toggle color theme"
+            className="rounded-md bg-cream-50/10 hover:bg-cream-50/20 px-3 py-1.5 focus-visible:shadow-focus"
+          >
             {theme === 'dark' ? 'Light' : 'Dark'}
           </button>
         </div>
       </aside>
 
       <div className="flex flex-col">
-        <header className="h-16 px-8 flex items-center justify-between border-b border-slate-200/70 bg-white/60 backdrop-blur dark:bg-slate-900/60 dark:border-slate-800">
+        <header className="h-16 px-8 flex items-center justify-between border-b border-cream-200 bg-cream-50/80 backdrop-blur dark:bg-ink-900/80 dark:border-ink-700">
           <div className="flex items-center gap-3">
-            <span className="text-sm text-slate-500 dark:text-slate-400">SUCCESS Bank</span>
-            <span className="text-slate-300">/</span>
-            <span className="text-sm font-medium">Internal Ticketing</span>
+            <span className="text-sm text-ink-500 dark:text-ink-300">SUCCESS Bank</span>
+            <span className="text-ink-300">/</span>
+            <span className="text-sm font-medium text-ink-900 dark:text-ink-50">Internal Ticketing</span>
           </div>
 
           <div className="flex items-center gap-3">
             <input
               className="input w-72"
               placeholder="Search tickets, knowledge base, users…"
+              aria-label="Search"
             />
             <div className="flex items-center gap-2">
               <div className="text-right text-xs hidden md:block">
-                <div className="font-medium leading-tight">{user?.full_name}</div>
-                <div className="text-slate-500 leading-tight capitalize">{user?.role.replace('_', ' ')}</div>
+                <div className="font-medium leading-tight text-ink-900 dark:text-ink-50">{user?.full_name}</div>
+                <div className="text-ink-500 leading-tight capitalize">{user?.role.replace('_', ' ')}</div>
               </div>
-              <div className="h-9 w-9 rounded-full bg-brand-100 flex items-center justify-center text-brand-700 font-semibold">
+              <div className="h-9 w-9 rounded-full bg-brand-100 dark:bg-brand-800 flex items-center justify-center text-brand-700 dark:text-cream-50 font-semibold">
                 {user ? userInitials(user.full_name) : 'SB'}
               </div>
-              <button onClick={onLogout} className="btn-ghost text-xs">Sign out</button>
+              <button
+                onClick={onLogout}
+                className="btn-ghost text-xs"
+                aria-label="Sign out"
+              >
+                Sign out
+              </button>
             </div>
           </div>
         </header>
