@@ -35,4 +35,9 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
 
         response: Response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
+        # Rate-limit headers stashed by the rate_limit dependency get
+        # re-applied here so they reach the client even when an exception
+        # handler builds a fresh response.
+        for k, v in getattr(request.state, "rate_limit_headers", {}).items():
+            response.headers.setdefault(k, v)
         return response

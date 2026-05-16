@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import get_session
+from app.core.rate_limit import rate_limit
 from app.repositories.user_repo import (
     LoginAttemptRepository,
     RefreshTokenRepository,
@@ -33,7 +34,10 @@ def _service(db: AsyncSession) -> AuthService:
     )
 
 
-@router.post("/login")
+@router.post(
+    "/login",
+    dependencies=[Depends(rate_limit(name="auth_login", times=10, seconds=60, scope="ip"))],
+)
 async def login(
     payload: LoginRequest,
     request: Request,
@@ -68,7 +72,10 @@ async def login(
     )
 
 
-@router.post("/refresh")
+@router.post(
+    "/refresh",
+    dependencies=[Depends(rate_limit(name="auth_refresh", times=30, seconds=60, scope="ip"))],
+)
 async def refresh(
     payload: RefreshRequest,
     request: Request,

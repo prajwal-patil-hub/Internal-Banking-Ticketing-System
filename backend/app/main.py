@@ -22,6 +22,7 @@ from app.api.v1.routes import ai_chat, audit, auth, categories, dashboard, healt
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
+from app.core.redis import close_redis, init_redis
 from app.middleware.request_context import RequestContextMiddleware
 from app.workers.email_worker import setup_email_worker, shutdown_email_worker
 from app.workers.sla_worker import setup_sla_worker, shutdown_sla_worker
@@ -34,15 +35,15 @@ async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
     configure_logging()
     log.info("app_starting", env=settings.APP_ENV, name=settings.APP_NAME)
 
-    # Start background workers
+    await init_redis()
     await setup_email_worker(app)
     await setup_sla_worker(app)
 
     yield
 
-    # Graceful shutdown of background workers
     await shutdown_email_worker()
     await shutdown_sla_worker()
+    await close_redis()
     log.info("app_stopped")
 
 

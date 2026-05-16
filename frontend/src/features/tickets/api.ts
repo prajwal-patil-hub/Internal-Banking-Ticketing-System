@@ -116,9 +116,25 @@ export interface PaginatedResponse<T> {
   total_pages: number;
 }
 
+function unwrapPaginated<T>(body: {
+  data: T[];
+  meta?: { pagination?: { page: number; size: number; total: number; pages: number } };
+}): PaginatedResponse<T> {
+  const p = body.meta?.pagination ?? { page: 1, size: 0, total: 0, pages: 0 };
+  return {
+    items: body.data ?? [],
+    total: p.total,
+    page: p.page,
+    page_size: p.size,
+    total_pages: p.pages,
+  };
+}
+
 export async function listTickets(params?: TicketListParams): Promise<PaginatedResponse<TicketSummary>> {
-  const { data } = await api.get('/tickets', { params });
-  return data.data;
+  const { page_size, ...rest } = params ?? {};
+  const apiParams = { ...rest, ...(page_size != null ? { per_page: page_size } : {}) };
+  const { data } = await api.get('/tickets', { params: apiParams });
+  return unwrapPaginated<TicketSummary>(data);
 }
 
 export async function getTicket(id: string): Promise<Ticket> {
@@ -139,14 +155,14 @@ export async function createTicket(payload: TicketCreate): Promise<Ticket> {
 export async function updateTicketStatus(
   id: string,
   status: TicketStatus,
-  comment?: string,
+  reason?: string,
 ): Promise<Ticket> {
-  const { data } = await api.patch(`/tickets/${id}/status`, { status, comment });
+  const { data } = await api.post(`/tickets/${id}/status`, { status, reason });
   return data.data;
 }
 
 export async function assignTicket(id: string, assignee_id: string): Promise<Ticket> {
-  const { data } = await api.patch(`/tickets/${id}/assign`, { assignee_id });
+  const { data } = await api.post(`/tickets/${id}/assign`, { assignee_id });
   return data.data;
 }
 
@@ -170,22 +186,22 @@ export async function getCategories(): Promise<Category[]> {
 }
 
 export async function aiSummarize(ticketId: string): Promise<{ summary: string; sentiment: string; risk_score: number }> {
-  const { data } = await api.post(`/tickets/${ticketId}/ai/summarize`);
+  const { data } = await api.post(`/tickets/${ticketId}/ai-summarize`);
   return data.data;
 }
 
 export async function aiSuggest(ticketId: string): Promise<{ suggestions: string[]; next_actions: string[] }> {
-  const { data } = await api.post(`/tickets/${ticketId}/ai/suggest`);
+  const { data } = await api.post(`/tickets/${ticketId}/ai-suggest`);
   return data.data;
 }
 
-export async function pauseSLA(ticketId: string, reason?: string): Promise<Ticket> {
-  const { data } = await api.post(`/tickets/${ticketId}/sla/pause`, { reason });
+export async function pauseSLA(ticketId: string, _reason?: string): Promise<Ticket> {
+  const { data } = await api.post(`/tickets/${ticketId}/pause-sla`);
   return data.data;
 }
 
 export async function resumeSLA(ticketId: string): Promise<Ticket> {
-  const { data } = await api.post(`/tickets/${ticketId}/sla/resume`);
+  const { data } = await api.post(`/tickets/${ticketId}/resume-sla`);
   return data.data;
 }
 
@@ -197,6 +213,8 @@ export async function getAuditLog(params?: {
   page?: number;
   page_size?: number;
 }): Promise<PaginatedResponse<AuditEntry>> {
-  const { data } = await api.get('/audit', { params });
-  return data.data;
+  const { page_size, ...rest } = params ?? {};
+  const apiParams = { ...rest, ...(page_size != null ? { per_page: page_size } : {}) };
+  const { data } = await api.get('/audit', { params: apiParams });
+  return unwrapPaginated<AuditEntry>(data);
 }

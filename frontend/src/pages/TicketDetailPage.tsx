@@ -345,7 +345,7 @@ export function TicketDetailPage() {
               <Button
                 key={nextStatus}
                 variant={STATUS_TRANSITION_VARIANTS[nextStatus] ?? 'ghost'}
-                disabled={statusMutation.isPending}
+                loading={statusMutation.isPending}
                 onClick={() => statusMutation.mutate({ status: nextStatus })}
               >
                 {STATUS_TRANSITION_LABELS[nextStatus]}
@@ -388,14 +388,16 @@ export function TicketDetailPage() {
               <div className="flex items-center gap-2">
                 <Button
                   variant="ghost"
-                  disabled={summarizeMutation.isPending}
+                  size="sm"
+                  loading={summarizeMutation.isPending}
                   onClick={() => summarizeMutation.mutate()}
                 >
                   {summarizeMutation.isPending ? 'Summarizing…' : 'Generate Summary'}
                 </Button>
                 <Button
                   variant="ghost"
-                  disabled={suggestMutation.isPending}
+                  size="sm"
+                  loading={suggestMutation.isPending}
                   onClick={() => suggestMutation.mutate()}
                 >
                   {suggestMutation.isPending ? 'Analyzing…' : 'Get Suggestions'}
@@ -533,7 +535,8 @@ export function TicketDetailPage() {
                   )}
                   <div className="ml-auto">
                     <Button
-                      disabled={!commentText.trim() || commentMutation.isPending}
+                      disabled={!commentText.trim()}
+                      loading={commentMutation.isPending}
                       onClick={() => commentMutation.mutate()}
                     >
                       {commentMutation.isPending ? 'Posting…' : 'Post Comment'}
@@ -614,8 +617,9 @@ export function TicketDetailPage() {
               {isAgent && (
                 <Button
                   variant="ghost"
-                  disabled={pauseSLAMutation.isPending || resumeSLAMutation.isPending}
-                  onClick={() => ticket.sla_breached ? resumeSLAMutation.mutate() : pauseSLAMutation.mutate()}
+                  size="sm"
+                  loading={pauseSLAMutation.isPending || resumeSLAMutation.isPending}
+                  onClick={() => ticket.sla_paused_at ? resumeSLAMutation.mutate() : pauseSLAMutation.mutate()}
                 >
                   {ticket.sla_breached ? 'Resume SLA' : 'Pause SLA'}
                 </Button>
