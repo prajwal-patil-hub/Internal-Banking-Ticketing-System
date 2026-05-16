@@ -110,9 +110,17 @@ async def _enforce(
         return  # fail-open
 
     remaining = max(times - int(count), 0)
+    # Set on the Response object (covers success path) and stash on
+    # request.state so RequestContextMiddleware can re-apply them on
+    # error responses, which FastAPI builds from scratch.
     response.headers["X-RateLimit-Limit"] = str(times)
     response.headers["X-RateLimit-Remaining"] = str(remaining)
     response.headers["X-RateLimit-Reset"] = str(reset_at)
+    request.state.rate_limit_headers = {
+        "X-RateLimit-Limit": str(times),
+        "X-RateLimit-Remaining": str(remaining),
+        "X-RateLimit-Reset": str(reset_at),
+    }
 
     if int(count) > times:
         retry_after = max(reset_at - now, 1)
