@@ -74,9 +74,21 @@ export function AIChatWidget() {
       };
 
       setMessages((prev) => [...prev.filter((m) => m.id !== 'typing'), assistantMsg]);
-    } catch {
+    } catch (err: any) {
       setMessages((prev) => prev.filter((m) => m.id !== 'typing'));
-      setError('Failed to get a response. Please try again.');
+      const code = err?.response?.data?.error?.code;
+      const msg = err?.response?.data?.error?.message;
+      if (code === 'AI_NOT_CONFIGURED') {
+        setError('AI is enabled but no Anthropic API key is configured on the backend.');
+      } else if (code === 'AI_UPSTREAM_ERROR') {
+        setError('AI provider returned an error. Please retry.');
+      } else if (code === 'RATE_LIMITED') {
+        setError('Too many requests. Please wait a moment and try again.');
+      } else if (code === 'VALIDATION_ERROR') {
+        setError(msg ?? 'AI features are disabled on this server.');
+      } else {
+        setError('Failed to get a response. Please try again.');
+      }
     } finally {
       setSending(false);
     }

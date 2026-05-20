@@ -16,6 +16,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.api.v1.deps import get_current_user, get_session
 from app.core.config import settings
@@ -113,51 +114,65 @@ def _build_system_prompt() -> str:
 
 
 async def _generate_ai_response(user_message: str, history: list[dict]) -> tuple[str, int, int]:
-    """Generate AI response.
+    """Generate AI response. Returns (text, input_tokens, output_tokens).
 
-    Returns (response_text, input_tokens, output_tokens).
-    In production this calls the Anthropic API via the anthropic SDK.
-    Returns a structured placeholder when AI is disabled or unavailable.
+    Raises ``ValidationError`` if AI is disabled, ``AppException(503)`` if the
+    API key is missing, ``AppException(502)`` if the upstream call fails.
+    Routes catch nothing — the standard exception handlers map these to clean
+    error responses that the frontend can surface verbatim.
     """
-    if not settings.AI_ENABLED:
-        return (
-            "AI assistance is currently disabled. Please contact your system administrator.",
-            0,
-            0,
-        )
+    from app.core.exceptions import AppException
+    from app.utils.ai_client import (
+        AIDisabledError,
+        AIKeyMissingError,
+        AIServiceError,
+        DEFAULT_MODEL,
+    )
 
     try:
+        if not settings.AI_ENABLED:
+            raise AIDisabledError("AI features are disabled.")
+        if not settings.ANTHROPIC_API_KEY:
+            raise AIKeyMissingError(
+                "AI is enabled but ANTHROPIC_API_KEY is not set. "
+                "Configure the key on the backend service and restart."
+            )
+
         import anthropic  # type: ignore[import-untyped]
-        import time
+        import asyncio as _aio
 
         client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-
-        messages = []
-        for turn in history:
-            messages.append({"role": turn["role"], "content": turn["content"]})
+        messages = [{"role": turn["role"], "content": turn["content"]} for turn in history]
         messages.append({"role": "user", "content": user_message})
 
-        start = time.monotonic()
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=settings.AI_MAX_TOKENS,
-            system=_build_system_prompt(),
-            messages=messages,
-        )
-        latency_ms = int((time.monotonic() - start) * 1000)
+        def _sync():
+            return client.messages.create(
+                model=DEFAULT_MODEL,
+                max_tokens=settings.AI_MAX_TOKENS,
+                system=_build_system_prompt(),
+                messages=messages,
+            )
 
-        response_text = response.content[0].text if response.content else ""
-        input_tokens = response.usage.input_tokens
-        output_tokens = response.usage.output_tokens
-        return response_text, input_tokens, output_tokens
+        try:
+            response = await _aio.to_thread(_sync)
+        except Exception as exc:  # noqa: BLE001
+            raise AIServiceError(str(exc)) from exc
 
-    except Exception as exc:  # noqa: BLE001
+        text = response.content[0].text if response.content else ""
+        return text, response.usage.input_tokens, response.usage.output_tokens
+
+    except AIDisabledError as exc:
+        raise ValidationError(str(exc)) from exc
+    except AIKeyMissingError as exc:
+        raise AppException(str(exc), code="AI_NOT_CONFIGURED", status_code=503) from exc
+    except AIServiceError as exc:
         log.warning("ai_api_error", error=str(exc))
-        return (
-            "I'm sorry, I encountered an issue processing your request. Please try again shortly.",
-            0,
-            0,
-        )
+        raise AppException(
+            "Upstream AI service error. Please try again.",
+            code="AI_UPSTREAM_ERROR",
+            status_code=502,
+            details={"reason": str(exc)},
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -184,6 +199,7 @@ async def chat(
     ticket_id_val = payload.get("ticket_id")
 
     session: ChatSession | None = None
+    is_new_session = False
 
     # Resume existing session if provided
     if session_id_val:
@@ -193,7 +209,9 @@ async def chat(
             raise ValidationError("Invalid session_id format.")
 
         result = await db.execute(
-            select(ChatSession).where(
+            select(ChatSession)
+            .options(selectinload(ChatSession.messages))
+            .where(
                 ChatSession.id == session_id,
                 ChatSession.user_id == current_user.id,
             )
@@ -206,6 +224,7 @@ async def chat(
 
     # Create new session
     if session is None:
+        is_new_session = True
         ticket_id: uuid.UUID | None = None
         if ticket_id_val:
             try:
@@ -222,12 +241,17 @@ async def chat(
         db.add(session)
         await db.flush()
 
-    # Build conversation history for AI context
-    history = [
-        {"role": msg.role.value, "content": msg.content}
-        for msg in session.messages
-        if msg.role in {ChatRole.USER, ChatRole.ASSISTANT}
-    ]
+    # Build conversation history for AI context.
+    # Brand-new sessions never have messages yet — skip the relationship
+    # access so we don't trigger a lazy-load outside the greenlet bridge.
+    if is_new_session:
+        history: list[dict] = []
+    else:
+        history = [
+            {"role": msg.role.value, "content": msg.content}
+            for msg in session.messages
+            if msg.role in {ChatRole.USER, ChatRole.ASSISTANT}
+        ]
 
     # Call AI
     import time
@@ -268,12 +292,23 @@ async def chat(
     )
 
     await db.commit()
+    await db.refresh(user_msg)
     await db.refresh(assistant_msg)
 
     return ok({
         "session_id": str(session.id),
-        "message": {
+        "user_message": {
+            "id": str(user_msg.id),
+            "session_id": str(session.id),
+            "role": "user",
+            "content": user_message,
+            "input_tokens": None,
+            "output_tokens": None,
+            "created_at": user_msg.created_at.isoformat(),
+        },
+        "assistant_message": {
             "id": str(assistant_msg.id),
+            "session_id": str(session.id),
             "role": "assistant",
             "content": ai_text,
             "input_tokens": input_tokens,

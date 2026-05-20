@@ -48,9 +48,14 @@ async def test_sla_pause_resume_button_contract(client, auth_headers):
 
 @pytest.mark.asyncio
 async def test_ai_summarize_button_contract(client, auth_headers, monkeypatch):
-    # AI features must be enabled for these routes; flip the setting for this test.
     from app.core import config as _cfg
+    from app.utils import ai_client as ai_client_module
     monkeypatch.setattr(_cfg.settings, "AI_ENABLED", True)
+    monkeypatch.setattr(_cfg.settings, "ANTHROPIC_API_KEY", "test-key-stub")
+
+    async def _stub_summary(**_kwargs):
+        return {"summary": "Stubbed.", "sentiment": "neutral", "risk_score": 0.1}
+    monkeypatch.setattr(ai_client_module, "summarize_ticket", _stub_summary)
 
     create = await client.post(
         "/api/v1/tickets",
@@ -69,7 +74,13 @@ async def test_ai_summarize_button_contract(client, auth_headers, monkeypatch):
 @pytest.mark.asyncio
 async def test_ai_suggest_button_contract(client, auth_headers, monkeypatch):
     from app.core import config as _cfg
+    from app.utils import ai_client as ai_client_module
     monkeypatch.setattr(_cfg.settings, "AI_ENABLED", True)
+    monkeypatch.setattr(_cfg.settings, "ANTHROPIC_API_KEY", "test-key-stub")
+
+    async def _stub_suggest(**_kwargs):
+        return {"suggestions": ["Step 1", "Step 2"], "next_actions": ["Note added"]}
+    monkeypatch.setattr(ai_client_module, "suggest_actions", _stub_suggest)
 
     create = await client.post(
         "/api/v1/tickets",

@@ -781,18 +781,41 @@ async def ai_summarize(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> dict:
-    from app.core.config import settings
+    from app.utils.ai_client import (
+        AIDisabledError,
+        AIKeyMissingError,
+        AIServiceError,
+        summarize_ticket,
+    )
+
     ticket = await _get_ticket_or_404(ticket_id, db, current_user)
 
-    if not settings.AI_ENABLED:
-        raise ValidationError("AI features are not enabled.")
+    try:
+        parsed = await summarize_ticket(
+            title=ticket.title,
+            description=ticket.description or "",
+            category=ticket.ai_category,
+            priority=ticket.priority.value,
+        )
+    except AIDisabledError as exc:
+        raise ValidationError(str(exc))
+    except AIKeyMissingError as exc:
+        # 503 — service is enabled but not configured.
+        from app.core.exceptions import AppException
+        raise AppException(str(exc), code="AI_NOT_CONFIGURED", status_code=503) from exc
+    except AIServiceError as exc:
+        from app.core.exceptions import AppException
+        raise AppException(
+            "Upstream AI service error. Please try again.",
+            code="AI_UPSTREAM_ERROR",
+            status_code=502,
+            details={"reason": str(exc)},
+        ) from exc
 
-    result = {
-        "ticket_id": str(ticket.id),
-        "ticket_number": ticket.ticket_number,
-        "summary": ticket.ai_summary or "Summary not yet generated. Trigger AI categorization first.",
-        "status": "ai_summarize_triggered",
-    }
+    # Persist the AI fields on the ticket for future reads.
+    ticket.ai_summary = parsed["summary"]
+    ticket.ai_sentiment = parsed["sentiment"]
+    ticket.ai_risk_score = parsed["risk_score"]
 
     await _record_audit(
         db,
@@ -800,10 +823,19 @@ async def ai_summarize(
         entity_id=str(ticket.id),
         user=current_user,
         request=request,
-        metadata_={"ai_action": "summarize"},
+        metadata_={"ai_action": "summarize", **parsed},
     )
     await db.commit()
-    return ok(result)
+    await db.refresh(ticket)
+    return ok(
+        {
+            "ticket_id": str(ticket.id),
+            "ticket_number": ticket.ticket_number,
+            "summary": parsed["summary"],
+            "sentiment": parsed["sentiment"],
+            "risk_score": parsed["risk_score"],
+        }
+    )
 
 
 @router.post(
@@ -817,41 +849,35 @@ async def ai_suggest(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> dict:
-    from app.core.config import settings
+    from app.utils.ai_client import (
+        AIDisabledError,
+        AIKeyMissingError,
+        AIServiceError,
+        suggest_actions,
+    )
+
     ticket = await _get_ticket_or_404(ticket_id, db, current_user)
 
-    if not settings.AI_ENABLED:
-        raise ValidationError("AI features are not enabled.")
-
-    # Build contextual suggestions based on category
-    suggestions: list[dict] = [
-        {
-            "rank": 1,
-            "suggestion": "Review the customer's transaction history in the core banking system.",
-            "confidence": 0.85,
-        },
-        {
-            "rank": 2,
-            "suggestion": "Check if there are any pending maintenance windows affecting this service.",
-            "confidence": 0.72,
-        },
-        {
-            "rank": 3,
-            "suggestion": "Escalate to the relevant department head if unresolved within SLA.",
-            "confidence": 0.65,
-        },
-    ]
-
-    result = {
-        "ticket_id": str(ticket.id),
-        "ticket_number": ticket.ticket_number,
-        "suggestions": suggestions,
-        "based_on": {
-            "title": ticket.title,
-            "category": ticket.ai_category,
-            "priority": ticket.priority.value,
-        },
-    }
+    try:
+        parsed = await suggest_actions(
+            title=ticket.title,
+            description=ticket.description or "",
+            category=ticket.ai_category,
+            priority=ticket.priority.value,
+        )
+    except AIDisabledError as exc:
+        raise ValidationError(str(exc))
+    except AIKeyMissingError as exc:
+        from app.core.exceptions import AppException
+        raise AppException(str(exc), code="AI_NOT_CONFIGURED", status_code=503) from exc
+    except AIServiceError as exc:
+        from app.core.exceptions import AppException
+        raise AppException(
+            "Upstream AI service error. Please try again.",
+            code="AI_UPSTREAM_ERROR",
+            status_code=502,
+            details={"reason": str(exc)},
+        ) from exc
 
     await _record_audit(
         db,
@@ -862,6 +888,12 @@ async def ai_suggest(
         metadata_={"ai_action": "suggest"},
     )
     await db.commit()
+    result = {
+        "ticket_id": str(ticket.id),
+        "ticket_number": ticket.ticket_number,
+        "suggestions": parsed["suggestions"],
+        "next_actions": parsed.get("next_actions", []),
+    }
     return ok(result)
 
 
