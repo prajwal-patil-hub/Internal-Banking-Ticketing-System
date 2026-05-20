@@ -166,8 +166,10 @@ export async function assignTicket(id: string, assignee_id: string): Promise<Tic
   return data.data;
 }
 
-export async function getComments(ticketId: string): Promise<Comment[]> {
-  const { data } = await api.get(`/tickets/${ticketId}/comments`);
+export async function getComments(ticketId: string, includeInternal = false): Promise<Comment[]> {
+  const { data } = await api.get(`/tickets/${ticketId}/comments`, {
+    params: includeInternal ? { include_internal: true } : undefined,
+  });
   return data.data;
 }
 

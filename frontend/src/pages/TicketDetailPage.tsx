@@ -224,8 +224,8 @@ export function TicketDetailPage() {
   });
 
   const commentsQuery = useQuery({
-    queryKey: ['tickets', id, 'comments'],
-    queryFn: () => getComments(id!),
+    queryKey: ['tickets', id, 'comments', isAgent ? 'with-internal' : 'public'],
+    queryFn: () => getComments(id!, isAgent),
     enabled: !!id,
     staleTime: STALE,
   });
