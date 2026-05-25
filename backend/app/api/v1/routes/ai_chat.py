@@ -114,53 +114,22 @@ def _build_system_prompt() -> str:
 
 
 async def _generate_ai_response(user_message: str, history: list[dict]) -> tuple[str, int, int]:
-    """Generate AI response. Returns (text, input_tokens, output_tokens).
+    """Generate AI response via the configured provider (Groq / Anthropic).
 
-    Raises ``ValidationError`` if AI is disabled, ``AppException(503)`` if the
-    API key is missing, ``AppException(502)`` if the upstream call fails.
-    Routes catch nothing — the standard exception handlers map these to clean
-    error responses that the frontend can surface verbatim.
+    Returns (text, input_tokens, output_tokens). Raises ``ValidationError`` if
+    AI is disabled, ``AppException(503)`` if the API key is missing,
+    ``AppException(502)`` if the upstream call fails.
     """
     from app.core.exceptions import AppException
     from app.utils.ai_client import (
         AIDisabledError,
         AIKeyMissingError,
         AIServiceError,
-        DEFAULT_MODEL,
+        call_llm,
     )
 
     try:
-        if not settings.AI_ENABLED:
-            raise AIDisabledError("AI features are disabled.")
-        if not settings.ANTHROPIC_API_KEY:
-            raise AIKeyMissingError(
-                "AI is enabled but ANTHROPIC_API_KEY is not set. "
-                "Configure the key on the backend service and restart."
-            )
-
-        import anthropic  # type: ignore[import-untyped]
-        import asyncio as _aio
-
-        client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-        messages = [{"role": turn["role"], "content": turn["content"]} for turn in history]
-        messages.append({"role": "user", "content": user_message})
-
-        def _sync():
-            return client.messages.create(
-                model=DEFAULT_MODEL,
-                max_tokens=settings.AI_MAX_TOKENS,
-                system=_build_system_prompt(),
-                messages=messages,
-            )
-
-        try:
-            response = await _aio.to_thread(_sync)
-        except Exception as exc:  # noqa: BLE001
-            raise AIServiceError(str(exc)) from exc
-
-        text = response.content[0].text if response.content else ""
-        return text, response.usage.input_tokens, response.usage.output_tokens
-
+        return await call_llm(user_message=user_message, history=history)
     except AIDisabledError as exc:
         raise ValidationError(str(exc)) from exc
     except AIKeyMissingError as exc:

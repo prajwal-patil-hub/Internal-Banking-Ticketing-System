@@ -46,11 +46,12 @@ async def test_summarize_persists_summary_sentiment_risk(client, auth_headers, m
 
 
 @pytest.mark.asyncio
-async def test_summarize_returns_503_when_key_missing(client, auth_headers, monkeypatch):
+async def test_summarize_returns_503_when_groq_key_missing(client, auth_headers, monkeypatch):
     from app.core import config as _cfg
 
     monkeypatch.setattr(_cfg.settings, "AI_ENABLED", True)
-    monkeypatch.setattr(_cfg.settings, "ANTHROPIC_API_KEY", "")
+    monkeypatch.setattr(_cfg.settings, "AI_PROVIDER", "groq")
+    monkeypatch.setattr(_cfg.settings, "GROQ_API_KEY", "")
 
     create = await client.post(
         "/api/v1/tickets",
@@ -63,7 +64,78 @@ async def test_summarize_returns_503_when_key_missing(client, auth_headers, monk
     assert r.status_code == 503, r.text
     body = r.json()
     assert body["error"]["code"] == "AI_NOT_CONFIGURED"
-    assert "ANTHROPIC_API_KEY" in body["error"]["message"]
+    assert "GROQ_API_KEY" in body["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_summarize_returns_503_when_anthropic_selected_and_key_missing(
+    client, auth_headers, monkeypatch,
+):
+    from app.core import config as _cfg
+
+    monkeypatch.setattr(_cfg.settings, "AI_ENABLED", True)
+    monkeypatch.setattr(_cfg.settings, "AI_PROVIDER", "anthropic")
+    monkeypatch.setattr(_cfg.settings, "ANTHROPIC_API_KEY", "")
+
+    create = await client.post(
+        "/api/v1/tickets",
+        headers=auth_headers,
+        json={"title": "Missing key", "priority": "low"},
+    )
+    tid = create.json()["data"]["id"]
+
+    r = await client.post(f"/api/v1/tickets/{tid}/ai-summarize", headers=auth_headers)
+    assert r.status_code == 503, r.text
+    assert r.json()["error"]["code"] == "AI_NOT_CONFIGURED"
+    assert "ANTHROPIC_API_KEY" in r.json()["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_groq_provider_calls_openai_compatible_endpoint(monkeypatch):
+    """End-to-end through call_llm against a stubbed httpx call —
+    verifies we hit /chat/completions with the Groq base URL + model."""
+    from app.core import config as _cfg
+    from app.utils import ai_client as ai
+
+    monkeypatch.setattr(_cfg.settings, "AI_ENABLED", True)
+    monkeypatch.setattr(_cfg.settings, "AI_PROVIDER", "groq")
+    monkeypatch.setattr(_cfg.settings, "GROQ_API_KEY", "gsk_test_stub")
+    monkeypatch.setattr(_cfg.settings, "GROQ_MODEL", "llama-3.3-70b-versatile")
+
+    captured: dict = {}
+
+    class _Resp:
+        status_code = 200
+        def json(self) -> dict:
+            return {
+                "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 1},
+            }
+        text = ""
+
+    class _Client:
+        def __init__(self, *a, **kw): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return None
+        async def post(self, url, headers=None, json=None):
+            captured["url"] = url
+            captured["headers"] = headers
+            captured["json"] = json
+            return _Resp()
+
+    import httpx as _httpx
+    monkeypatch.setattr(_httpx, "AsyncClient", _Client)
+
+    text, in_tok, out_tok = await ai.call_llm(user_message="hello")
+    assert text == "ok"
+    assert in_tok == 5 and out_tok == 1
+    assert captured["url"].endswith("/chat/completions")
+    assert "api.groq.com" in captured["url"]
+    assert captured["headers"]["Authorization"] == "Bearer gsk_test_stub"
+    assert captured["json"]["model"] == "llama-3.3-70b-versatile"
+    # System prompt + user message should both be present.
+    roles = [m["role"] for m in captured["json"]["messages"]]
+    assert roles == ["system", "user"]
 
 
 @pytest.mark.asyncio
@@ -155,12 +227,13 @@ async def test_ai_client_extract_json_strips_markdown_fences(monkeypatch):
     from app.core import config as _cfg
 
     monkeypatch.setattr(_cfg.settings, "AI_ENABLED", True)
-    monkeypatch.setattr(_cfg.settings, "ANTHROPIC_API_KEY", "test-key-stub")
+    monkeypatch.setattr(_cfg.settings, "AI_PROVIDER", "groq")
+    monkeypatch.setattr(_cfg.settings, "GROQ_API_KEY", "gsk_test_stub")
 
-    async def _stub_call(prompt, max_tokens=None):
-        return '```json\n{"summary": "S", "sentiment": "neutral", "risk_score": 0.2}\n```'
+    async def _stub_call(*, user_message, history=None, max_tokens=None, json_mode=False):
+        return ('```json\n{"summary": "S", "sentiment": "neutral", "risk_score": 0.2}\n```', 1, 1)
 
-    monkeypatch.setattr(ai_client_module, "_call_claude", _stub_call)
+    monkeypatch.setattr(ai_client_module, "call_llm", _stub_call)
     result = await ai_client_module.summarize_ticket(
         title="t", description="d", category=None, priority="low",
     )
