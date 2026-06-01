@@ -89,8 +89,14 @@ frontend/
   (per-IP), AI (per-user), write endpoints (per-user). Fail-open on Redis
   outage but log. Returns `Retry-After` + `X-RateLimit-*` headers.
 - **Passwords**: Argon2id only (`app.core.security.hash_password`).
-- **PII**: PII redaction before any LLM call is a tracked open item; until
-  done, do not send raw customer text to providers outside the bank network.
+- **PII**: Every LLM call routes through `app/utils/ai_client.call_llm`,
+  which applies `app/utils/pii.redact_pii` to the prompt and history before
+  the request leaves the process. Recognised types: PAN, Aadhaar, card
+  number, IFSC, UPI handle, +91/0-prefixed phone, email, generic
+  10–18-digit account fallback, CVV when in context. Matched spans become
+  `[REDACTED_<TYPE>]` markers so the model still sees structure. Opt-out
+  with `redact_pii=False` only when the caller has explicit clearance and
+  has already sanitised input.
 - **Mass assignment**: Endpoints that take `payload: dict` MUST pick fields
   by name — never `**payload` into a model. Migrating these to typed
   Pydantic request schemas is the long-term direction.

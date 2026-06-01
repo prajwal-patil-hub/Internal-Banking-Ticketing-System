@@ -64,10 +64,28 @@ async def call_llm(
     history: list[dict] | None = None,
     max_tokens: int | None = None,
     json_mode: bool = False,
+    redact_pii: bool = True,
 ) -> tuple[str, int, int]:
-    """Send one prompt to the configured provider. Returns (text, in_tokens, out_tokens)."""
+    """Send one prompt to the configured provider. Returns (text, in_tokens, out_tokens).
+
+    By default every outgoing prompt is scrubbed of recognised PII (PAN,
+    Aadhaar, card numbers, IFSC, UPI, phone, email, generic long-digit
+    account numbers). Set ``redact_pii=False`` only for callers that have
+    already sanitised their input.
+    """
     _require_ready()
     history = history or []
+
+    if redact_pii:
+        from app.utils.pii import redact_message_list, redact_pii as _redact
+        msg_report = _redact(user_message)
+        user_message = msg_report.text
+        history, hist_counts = redact_message_list(history)
+        merged: dict[str, int] = dict(msg_report.counts)
+        for k, v in hist_counts.items():
+            merged[k] = merged.get(k, 0) + v
+        if merged:
+            log.info("pii_redacted", provider=settings.AI_PROVIDER, counts=merged)
 
     if settings.AI_PROVIDER == "groq":
         return await _openai_compatible_chat(
