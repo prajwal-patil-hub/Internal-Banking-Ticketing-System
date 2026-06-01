@@ -510,6 +510,18 @@ async def assign_ticket(
     if assignee is None:
         raise NotFoundError(f"User {assignee_id} not found.")
 
+    # Authorization: tickets may only be assigned to active staff accounts,
+    # not branch users or deactivated employees. The role check has to happen
+    # server-side because the UI's role filter is advisory.
+    if not assignee.is_active:
+        raise ValidationError("Cannot assign a ticket to an inactive user.")
+    if assignee.role.name not in _AGENT_ROLES:
+        raise ValidationError(
+            f"User '{assignee.email}' has role '{assignee.role.name}' and "
+            "cannot be assigned tickets. Assign to an agent, supervisor, "
+            "admin, or auditor."
+        )
+
     old_assignee = str(ticket.assignee_id) if ticket.assignee_id else None
     ticket.assignee_id = assignee_id
     if ticket.status == TicketStatus.NEW:
@@ -682,7 +694,12 @@ async def list_comments(
     return ok([_serialize_comment(c) for c in comments])
 
 
-@router.post("/{ticket_id}/comments", status_code=status.HTTP_201_CREATED, summary="Add comment to ticket")
+@router.post(
+    "/{ticket_id}/comments",
+    status_code=status.HTTP_201_CREATED,
+    summary="Add comment to ticket",
+    dependencies=[Depends(rate_limit(name="comment_create", times=60, seconds=60, scope="user"))],
+)
 async def add_comment(
     ticket_id: uuid.UUID,
     payload: dict,
