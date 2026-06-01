@@ -2,49 +2,76 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Tokens that need CSS-var form for animations & gradients */
+/* Paper + brass tokens reused in gradients and effects. */
 :root {
-  --brand-grad: linear-gradient(180deg, #4F36DC 0%, #3F2FBE 100%);
-  --accent-grad: linear-gradient(135deg, #B89AFF 0%, #7E4DFF 100%);
+  --brand-grad: linear-gradient(180deg, #365033 0%, #1F3A2E 100%);
+  --accent-grad: linear-gradient(135deg, #BA9D58 0%, #8E7042 100%);
+  --paper:      #FBF8F1;
+  --paper-edge: rgba(42, 33, 27, 0.08);
 }
 
 html, body, #root { height: 100%; }
 
-/* Subtle scrollbar to match enterprise feel */
+body {
+  background: var(--paper);
+  color: #2A211B;                          /* espresso */
+  font-feature-settings: 'ss01', 'cv11';   /* humanist Inter alternates */
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Display headings get a serif. */
+h1, h2, .display { font-family: theme('fontFamily.display'); letter-spacing: -0.01em; }
+
+/* Paper-grain scrollbar, never the SaaS-blue thumb. */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb {
-  background: rgba(63, 47, 190, 0.25);
+  background: rgba(31, 58, 46, 0.20);
   border-radius: 999px;
 }
-::-webkit-scrollbar-thumb:hover { background: rgba(63, 47, 190, 0.45); }
+::-webkit-scrollbar-thumb:hover { background: rgba(31, 58, 46, 0.40); }
+
+/* Visible-only-on-keyboard focus ring, brass. */
+:focus-visible { outline: none; box-shadow: theme('boxShadow.focus'); border-radius: 4px; }
 
 @layer components {
   .card {
-    @apply bg-surface rounded-2xl shadow-card p-6;
+    @apply bg-white rounded-lg p-6 shadow-card border border-cream-200;
   }
   .kpi {
     @apply card flex flex-col gap-1;
   }
   .pill {
-    @apply inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium;
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium tracking-wide uppercase;
   }
+  /* Primary button: deep forest, ivory text, subtle press.
+     Disabled state is muted on cream, not the universal "opacity-50". */
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 hover:bg-brand-500
-           text-white px-4 py-2 text-sm font-medium shadow-card transition-colors
-           disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply inline-flex items-center justify-center gap-2 rounded-md bg-brand-600 hover:bg-brand-500
+           active:bg-brand-700 text-cream-50 px-4 py-2 text-sm font-medium tracking-wide
+           shadow-card transition-colors
+           disabled:bg-ink-300 disabled:text-cream-50 disabled:cursor-not-allowed disabled:shadow-none;
   }
   .btn-ghost {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-transparent
-           hover:bg-surface-subtle text-slate-700 px-4 py-2 text-sm font-medium;
+    @apply inline-flex items-center justify-center gap-2 rounded-md bg-transparent
+           hover:bg-cream-200 active:bg-cream-300 text-ink-700 px-4 py-2 text-sm font-medium
+           transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 rounded-md bg-oxblood
+           hover:bg-oxblood-700 text-cream-50 px-4 py-2 text-sm font-medium
+           shadow-card transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
   }
   .input {
-    @apply w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm
-           placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-200
+    @apply w-full rounded-md border border-cream-300 bg-white px-3 py-2 text-sm text-ink-900
+           placeholder:text-ink-300 focus:border-accent-400 focus:ring-0
            outline-none transition-colors;
   }
 }
 
-/* Dark mode overrides */
-.dark body { @apply bg-slate-950 text-slate-100; }
-.dark .card { @apply bg-slate-900 shadow-none border border-slate-800; }
-.dark .input { @apply bg-slate-900 border-slate-700 text-slate-100 placeholder:text-slate-500; }
+/* Dark mode — ivory text on deep walnut, brass accents still pop. */
+.dark body { background: #1A1612; color: #E8E1D2; }
+.dark .card { background: #221C16; border-color: #2F271F; box-shadow: none; }
+.dark .input { background: #221C16; border-color: #3D332A; color: #E8E1D2; }
+.dark .input::placeholder { color: #6E614C; }
+.dark .btn-ghost { color: #E8E1D2; }
+.dark .btn-ghost:hover { background: #2F271F; }

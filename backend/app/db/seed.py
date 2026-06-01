@@ -42,6 +42,7 @@ async def _ensure_role(session, name: Role) -> RoleModel:
     if existing:
         return existing
     role = RoleModel(name=name.value, description=name.value.replace("_", " ").title())
+    role.permissions = []  # mark collection loaded so later access won't lazy-load
     session.add(role)
     await session.flush()
     return role

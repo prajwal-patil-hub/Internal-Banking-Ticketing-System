@@ -109,17 +109,29 @@ class Ticket(UUIDPKMixin, TimestampMixin, Base):
 
     # Status / priority / source
     status: Mapped[TicketStatus] = mapped_column(
-        Enum(TicketStatus, name="ticketstatus"),
+        Enum(
+            TicketStatus,
+            name="ticketstatus",
+            values_callable=lambda x: [e.value for e in x],
+        ),
         default=TicketStatus.NEW,
         nullable=False,
     )
     priority: Mapped[TicketPriority] = mapped_column(
-        Enum(TicketPriority, name="ticketpriority"),
+        Enum(
+            TicketPriority,
+            name="ticketpriority",
+            values_callable=lambda x: [e.value for e in x],
+        ),
         default=TicketPriority.MEDIUM,
         nullable=False,
     )
     source: Mapped[TicketSource] = mapped_column(
-        Enum(TicketSource, name="ticketsource"),
+        Enum(
+            TicketSource,
+            name="ticketsource",
+            values_callable=lambda x: [e.value for e in x],
+        ),
         default=TicketSource.PORTAL,
         nullable=False,
     )

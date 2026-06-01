@@ -41,7 +41,11 @@ class TicketComment(UUIDPKMixin, TimestampMixin, Base):
     body: Mapped[str] = mapped_column(Text, nullable=False)
     is_internal: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     source: Mapped[CommentSource] = mapped_column(
-        Enum(CommentSource, name="commentsource"),
+        Enum(
+            CommentSource,
+            name="commentsource",
+            values_callable=lambda x: [e.value for e in x],
+        ),
         default=CommentSource.AGENT,
         nullable=False,
     )

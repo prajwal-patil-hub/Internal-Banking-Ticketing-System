@@ -64,10 +64,31 @@ class Settings(BaseSettings):
     SLA_LOW_MINUTES: int = 4320
 
     # --- AI ---
-    ANTHROPIC_API_KEY: str = ""
+    # AI_PROVIDER selects which LLM API the AI client routes to.
+    #   groq      — recommended for local/dev: free tier, OpenAI-compatible.
+    #   anthropic — production Claude.
+    AI_PROVIDER: Literal["groq", "anthropic"] = "groq"
     AI_ENABLED: bool = True
     AI_MAX_TOKENS: int = 1024
     AI_CONFIDENCE_THRESHOLD: float = 0.7
+
+    # Anthropic provider
+    ANTHROPIC_API_KEY: str = ""
+    ANTHROPIC_MODEL: str = "claude-sonnet-4-6"
+
+    # Groq provider (OpenAI-compatible API at https://api.groq.com/openai/v1)
+    GROQ_API_KEY: str = ""
+    GROQ_MODEL: str = "llama-3.3-70b-versatile"
+    GROQ_BASE_URL: str = "https://api.groq.com/openai/v1"
+
+    @property
+    def ai_provider_key(self) -> str:
+        """Return the API key for the currently selected provider."""
+        return self.GROQ_API_KEY if self.AI_PROVIDER == "groq" else self.ANTHROPIC_API_KEY
+
+    @property
+    def ai_provider_key_env_name(self) -> str:
+        return "GROQ_API_KEY" if self.AI_PROVIDER == "groq" else "ANTHROPIC_API_KEY"
 
     # --- Email Ingestion (IMAP) ---
     IMAP_ENABLED: bool = False

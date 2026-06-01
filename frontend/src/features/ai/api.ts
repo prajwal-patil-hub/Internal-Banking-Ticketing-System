@@ -56,17 +56,17 @@ export async function sendChatMessage(payload: SendMessagePayload): Promise<Send
 }
 
 export async function getChatSessions(): Promise<ChatSession[]> {
-  const { data } = await api.get('/ai/chat/sessions');
-  return data.data;
+  const { data } = await api.get('/ai/sessions');
+  return data.data?.items ?? data.data ?? [];
 }
 
 export async function getChatSession(sessionId: string): Promise<{ session: ChatSession; messages: ChatMessage[] }> {
-  const { data } = await api.get(`/ai/chat/sessions/${sessionId}`);
+  const { data } = await api.get(`/ai/sessions/${sessionId}`);
   return data.data;
 }
 
 export async function endChatSession(sessionId: string): Promise<void> {
-  await api.post(`/ai/chat/sessions/${sessionId}/end`);
+  await api.delete(`/ai/sessions/${sessionId}`);
 }
 
 export async function categorizeText(text: string, title?: string): Promise<CategorizeResponse> {

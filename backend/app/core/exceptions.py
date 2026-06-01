@@ -106,13 +106,24 @@ def register_exception_handlers(app: FastAPI) -> None:
             message=exc.message,
             path=request.url.path,
         )
-        return _envelope(
+        response = _envelope(
             code=exc.code,
             message=exc.message,
             status_code=exc.status_code,
             request_id=getattr(request.state, "request_id", None),
             details=exc.details,
         )
+        if isinstance(exc, RateLimitError):
+            d = exc.details
+            if (retry := d.get("retry_after_seconds")) is not None:
+                response.headers["Retry-After"] = str(retry)
+            if (limit := d.get("limit")) is not None:
+                response.headers["X-RateLimit-Limit"] = str(limit)
+            if (remaining := d.get("remaining")) is not None:
+                response.headers["X-RateLimit-Remaining"] = str(remaining)
+            if (reset_at := d.get("reset_at")) is not None:
+                response.headers["X-RateLimit-Reset"] = str(reset_at)
+        return response
 
     @app.exception_handler(RequestValidationError)
     async def _validation_exc(

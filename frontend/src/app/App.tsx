@@ -10,6 +10,10 @@ import { TicketsPage } from '@/pages/TicketsPage';
 import { TicketDetailPage } from '@/pages/TicketDetailPage';
 import { CreateTicketPage } from '@/pages/CreateTicketPage';
 import { AuditPage } from '@/pages/AuditPage';
+import { UsersPage } from '@/pages/UsersPage';
+import { BranchesPage } from '@/pages/BranchesPage';
+import { EscalationsPage } from '@/pages/EscalationsPage';
+import { SLAMonitorPage } from '@/pages/SLAMonitorPage';
 
 export default function App() {
   return (
@@ -31,32 +35,32 @@ export default function App() {
         <Route
           path="/sla"
           element={
-            <RequireAuth roles={['admin', 'supervisor']}>
-              <PlaceholderPage title="SLA Monitor" phase="P4 / P7" />
+            <RequireAuth roles={['admin', 'supervisor', 'agent', 'auditor']}>
+              <SLAMonitorPage />
             </RequireAuth>
           }
         />
         <Route
           path="/escalations"
           element={
-            <RequireAuth roles={['admin', 'supervisor']}>
-              <PlaceholderPage title="Escalations" phase="P5" />
+            <RequireAuth roles={['admin', 'supervisor', 'auditor']}>
+              <EscalationsPage />
             </RequireAuth>
           }
         />
         <Route
           path="/branches"
           element={
-            <RequireAuth roles={['admin']}>
-              <PlaceholderPage title="Branches" phase="P2" />
+            <RequireAuth roles={['admin', 'supervisor']}>
+              <BranchesPage />
             </RequireAuth>
           }
         />
         <Route
           path="/users"
           element={
-            <RequireAuth roles={['admin']}>
-              <PlaceholderPage title="Users & Roles" phase="P1+" />
+            <RequireAuth roles={['admin', 'supervisor']}>
+              <UsersPage />
             </RequireAuth>
           }
         />

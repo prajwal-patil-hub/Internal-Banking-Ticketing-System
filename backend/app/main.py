@@ -18,10 +18,22 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1.routes import ai_chat, audit, auth, categories, dashboard, health, tickets, users
+from app.api.v1.routes import (
+    ai_chat,
+    audit,
+    auth,
+    branches,
+    categories,
+    dashboard,
+    escalations,
+    health,
+    tickets,
+    users,
+)
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
+from app.core.redis import close_redis, init_redis
 from app.middleware.request_context import RequestContextMiddleware
 from app.workers.email_worker import setup_email_worker, shutdown_email_worker
 from app.workers.sla_worker import setup_sla_worker, shutdown_sla_worker
@@ -34,15 +46,15 @@ async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
     configure_logging()
     log.info("app_starting", env=settings.APP_ENV, name=settings.APP_NAME)
 
-    # Start background workers
+    await init_redis()
     await setup_email_worker(app)
     await setup_sla_worker(app)
 
     yield
 
-    # Graceful shutdown of background workers
     await shutdown_email_worker()
     await shutdown_sla_worker()
+    await close_redis()
     log.info("app_stopped")
 
 
@@ -72,6 +84,9 @@ def create_app() -> FastAPI:
     app.include_router(health.router, prefix="/api/v1")
     app.include_router(auth.router, prefix="/api/v1")
     app.include_router(users.router, prefix="/api/v1")
+    app.include_router(users.roles_router, prefix="/api/v1")
+    app.include_router(branches.router, prefix="/api/v1")
+    app.include_router(escalations.router, prefix="/api/v1")
     app.include_router(tickets.router, prefix="/api/v1")
     app.include_router(categories.router, prefix="/api/v1")
     app.include_router(ai_chat.router, prefix="/api/v1")

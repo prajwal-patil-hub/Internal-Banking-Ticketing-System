@@ -108,7 +108,7 @@ export function LoginPage() {
               )}
             </label>
 
-            <Button type="submit" disabled={isSubmitting}>
+            <Button type="submit" loading={isSubmitting} className="w-full">
               {isSubmitting ? 'Signing in…' : 'Sign in'}
             </Button>
 

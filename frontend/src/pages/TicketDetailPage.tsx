@@ -224,8 +224,8 @@ export function TicketDetailPage() {
   });
 
   const commentsQuery = useQuery({
-    queryKey: ['tickets', id, 'comments'],
-    queryFn: () => getComments(id!),
+    queryKey: ['tickets', id, 'comments', isAgent ? 'with-internal' : 'public'],
+    queryFn: () => getComments(id!, isAgent),
     enabled: !!id,
     staleTime: STALE,
   });
@@ -345,7 +345,7 @@ export function TicketDetailPage() {
               <Button
                 key={nextStatus}
                 variant={STATUS_TRANSITION_VARIANTS[nextStatus] ?? 'ghost'}
-                disabled={statusMutation.isPending}
+                loading={statusMutation.isPending}
                 onClick={() => statusMutation.mutate({ status: nextStatus })}
               >
                 {STATUS_TRANSITION_LABELS[nextStatus]}
@@ -388,14 +388,16 @@ export function TicketDetailPage() {
               <div className="flex items-center gap-2">
                 <Button
                   variant="ghost"
-                  disabled={summarizeMutation.isPending}
+                  size="sm"
+                  loading={summarizeMutation.isPending}
                   onClick={() => summarizeMutation.mutate()}
                 >
                   {summarizeMutation.isPending ? 'Summarizing…' : 'Generate Summary'}
                 </Button>
                 <Button
                   variant="ghost"
-                  disabled={suggestMutation.isPending}
+                  size="sm"
+                  loading={suggestMutation.isPending}
                   onClick={() => suggestMutation.mutate()}
                 >
                   {suggestMutation.isPending ? 'Analyzing…' : 'Get Suggestions'}
@@ -414,24 +416,53 @@ export function TicketDetailPage() {
             {/* Freshly generated summary */}
             {aiSummaryResult && (
               <div className="mb-4 p-3 rounded-xl bg-accent-50 dark:bg-accent-500/10 border border-accent-200 dark:border-accent-500/20">
-                <div className="flex items-center gap-2 mb-1.5">
+                <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                   <p className="text-xs font-medium text-accent-700 dark:text-accent-400">AI Summary</p>
-                  <span className={cn('pill text-[10px]',
-                    aiSummaryResult.sentiment === 'positive' ? 'bg-emerald-100 text-emerald-700' :
-                    aiSummaryResult.sentiment === 'negative' ? 'bg-red-100 text-red-700' :
-                    'bg-slate-100 text-slate-600'
-                  )}>
-                    {aiSummaryResult.sentiment}
-                  </span>
-                  <span className={cn('pill text-[10px]',
-                    aiSummaryResult.risk_score >= 0.7 ? 'bg-red-100 text-red-700' :
-                    aiSummaryResult.risk_score >= 0.3 ? 'bg-amber-100 text-amber-700' :
-                    'bg-emerald-100 text-emerald-700'
-                  )}>
-                    Risk: {(aiSummaryResult.risk_score * 100).toFixed(0)}%
-                  </span>
+                  {aiSummaryResult.sentiment && (
+                    <span className={cn('pill text-[10px]',
+                      aiSummaryResult.sentiment === 'positive' ? 'bg-emerald-100 text-emerald-700' :
+                      aiSummaryResult.sentiment === 'negative' ? 'bg-red-100 text-red-700' :
+                      'bg-slate-100 text-slate-600'
+                    )}>
+                      {aiSummaryResult.sentiment}
+                    </span>
+                  )}
+                  {typeof aiSummaryResult.risk_score === 'number' && !isNaN(aiSummaryResult.risk_score) && (
+                    <span className={cn('pill text-[10px]',
+                      aiSummaryResult.risk_score >= 0.7 ? 'bg-red-100 text-red-700' :
+                      aiSummaryResult.risk_score >= 0.3 ? 'bg-amber-100 text-amber-700' :
+                      'bg-emerald-100 text-emerald-700'
+                    )}>
+                      Risk: {(aiSummaryResult.risk_score * 100).toFixed(0)}%
+                    </span>
+                  )}
                 </div>
                 <p className="text-sm text-slate-700 dark:text-slate-300">{aiSummaryResult.summary}</p>
+              </div>
+            )}
+
+            {(summarizeMutation.isError || suggestMutation.isError) && (
+              <div className="mb-4 p-3 rounded-xl bg-oxblood-50 text-oxblood text-sm flex items-start gap-2">
+                <svg className="h-4 w-4 mt-0.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" /><path d="M12 8v4M12 16h.01" />
+                </svg>
+                <div>
+                  {(() => {
+                    const err: any = summarizeMutation.error ?? suggestMutation.error;
+                    const code = err?.response?.data?.error?.code;
+                    const msg = err?.response?.data?.error?.message;
+                    if (code === 'AI_NOT_CONFIGURED') {
+                      return <span>AI is enabled but no Anthropic API key is set. Configure <code>ANTHROPIC_API_KEY</code> on the backend and restart.</span>;
+                    }
+                    if (code === 'AI_UPSTREAM_ERROR') {
+                      return <span>The AI provider returned an error. Please retry, or check the backend logs.</span>;
+                    }
+                    if (code === 'VALIDATION_ERROR') {
+                      return <span>{msg ?? 'AI features are disabled.'}</span>;
+                    }
+                    return <span>Unable to call the AI service. Try again shortly.</span>;
+                  })()}
+                </div>
               </div>
             )}
 
@@ -533,7 +564,8 @@ export function TicketDetailPage() {
                   )}
                   <div className="ml-auto">
                     <Button
-                      disabled={!commentText.trim() || commentMutation.isPending}
+                      disabled={!commentText.trim()}
+                      loading={commentMutation.isPending}
                       onClick={() => commentMutation.mutate()}
                     >
                       {commentMutation.isPending ? 'Posting…' : 'Post Comment'}
@@ -614,8 +646,9 @@ export function TicketDetailPage() {
               {isAgent && (
                 <Button
                   variant="ghost"
-                  disabled={pauseSLAMutation.isPending || resumeSLAMutation.isPending}
-                  onClick={() => ticket.sla_breached ? resumeSLAMutation.mutate() : pauseSLAMutation.mutate()}
+                  size="sm"
+                  loading={pauseSLAMutation.isPending || resumeSLAMutation.isPending}
+                  onClick={() => ticket.sla_paused_at ? resumeSLAMutation.mutate() : pauseSLAMutation.mutate()}
                 >
                   {ticket.sla_breached ? 'Resume SLA' : 'Pause SLA'}
                 </Button>
