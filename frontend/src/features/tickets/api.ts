@@ -118,8 +118,20 @@ export interface PaginatedResponse<T> {
 }
 
 export async function listTickets(params?: TicketListParams): Promise<PaginatedResponse<TicketSummary>> {
-  const { data } = await api.get('/tickets', { params });
-  return data.data;
+  // Backend uses `per_page`; frontend convention is `page_size` — map here
+  const { page_size, ...rest } = params ?? {};
+  const queryParams = { ...rest, ...(page_size !== undefined ? { per_page: page_size } : {}) };
+  const { data } = await api.get('/tickets', { params: queryParams });
+  // Backend envelope: { data: items[], meta: { pagination: { page, size, total, pages } } }
+  const items: TicketSummary[] = data.data ?? [];
+  const pg = data.meta?.pagination ?? {};
+  return {
+    items,
+    total:       pg.total      ?? 0,
+    page:        pg.page       ?? 1,
+    page_size:   pg.size       ?? (page_size ?? 20),
+    total_pages: pg.pages      ?? 1,
+  };
 }
 
 export async function getTicket(id: string): Promise<Ticket> {
@@ -200,6 +212,16 @@ export async function getAuditLog(params?: {
   page?: number;
   page_size?: number;
 }): Promise<PaginatedResponse<AuditEntry>> {
-  const { data } = await api.get('/audit', { params });
-  return data.data;
+  const { page_size, ...rest } = params ?? {};
+  const queryParams = { ...rest, ...(page_size !== undefined ? { per_page: page_size } : {}) };
+  const { data } = await api.get('/audit', { params: queryParams });
+  const items: AuditEntry[] = data.data ?? [];
+  const pg = data.meta?.pagination ?? {};
+  return {
+    items,
+    total:       pg.total      ?? 0,
+    page:        pg.page       ?? 1,
+    page_size:   pg.size       ?? (page_size ?? 50),
+    total_pages: pg.pages      ?? 1,
+  };
 }
