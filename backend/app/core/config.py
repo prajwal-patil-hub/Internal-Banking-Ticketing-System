@@ -64,6 +64,12 @@ class Settings(BaseSettings):
     SLA_LOW_MINUTES: int = 4320
 
     # --- AI ---
+    # LLM_PROVIDER: "ollama" (local, free) | "anthropic" (cloud) | "none" (disabled)
+    LLM_PROVIDER: Literal["ollama", "anthropic", "none"] = "none"
+    # Ollama: base URL reachable from inside Docker container
+    LLM_BASE_URL: str = "http://host.docker.internal:11434"
+    LLM_MODEL: str = "qwen2.5:3b"
+    # Anthropic (only used when LLM_PROVIDER=anthropic)
     ANTHROPIC_API_KEY: str = ""
     AI_ENABLED: bool = True
     AI_MAX_TOKENS: int = 1024

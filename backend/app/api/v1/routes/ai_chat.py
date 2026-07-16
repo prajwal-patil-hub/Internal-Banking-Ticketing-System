@@ -112,52 +112,89 @@ def _build_system_prompt() -> str:
 
 
 async def _generate_ai_response(user_message: str, history: list[dict]) -> tuple[str, int, int]:
-    """Generate AI response.
+    """Generate AI response using the configured LLM provider.
 
     Returns (response_text, input_tokens, output_tokens).
-    In production this calls the Anthropic API via the anthropic SDK.
-    Returns a structured placeholder when AI is disabled or unavailable.
+    Supports:
+      - "ollama"    → local Ollama server (free, runs on Mac M2 with Metal)
+      - "anthropic" → Anthropic cloud API (requires ANTHROPIC_API_KEY)
+      - "none"      → disabled
     """
-    if not settings.AI_ENABLED:
+    if not settings.AI_ENABLED or settings.LLM_PROVIDER == "none":
         return (
-            "AI assistance is currently disabled. Please contact your system administrator.",
+            "AI assistance is currently disabled. Set LLM_PROVIDER=ollama in backend/.env to enable it.",
             0,
             0,
         )
 
-    try:
-        import time
+    # ── Ollama (local LLM, OpenAI-compatible endpoint) ──────────────────────
+    if settings.LLM_PROVIDER == "ollama":
+        try:
+            import httpx
 
-        import anthropic  # type: ignore[import-untyped]
+            messages = [{"role": "system", "content": _build_system_prompt()}]
+            for turn in history:
+                messages.append({"role": turn["role"], "content": turn["content"]})
+            messages.append({"role": "user", "content": user_message})
 
-        client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                resp = await client.post(
+                    f"{settings.LLM_BASE_URL}/v1/chat/completions",
+                    json={
+                        "model": settings.LLM_MODEL,
+                        "messages": messages,
+                        "max_tokens": settings.AI_MAX_TOKENS,
+                        "stream": False,
+                    },
+                )
+                resp.raise_for_status()
+                payload = resp.json()
 
-        messages = []
-        for turn in history:
-            messages.append({"role": turn["role"], "content": turn["content"]})
-        messages.append({"role": "user", "content": user_message})
+            choice = payload["choices"][0]
+            response_text: str = choice["message"]["content"]
+            usage = payload.get("usage", {})
+            input_tokens  = usage.get("prompt_tokens",     0)
+            output_tokens = usage.get("completion_tokens", 0)
+            return response_text, input_tokens, output_tokens
 
-        start = time.monotonic()
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=settings.AI_MAX_TOKENS,
-            system=_build_system_prompt(),
-            messages=messages,
-        )
-        _ = int((time.monotonic() - start) * 1000)  # latency captured for future logging
+        except Exception as exc:
+            log.warning("ollama_api_error", error=str(exc), model=settings.LLM_MODEL, url=settings.LLM_BASE_URL)
+            return (
+                f"Local AI (Ollama) is unavailable: {exc}. "
+                "Make sure Ollama is running on your Mac: `ollama serve`",
+                0,
+                0,
+            )
 
-        response_text = response.content[0].text if response.content else ""
-        input_tokens = response.usage.input_tokens
-        output_tokens = response.usage.output_tokens
-        return response_text, input_tokens, output_tokens
+    # ── Anthropic (cloud) ────────────────────────────────────────────────────
+    if settings.LLM_PROVIDER == "anthropic":
+        try:
+            import anthropic  # type: ignore[import-untyped]
 
-    except Exception as exc:
-        log.warning("ai_api_error", error=str(exc))
-        return (
-            "I'm sorry, I encountered an issue processing your request. Please try again shortly.",
-            0,
-            0,
-        )
+            client_a = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+            messages_a = []
+            for turn in history:
+                messages_a.append({"role": turn["role"], "content": turn["content"]})
+            messages_a.append({"role": "user", "content": user_message})
+
+            response = client_a.messages.create(
+                model=settings.LLM_MODEL or "claude-haiku-4-5-20251001",
+                max_tokens=settings.AI_MAX_TOKENS,
+                system=_build_system_prompt(),
+                messages=messages_a,
+            )
+            response_text = response.content[0].text if response.content else ""
+            return response_text, response.usage.input_tokens, response.usage.output_tokens
+
+        except Exception as exc:
+            log.warning("anthropic_api_error", error=str(exc))
+            return (
+                "I'm sorry, I encountered an issue processing your request. Please try again shortly.",
+                0,
+                0,
+            )
+
+    return ("Unsupported LLM_PROVIDER value in configuration.", 0, 0)
 
 
 # ---------------------------------------------------------------------------
