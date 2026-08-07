@@ -2,93 +2,303 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ── Design Tokens ─────────────────────────────────────────────────────────── */
+/* ── Warm Neumorphic Design Tokens ─────────────────────────────────────────── */
 :root {
-  --brand-grad:    linear-gradient(180deg, #4F36DC 0%, #3F2FBE 100%);
-  --accent-grad:   linear-gradient(135deg, #B89AFF 0%, #7E4DFF 100%);
-  --sidebar-width: 220px;
-  --header-height: 56px;
+  /* Layout */
+  --sidebar-width:  228px;
+  --header-height:  56px;
+
+  /* Surface — identical to bg; shadows create all depth */
+  --bg:      #EDE4D8;
+  --surface: #EDE4D8;
+  --raised:  #F0E7DB;
+  --inset:   #E8DFCF;
+
+  /* Shadow pair */
+  --sh-dark:  #C8BAA8;
+  --sh-light: #FFFFFF;
+
+  /* Elevation presets */
+  --neu-xs:      2px 2px 5px var(--sh-dark), -2px -2px 5px var(--sh-light);
+  --neu-sm:      4px 4px 8px var(--sh-dark), -4px -4px 8px var(--sh-light);
+  --neu-md:      8px 8px 16px var(--sh-dark), -8px -8px 16px var(--sh-light);
+  --neu-lg:      12px 12px 24px rgba(180,160,136,.55), -12px -12px 24px rgba(255,255,255,.90);
+  --neu-in:      inset 3px 3px 7px var(--sh-dark), inset -3px -3px 7px var(--sh-light);
+  --neu-in-deep: inset 5px 5px 10px var(--sh-dark), inset -5px -5px 10px var(--sh-light);
+  --drop-md:     0 10px 32px rgba(120,100,80,.22);
+  --drop-lg:     0 20px 56px rgba(100,80,60,.30);
+
+  /* Brand */
+  --brand:    #0F5C5C;
+  --brand-dk: #0A4444;
+  --brand-lt: #1A7A7A;
+  --brand-xs: #D6ECEC;
+  --brand-sm: #A8D8D8;
+
+  /* Text */
+  --tx:   #1A1A1C;
+  --tx-2: #4A4A4C;
+  --tx-3: #8A8A8C;
+
+  /* Divider */
+  --line: rgba(180,160,136,.25);
+
+  /* Semantic */
+  --err:     #C0392B;
+  --err-bg:  rgba(192,57,43,.10);
+  --warn:    #B45309;
+  --warn-bg: rgba(180,83,9,.10);
+  --ok:      #0F5C5C;
+  --ok-bg:   #D6ECEC;
+  --info:    #1D4ED8;
+  --info-bg: rgba(29,78,216,.10);
+
+  /* Radius */
+  --r1: 4px;  --r2: 8px;  --r3: 12px; --r4: 16px;
+  --r5: 24px; --r6: 32px; --rf: 9999px;
+
+  /* Motion */
+  --t-fast: 100ms ease;
+  --t-base: 160ms ease;
+  --t-slow: 260ms ease-out;
 }
 
-html, body, #root { height: 100%; }
+/* ── Dark mode ──────────────────────────────────────────────────────────────── */
+.dark {
+  --bg:      #1A2828;
+  --surface: #1A2828;
+  --raised:  #1E2E2E;
+  --inset:   #162020;
+  --sh-dark:  #0E1C1C;
+  --sh-light: #283C3C;
+  --brand:    #2AAFAF;
+  --brand-dk: #1A8A8A;
+  --brand-lt: #3DBCBC;
+  --brand-xs: #0F3030;
+  --brand-sm: #1A4A4A;
+  --tx:   #F0EBE4;
+  --tx-2: #A8A098;
+  --tx-3: #6A6060;
+  --line: rgba(255,255,255,.08);
+  --err:  #F87171;
+  --warn: #FBBF24;
+  --ok:   #34D399;
+  --ok-bg: rgba(52,211,153,.12);
+}
 
-/* ── Scrollbar ─────────────────────────────────────────────────────────────── */
+html, body, #root {
+  height: 100%;
+  background: var(--bg);
+  color: var(--tx);
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: rgba(63, 47, 190, 0.20);
-  border-radius: 999px;
+  background: var(--sh-dark);
+  border-radius: var(--rf);
 }
-::-webkit-scrollbar-thumb:hover { background: rgba(63, 47, 190, 0.40); }
+::-webkit-scrollbar-thumb:hover { background: var(--tx-3); }
 
-/* ── Filter drawer animation ──────────────────────────────────────────────── */
+/* ── Filter drawer animation ────────────────────────────────────────────────── */
 .filter-drawer {
   display: grid;
   grid-template-rows: 0fr;
   transition: grid-template-rows 220ms cubic-bezier(0.4, 0, 0.2, 1);
 }
-.filter-drawer.open {
-  grid-template-rows: 1fr;
-}
-.filter-drawer > * {
-  overflow: hidden;
-}
+.filter-drawer.open { grid-template-rows: 1fr; }
+.filter-drawer > * { overflow: hidden; }
 
-/* ── Component layer ──────────────────────────────────────────────────────── */
+/* ── Component layer ────────────────────────────────────────────────────────── */
 @layer components {
-  /* Cards */
+
+  /* ── Cards ── */
   .card {
-    @apply bg-surface rounded-2xl shadow-card p-5;
+    background: var(--bg);
+    border-radius: var(--r4);
+    box-shadow: var(--neu-md);
+    padding: 20px;
   }
   .card-sm {
-    @apply bg-surface rounded-xl shadow-card p-4;
+    background: var(--bg);
+    border-radius: var(--r3);
+    box-shadow: var(--neu-sm);
+    padding: 16px;
+  }
+  .card-raised {
+    background: var(--raised);
+    border-radius: var(--r4);
+    box-shadow: var(--neu-md);
+    padding: 20px;
   }
 
-  /* Data pill */
-  .pill {
-    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium;
-  }
-
-  /* Buttons */
+  /* ── Buttons ── */
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-1.5 rounded-lg bg-brand-600 hover:bg-brand-500
-           text-white px-3.5 py-1.5 text-sm font-medium shadow-sm transition-colors
-           disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply inline-flex items-center justify-center gap-1.5 text-sm font-semibold;
+    padding: 9px 20px;
+    border-radius: var(--rf);
+    border: none;
+    cursor: pointer;
+    background: var(--brand);
+    color: #fff;
+    box-shadow: 4px 4px 10px rgba(10,68,68,.35), -2px -2px 6px rgba(40,120,120,.15);
+    transition: box-shadow var(--t-fast), background var(--t-base), transform var(--t-fast);
   }
+  .btn-primary:hover {
+    background: var(--brand-lt);
+    box-shadow: 6px 6px 14px rgba(10,68,68,.4), -3px -3px 8px rgba(40,120,120,.18);
+  }
+  .btn-primary:active {
+    transform: scale(.97);
+    box-shadow: var(--neu-btn-press, inset 3px 3px 6px rgba(10,68,68,.3), inset -2px -2px 4px rgba(40,120,120,.1));
+  }
+  .btn-primary:disabled {
+    opacity: .45;
+    cursor: not-allowed;
+    box-shadow: none;
+  }
+
   .btn-ghost {
-    @apply inline-flex items-center justify-center gap-1.5 rounded-lg bg-transparent
-           hover:bg-surface-subtle text-slate-700 dark:text-slate-300 px-3.5 py-1.5 text-sm font-medium transition-colors;
+    @apply inline-flex items-center justify-center gap-1.5 text-sm font-semibold;
+    padding: 9px 20px;
+    border-radius: var(--rf);
+    border: none;
+    cursor: pointer;
+    background: var(--bg);
+    color: var(--tx-2);
+    box-shadow: var(--neu-sm);
+    transition: box-shadow var(--t-fast), color var(--t-base), transform var(--t-fast);
   }
+  .btn-ghost:hover  { box-shadow: var(--neu-xs); color: var(--tx); }
+  .btn-ghost:active { box-shadow: var(--neu-in); transform: scale(.97); }
+  .btn-ghost:disabled { opacity: .45; cursor: not-allowed; }
+
   .btn-outline {
-    @apply inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200
-           dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-surface-subtle
-           text-slate-700 dark:text-slate-300 px-3.5 py-1.5 text-sm font-medium transition-colors
-           disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply inline-flex items-center justify-center gap-1.5 text-sm font-semibold;
+    padding: 8px 18px;
+    border-radius: var(--rf);
+    border: 1px solid var(--line);
+    cursor: pointer;
+    background: var(--bg);
+    color: var(--tx-2);
+    box-shadow: var(--neu-xs);
+    transition: box-shadow var(--t-fast), color var(--t-base);
   }
+  .btn-outline:hover  { box-shadow: var(--neu-sm); color: var(--tx); }
+  .btn-outline:active { box-shadow: var(--neu-in); }
+
   .btn-danger {
-    @apply inline-flex items-center justify-center gap-1.5 rounded-lg bg-red-600 hover:bg-red-500
-           text-white px-3.5 py-1.5 text-sm font-medium shadow-sm transition-colors
-           disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply inline-flex items-center justify-center gap-1.5 text-sm font-semibold;
+    padding: 9px 20px;
+    border-radius: var(--rf);
+    border: none;
+    cursor: pointer;
+    background: var(--bg);
+    color: var(--err);
+    box-shadow: var(--neu-sm);
+    transition: box-shadow var(--t-fast), background var(--t-base), transform var(--t-fast);
   }
+  .btn-danger:hover  { background: var(--err-bg); box-shadow: var(--neu-xs); }
+  .btn-danger:active { box-shadow: var(--neu-in); transform: scale(.97); }
+  .btn-danger:disabled { opacity: .45; cursor: not-allowed; }
 
-  /* Form inputs */
+  /* ── Form inputs — inset (sunken into surface) ── */
   .input {
-    @apply w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm
-           placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-200
-           outline-none transition-colors;
+    width: 100%;
+    border-radius: var(--r2);
+    border: none;
+    background: var(--bg);
+    box-shadow: var(--neu-in);
+    padding: 9px 14px;
+    font-size: .875rem;
+    color: var(--tx);
+    outline: none;
+    transition: box-shadow var(--t-base);
+  }
+  .input::placeholder { color: var(--tx-3); }
+  .input:focus        { box-shadow: var(--neu-in-deep); }
+  .input:disabled     { opacity: .5; cursor: not-allowed; }
+  .input.error        { box-shadow: var(--neu-in), 0 0 0 2px var(--err-bg); }
+
+  /* ── Badge / pill ── */
+  .pill {
+    @apply inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold;
+  }
+  .pill-ok   { background: var(--ok-bg);   color: var(--ok);   }
+  .pill-err  { background: var(--err-bg);  color: var(--err);  }
+  .pill-warn { background: var(--warn-bg); color: var(--warn); }
+  .pill-info { background: var(--info-bg); color: var(--info); }
+  .pill-neu  { background: var(--bg);      color: var(--tx-2); box-shadow: var(--neu-xs); }
+
+  /* ── Filter chip ── */
+  .filter-chip {
+    @apply inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold;
+    background: var(--bg);
+    color: var(--brand);
+    box-shadow: var(--neu-in);
   }
 
-  /* Filter chip */
-  .filter-chip {
-    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-brand-50 text-brand-700
-           dark:bg-brand-900/30 dark:text-brand-300 text-xs font-medium border border-brand-200
-           dark:border-brand-700/40;
+  /* ── Data table ── */
+  .data-table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+  .data-table th {
+    padding: 12px 16px;
+    text-align: left;
+    font-size: .65rem;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--tx-3);
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+  }
+  .data-table td {
+    padding: 13px 16px;
+    border-bottom: 1px solid var(--line);
+    color: var(--tx-2);
+    vertical-align: middle;
+  }
+  .data-table tr:last-child td { border-bottom: none; }
+  .data-table tr:hover td      { background: rgba(15,92,92,.03); }
+
+  /* ── Sidebar nav item ── */
+  .nav-item {
+    @apply flex items-center gap-2.5 px-5 py-2 text-sm font-medium cursor-pointer;
+    color: var(--tx-2);
+    border-left: 3px solid transparent;
+    transition: all var(--t-base);
+  }
+  .nav-item:hover {
+    color: var(--tx);
+    background: linear-gradient(to right, rgba(15,92,92,.05), transparent);
+  }
+  .nav-item.active {
+    color: var(--brand);
+    border-left-color: var(--brand);
+    font-weight: 600;
+    background: linear-gradient(to right, var(--brand-xs), transparent);
+  }
+
+  /* ── Inset surface (for search bars, code blocks) ── */
+  .inset-surface {
+    background: var(--bg);
+    box-shadow: var(--neu-in);
+    border-radius: var(--r3);
   }
 }
 
-/* ── Dark mode overrides ─────────────────────────────────────────────────── */
-.dark body       { @apply bg-slate-950 text-slate-100; }
-.dark .card      { @apply bg-slate-900 shadow-none border border-slate-800; }
-.dark .card-sm   { @apply bg-slate-900 shadow-none border border-slate-800; }
-.dark .input     { @apply bg-slate-900 border-slate-700 text-slate-100 placeholder:text-slate-500; }
-.dark .btn-ghost { @apply hover:bg-slate-800; }
+/* ── Dark mode component overrides ─────────────────────────────────────────── */
+.dark .card,
+.dark .card-sm,
+.dark .card-raised {
+  background: var(--bg);
+  box-shadow: var(--neu-md);
+  border: none;
+}
+.dark .input {
+  background: var(--bg);
+  color: var(--tx);
+}
+.dark .data-table tr:hover td {
+  background: rgba(42,175,175,.04);
+}
