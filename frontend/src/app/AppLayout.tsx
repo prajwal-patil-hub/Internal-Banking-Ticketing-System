@@ -75,7 +75,7 @@ export function AppLayout() {
 
   return (
     <div
-      className="min-h-full grid bg-surface-muted dark:bg-slate-950"
+      className="min-h-full grid bg-[var(--bg)]"
       style={{ gridTemplateColumns: 'var(--sidebar-width, 220px) 1fr' }}
     >
       {/* ── Sidebar ─────────────────────────────────────────────────────── */}
@@ -95,7 +95,7 @@ export function AppLayout() {
                 cn(
                   'flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm font-medium transition-colors',
                   isActive
-                    ? 'bg-white text-brand-700 shadow-sm'
+                    ? 'bg-white/15 text-white border-l-2 border-white shadow-sm'
                     : 'text-white/80 hover:bg-white/10 hover:text-white',
                 )
               }
@@ -103,7 +103,7 @@ export function AppLayout() {
               <Icon d={item.icon} />
               <span className="flex-1 truncate">{item.label}</span>
               {item.badge && (
-                <span className="px-1.5 py-0.5 rounded bg-accent-500/30 text-accent-100 text-[9px] font-bold tracking-wider leading-none">
+                <span className="px-1.5 py-0.5 rounded bg-white/15 text-white/90 text-[9px] font-bold tracking-wider leading-none">
                   {item.badge}
                 </span>
               )}
@@ -137,13 +137,13 @@ export function AppLayout() {
       <div className="flex flex-col min-h-0 overflow-auto">
         {/* Header */}
         <header
-          className="shrink-0 px-6 flex items-center justify-between border-b border-slate-200/70 bg-white/70 backdrop-blur-sm dark:bg-slate-900/70 dark:border-slate-800 sticky top-0 z-20"
-          style={{ height: 'var(--header-height, 56px)' }}
+          className="shrink-0 px-6 flex items-center justify-between sticky top-0 z-20 bg-[var(--bg)]"
+          style={{ height: 'var(--header-height, 56px)', boxShadow: '0 2px 8px var(--sh-dark)' }}
         >
           {/* Breadcrumb */}
-          <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-            <span className="font-medium text-slate-700 dark:text-slate-300">SUCCESS Bank</span>
-            <span className="text-slate-300 dark:text-slate-700">/</span>
+          <div className="flex items-center gap-2 text-xs text-[var(--tx-3)]">
+            <span className="font-medium text-[var(--tx-2)]">SUCCESS Bank</span>
+            <span>/</span>
             <span>Internal Ticketing</span>
           </div>
 
@@ -152,7 +152,7 @@ export function AppLayout() {
             {/* Search */}
             <form onSubmit={handleSearch} className="relative hidden md:block">
               <svg
-                className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none"
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--tx-3)] pointer-events-none"
                 viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
                 strokeLinecap="round" strokeLinejoin="round"
               >
@@ -170,15 +170,15 @@ export function AppLayout() {
             {/* User avatar + role */}
             <div className="flex items-center gap-2">
               <div className="hidden md:flex flex-col items-end leading-tight">
-                <span className="text-xs font-medium text-slate-700 dark:text-slate-300">{user?.full_name}</span>
-                <span className="text-[10px] text-slate-400 capitalize">{user?.role.replace('_', ' ')}</span>
+                <span className="text-xs font-medium text-[var(--tx)]">{user?.full_name}</span>
+                <span className="text-[10px] text-[var(--tx-3)] capitalize">{user?.role.replace('_', ' ')}</span>
               </div>
               <div className="h-8 w-8 rounded-full bg-brand-100 dark:bg-brand-900/50 flex items-center justify-center text-brand-700 dark:text-brand-300 text-xs font-bold">
                 {user ? userInitials(user.full_name) : 'SB'}
               </div>
               <button
                 onClick={onLogout}
-                className="text-xs text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition-colors"
+                className="text-xs text-[var(--tx-3)] hover:text-[var(--tx)] transition-colors"
                 title="Sign out"
               >
                 <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

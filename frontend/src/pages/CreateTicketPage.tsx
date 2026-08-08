@@ -66,7 +66,7 @@ function TagInput({ value, onChange }: { value: string[]; onChange: (v: string[]
           Add
         </button>
       </div>
-      <p className="text-[10px] text-slate-400">Press Enter to add · max 10 tags</p>
+      <p className="text-[10px] text-[var(--tx-3)]">Press Enter to add · max 10 tags</p>
     </div>
   );
 }
@@ -86,24 +86,24 @@ function AISuggestion({ suggestion, categories, onAccept, onDismiss }: AISuggest
   );
 
   return (
-    <div className="p-3.5 rounded-xl border-2 border-accent-300 dark:border-accent-500/50 bg-accent-50 dark:bg-accent-500/10">
+    <div className="card-sm !p-3.5" style={{ borderLeft: '2px solid var(--brand-sm)' }}>
       <div className="flex items-start justify-between gap-3 mb-3">
         <div className="flex items-center gap-2">
-          <div className="h-6 w-6 rounded-lg bg-accent-200 dark:bg-accent-500/30 flex items-center justify-center">
-            <svg className="h-3.5 w-3.5 text-accent-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <div className="h-6 w-6 rounded-lg bg-[var(--brand-xs)] flex items-center justify-center">
+            <svg className="h-3.5 w-3.5 text-[var(--brand)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 2a10 10 0 0 1 0 20M12 2a10 10 0 0 0 0 20M12 8v4M12 16h.01" />
             </svg>
           </div>
-          <span className="text-sm font-semibold text-accent-700 dark:text-accent-400">AI Suggestion</span>
-          <span className={cn('pill text-[10px]',
-            suggestion.confidence >= 0.8 ? 'bg-emerald-100 text-emerald-700' :
-            suggestion.confidence >= 0.5 ? 'bg-amber-100 text-amber-700' :
-            'bg-red-100 text-red-700'
+          <span className="text-sm font-semibold text-[var(--brand-dk)] dark:text-[var(--brand-lt)]">AI Suggestion</span>
+          <span className={cn('pill',
+            suggestion.confidence >= 0.8 ? 'pill-ok' :
+            suggestion.confidence >= 0.5 ? 'pill-warn' :
+            'pill-err'
           )}>
             {(suggestion.confidence * 100).toFixed(0)}% confidence
           </span>
         </div>
-        <button onClick={onDismiss} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors">
+        <button onClick={onDismiss} className="text-[var(--tx-3)] hover:text-[var(--tx)] transition-colors">
           <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M18 6 6 18M6 6l12 12" />
           </svg>
@@ -112,28 +112,28 @@ function AISuggestion({ suggestion, categories, onAccept, onDismiss }: AISuggest
 
       <div className="grid grid-cols-2 gap-3 mb-3">
         <div>
-          <p className="text-[10px] text-slate-400 uppercase tracking-wide font-semibold mb-0.5">Category</p>
-          <p className="text-xs font-medium text-slate-800 dark:text-slate-200">
+          <p className="text-[10px] text-[var(--tx-3)] uppercase tracking-wide font-semibold mb-0.5">Category</p>
+          <p className="text-xs font-medium text-[var(--tx)]">
             {suggestion.category}
-            {suggestion.subcategory && <span className="text-slate-400"> / {suggestion.subcategory}</span>}
+            {suggestion.subcategory && <span className="text-[var(--tx-3)]"> / {suggestion.subcategory}</span>}
           </p>
         </div>
         <div>
-          <p className="text-[10px] text-slate-400 uppercase tracking-wide font-semibold mb-0.5">Priority</p>
-          <p className="text-xs font-medium capitalize text-slate-800 dark:text-slate-200">{suggestion.priority}</p>
+          <p className="text-[10px] text-[var(--tx-3)] uppercase tracking-wide font-semibold mb-0.5">Priority</p>
+          <p className="text-xs font-medium capitalize text-[var(--tx)]">{suggestion.priority}</p>
         </div>
         {suggestion.department && (
           <div>
-            <p className="text-[10px] text-slate-400 uppercase tracking-wide font-semibold mb-0.5">Department</p>
-            <p className="text-xs font-medium text-slate-800 dark:text-slate-200">{suggestion.department}</p>
+            <p className="text-[10px] text-[var(--tx-3)] uppercase tracking-wide font-semibold mb-0.5">Department</p>
+            <p className="text-xs font-medium text-[var(--tx)]">{suggestion.department}</p>
           </div>
         )}
         {suggestion.tags.length > 0 && (
           <div>
-            <p className="text-[10px] text-slate-400 uppercase tracking-wide font-semibold mb-0.5">Tags</p>
+            <p className="text-[10px] text-[var(--tx-3)] uppercase tracking-wide font-semibold mb-0.5">Tags</p>
             <div className="flex flex-wrap gap-1">
               {suggestion.tags.map((t) => (
-                <span key={t} className="pill bg-accent-100 text-accent-700 dark:bg-accent-500/20 dark:text-accent-400 text-[9px]">{t}</span>
+                <span key={t} className="pill bg-[var(--brand-xs)] text-[var(--brand)] text-[9px]">{t}</span>
               ))}
             </div>
           </div>
@@ -157,11 +157,11 @@ function AISuggestion({ suggestion, categories, onAccept, onDismiss }: AISuggest
 function Field({ label, required, error, children }: { label: string; required?: boolean; error?: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
-        {label} {required && <span className="text-red-500">*</span>}
+      <label className="text-sm font-medium text-[var(--tx-2)]">
+        {label} {required && <span className="text-[var(--err)]">*</span>}
       </label>
       {children}
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      {error && <p className="text-xs text-[var(--err)]">{error}</p>}
     </div>
   );
 }
@@ -221,22 +221,22 @@ export function CreateTicketPage() {
       <div className="flex items-center gap-3">
         <button
           onClick={() => navigate('/tickets')}
-          className="h-8 w-8 rounded-lg border border-slate-200 dark:border-slate-700 flex items-center justify-center hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors shrink-0"
+          className="btn-ghost !p-1.5 rounded-lg shrink-0"
         >
-          <svg className="h-3.5 w-3.5 text-slate-600 dark:text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M19 12H5M12 5l-7 7 7 7" />
           </svg>
         </button>
         <div>
-          <h1 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">Create Ticket</h1>
-          <p className="text-xs text-slate-400">Submit a new support request</p>
+          <h1 className="text-xl font-semibold tracking-tight text-[var(--tx)]">Create Ticket</h1>
+          <p className="text-xs text-[var(--tx-3)]">Submit a new support request</p>
         </div>
       </div>
 
       <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4">
 
         {/* Main content card */}
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-5 flex flex-col gap-4">
+        <div className="card-sm !p-5 flex flex-col gap-4">
 
           <Field label="Title" required error={errors.title?.message}>
             <input
@@ -273,10 +273,10 @@ export function CreateTicketPage() {
               {aiMutation.isPending ? 'Analyzing…' : 'AI Assist'}
             </button>
             {!canAI && (
-              <p className="text-xs text-slate-400">Add title + description to enable AI Assist</p>
+              <p className="text-xs text-[var(--tx-3)]">Add title + description to enable AI Assist</p>
             )}
             {aiMutation.isError && (
-              <p className="text-xs text-red-600">AI analysis failed. Fill in manually.</p>
+              <p className="text-xs text-[var(--err)]">AI analysis failed. Fill in manually.</p>
             )}
           </div>
 
@@ -292,8 +292,8 @@ export function CreateTicketPage() {
         </div>
 
         {/* Classification card */}
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-5">
-          <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-4">Classification</h2>
+        <div className="card-sm !p-5">
+          <h2 className="text-sm font-semibold text-[var(--tx-2)] mb-4">Classification</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="Priority" required error={errors.priority?.message}>
               <select {...register('priority')} className="input">
@@ -327,7 +327,7 @@ export function CreateTicketPage() {
 
         {/* Submit error */}
         {submitError && (
-          <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
+          <div className="card-sm flex items-center gap-2 text-sm text-[var(--err)]" style={{ borderLeft: '3px solid var(--err)' }}>
             <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="10" /><path d="M12 8v4M12 16h.01" />
             </svg>

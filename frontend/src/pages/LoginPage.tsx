@@ -67,10 +67,10 @@ export function LoginPage() {
         <span className="text-white/60 text-xs">© SUCCESS Bank — internal use only.</span>
       </div>
 
-      <div className="flex items-center justify-center p-8 bg-surface-muted dark:bg-slate-950">
+      <div className="flex items-center justify-center p-8 bg-[var(--bg)]">
         <Card className="w-full max-w-md">
-          <h2 className="text-xl font-semibold">Sign in</h2>
-          <p className="text-sm text-slate-500 mt-1">Use your corporate credentials.</p>
+          <h2 className="text-xl font-semibold text-[var(--tx)]">Sign in</h2>
+          <p className="text-sm text-[var(--tx-2)] mt-1">Use your corporate credentials.</p>
 
           {submitError && (
             <div className="mt-4">
@@ -80,7 +80,7 @@ export function LoginPage() {
 
           <form className="mt-6 flex flex-col gap-4" onSubmit={handleSubmit(onSubmit)} noValidate>
             <label className="text-sm">
-              <span className="block mb-1 font-medium">Work email</span>
+              <span className="block mb-1 font-medium text-[var(--tx-2)]">Work email</span>
               <input
                 className="input"
                 type="email"
@@ -88,11 +88,11 @@ export function LoginPage() {
                 placeholder="you@successbank.com"
                 {...register('email')}
               />
-              {errors.email && <span className="text-xs text-red-600">{errors.email.message}</span>}
+              {errors.email && <span className="text-xs text-[var(--err)]">{errors.email.message}</span>}
             </label>
 
             <label className="text-sm">
-              <span className="block mb-1 font-medium">Password</span>
+              <span className="block mb-1 font-medium text-[var(--tx-2)]">Password</span>
               <input
                 className="input"
                 type="password"
@@ -101,7 +101,7 @@ export function LoginPage() {
                 {...register('password')}
               />
               {errors.password && (
-                <span className="text-xs text-red-600">{errors.password.message}</span>
+                <span className="text-xs text-[var(--err)]">{errors.password.message}</span>
               )}
             </label>
 
@@ -109,7 +109,7 @@ export function LoginPage() {
               {isSubmitting ? 'Signing in…' : 'Sign in'}
             </Button>
 
-            <p className="text-xs text-slate-500 text-center">
+            <p className="text-xs text-[var(--tx-3)] text-center">
               MFA prompt appears after first login (P8).
             </p>
           </form>

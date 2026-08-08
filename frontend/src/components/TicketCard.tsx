@@ -42,7 +42,7 @@ function SourceIcon({ source }: { source: string }) {
   };
   const icon = icons[source] ?? icons.portal;
   return (
-    <span title={icon.label} className="text-slate-300 dark:text-slate-600">
+    <span title={icon.label} className="text-[var(--tx-3)]">
       <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
         <path d={icon.path} strokeLinecap="round" strokeLinejoin="round" />
       </svg>
@@ -62,17 +62,17 @@ export function TicketCard({ ticket, className, compact = false }: Props) {
         onClick={() => navigate(`/tickets/${ticket.id}`)}
         onKeyDown={(e) => e.key === 'Enter' && navigate(`/tickets/${ticket.id}`)}
         className={cn(
-          'group flex items-center gap-3 px-3 py-2.5 rounded-xl border cursor-pointer transition-all',
-          'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800',
-          'hover:border-brand-300 dark:hover:border-brand-700 hover:shadow-sm',
-          ticket.sla_breached && 'border-l-2 border-l-red-500',
+          'card-sm cursor-pointer transition-shadow duration-150',
+          '!p-0 flex items-center gap-3 px-3 py-2.5',
+          'hover:shadow-[var(--neu-md)]',
+          ticket.sla_breached && 'border-l-2 border-l-[var(--err)]',
           className,
         )}
       >
         {/* SLA dot */}
         <span className={cn(
           'h-2 w-2 rounded-full shrink-0',
-          ticket.sla_breached ? 'bg-red-500' : 'bg-emerald-400',
+          ticket.sla_breached ? 'bg-[var(--err)]' : 'bg-emerald-400',
         )} />
 
         {/* Ticket number */}
@@ -81,7 +81,7 @@ export function TicketCard({ ticket, className, compact = false }: Props) {
         </span>
 
         {/* Title */}
-        <span className="flex-1 text-xs font-medium text-slate-800 dark:text-slate-200 truncate">
+        <span className="flex-1 text-xs font-medium text-[var(--tx)] truncate">
           {ticket.title}
         </span>
 
@@ -89,7 +89,7 @@ export function TicketCard({ ticket, className, compact = false }: Props) {
         <div className="flex items-center gap-1.5 shrink-0">
           <StatusBadge status={ticket.status} />
           <PriorityBadge priority={ticket.priority} />
-          <span className="text-[10px] text-slate-400">{formatRelativeTime(ticket.created_at)}</span>
+          <span className="text-[10px] text-[var(--tx-3)]">{formatRelativeTime(ticket.created_at)}</span>
         </div>
       </div>
     );
@@ -103,11 +103,9 @@ export function TicketCard({ ticket, className, compact = false }: Props) {
       onClick={() => navigate(`/tickets/${ticket.id}`)}
       onKeyDown={(e) => e.key === 'Enter' && navigate(`/tickets/${ticket.id}`)}
       className={cn(
-        'group cursor-pointer rounded-xl border transition-all duration-150',
-        'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800',
-        'hover:border-brand-300 dark:hover:border-brand-700 hover:shadow-md hover:-translate-y-px',
-        ticket.sla_breached && 'border-l-[3px] border-l-red-500',
-        'p-3.5',
+        'card-sm cursor-pointer transition-shadow duration-150',
+        '!p-3.5 hover:shadow-[var(--neu-md)] hover:-translate-y-px',
+        ticket.sla_breached && 'border-l-[3px] border-l-[var(--err)]',
         className,
       )}
     >
@@ -123,7 +121,7 @@ export function TicketCard({ ticket, className, compact = false }: Props) {
           </div>
 
           {/* Title */}
-          <h3 className="text-sm font-medium text-slate-900 dark:text-slate-100 line-clamp-2 leading-snug">
+          <h3 className="text-sm font-medium text-[var(--tx)] line-clamp-2 leading-snug">
             {ticket.title}
           </h3>
 
@@ -142,9 +140,9 @@ export function TicketCard({ ticket, className, compact = false }: Props) {
           <div className="mt-2 flex items-center gap-2.5 flex-wrap">
             <SLABadge breached={ticket.sla_breached} dueAt={ticket.resolution_due_at ?? null} />
             {ticket.department && (
-              <span className="text-[11px] text-slate-500 dark:text-slate-400">{ticket.department}</span>
+              <span className="text-[11px] text-[var(--tx-2)]">{ticket.department}</span>
             )}
-            <span className="text-[11px] text-slate-400 dark:text-slate-500 ml-auto">
+            <span className="text-[11px] text-[var(--tx-3)] ml-auto">
               {formatRelativeTime(ticket.created_at)}
             </span>
           </div>

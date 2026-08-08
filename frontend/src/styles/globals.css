@@ -80,10 +80,14 @@
   --tx-2: #A8A098;
   --tx-3: #6A6060;
   --line: rgba(255,255,255,.08);
-  --err:  #F87171;
-  --warn: #FBBF24;
-  --ok:   #34D399;
-  --ok-bg: rgba(52,211,153,.12);
+  --err:     #F87171;
+  --err-bg:  rgba(248,113,113,.12);
+  --warn:    #FBBF24;
+  --warn-bg: rgba(251,191,36,.12);
+  --ok:      #34D399;
+  --ok-bg:   rgba(52,211,153,.12);
+  --info:    #60A5FA;
+  --info-bg: rgba(96,165,250,.12);
 }
 
 html, body, #root {
