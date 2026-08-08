@@ -1,7 +1,8 @@
-"""AI service — GLM-4 (Zhipu AI) powered operations for the banking ticketing system.
+"""AI service — Ollama-powered operations for the banking ticketing system.
 
-Uses the zhipuai SDK (synchronous client) wrapped in asyncio.run_in_executor
-so it integrates cleanly with FastAPI's async request handlers.
+Uses the openai SDK pointed at the local Ollama server (OpenAI-compatible API),
+wrapped in asyncio.run_in_executor so it integrates cleanly with FastAPI's
+async request handlers.
 
 All AI calls are logged to AIInteractionLog for auditability, cost tracking,
 and replay/debugging.
@@ -15,7 +16,7 @@ import time
 import uuid
 from typing import Any
 
-from zhipuai import ZhipuAI
+from openai import OpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -34,7 +35,12 @@ class AIService:
         db: AsyncSession,
         actor_id: str | None = None,
     ) -> None:
-        self.client = ZhipuAI(api_key=settings.GLM_API_KEY)
+        # Ollama exposes an OpenAI-compatible API at /v1 — api_key is required
+        # by the SDK but ignored by Ollama
+        self.client = OpenAI(
+            base_url=f"{settings.LLM_BASE_URL}/v1",
+            api_key="ollama",
+        )
         self.db = db
         self.actor_id = actor_id
 

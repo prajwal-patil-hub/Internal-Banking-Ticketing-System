@@ -64,14 +64,12 @@ class Settings(BaseSettings):
     SLA_LOW_MINUTES: int = 4320
 
     # --- AI ---
-    # LLM_PROVIDER: "glm4" (Zhipu AI cloud) | "ollama" (local) | "anthropic" (cloud) | "none" (disabled)
-    LLM_PROVIDER: Literal["glm4", "ollama", "anthropic", "none"] = "none"
-    # GLM-4 (Zhipu AI) — get your key at https://open.bigmodel.cn/
-    GLM_API_KEY: str = ""
-    LLM_MODEL: str = "glm-4"
-    # Ollama: base URL reachable from inside Docker container
+    # LLM_PROVIDER: "ollama" (local via Ollama) | "anthropic" (cloud) | "none" (disabled)
+    LLM_PROVIDER: Literal["ollama", "anthropic", "none"] = "ollama"
+    # Ollama base URL — from inside Docker container use host.docker.internal
     LLM_BASE_URL: str = "http://host.docker.internal:11434"
-    # Anthropic (legacy — only used when LLM_PROVIDER=anthropic)
+    LLM_MODEL: str = "glm4"
+    # Anthropic (only used when LLM_PROVIDER=anthropic)
     ANTHROPIC_API_KEY: str = ""
     AI_ENABLED: bool = True
     AI_MAX_TOKENS: int = 1024

@@ -38,7 +38,7 @@ dependencies = [
   "prometheus-client==0.21.0",
 
   # --- AI ---
-  "zhipuai>=2.1.0",
+  "openai>=1.54.0",
 
   # --- Email / file handling ---
   "aiosmtplib==3.0.1",
