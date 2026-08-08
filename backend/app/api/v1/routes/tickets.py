@@ -1,10 +1,4 @@
-"""Ticket management API routes.
-
-Covers the full ticket lifecycle: creation, listing, status transitions,
-assignment, SLA management, comments, AI enrichment, and audit trail.
-
-Branch users see only their own tickets. Agents and admins can see all.
-"""
+"""Ticket management API routes."""
 
 from __future__ import annotations
 
@@ -24,6 +18,7 @@ from app.models.comment import CommentSource, TicketComment
 from app.models.ticket import Ticket, TicketStatus
 from app.models.user import User
 from app.schemas.envelope import ok, paginated
+from app.services.org_service import get_accessible_org_unit_ids
 
 log = get_logger(__name__)
 
@@ -41,11 +36,39 @@ def _is_branch_user(user: User) -> bool:
     return user.role.name == _BRANCH_USER_ROLE
 
 
-def _ticket_access_filter(user: User):
-    """Return a SQLAlchemy WHERE clause that respects branch-user visibility."""
+async def _ticket_access_filter(user: User, db: AsyncSession):
+    """Return a SQLAlchemy WHERE clause respecting org-scoped visibility."""
+    if user.is_super_admin:
+        return None
+    # New org-hierarchy visibility: strictly org-unit scoped
+    if user.org_unit_id:
+        accessible = await get_accessible_org_unit_ids(user, db)
+        if accessible is not None:
+            return or_(
+                Ticket.org_unit_id.in_([str(uid) for uid in accessible]),
+                Ticket.assignee_id == user.id,
+            )
+        return None  # subtree admin sees all
+    # Legacy: branch_user sees only own tickets
     if _is_branch_user(user):
         return Ticket.reporter_id == user.id
     return None  # agents/admins see all
+
+
+def _can_modify_ticket(ticket: Ticket, user: User) -> bool:
+    """Check if user can modify a ticket."""
+    if user.is_super_admin:
+        return True
+    # Only the raiser can modify/communicate
+    if str(ticket.reporter_id) == str(user.id):
+        return True
+    # Assigned agent can update status
+    if ticket.assignee_id and str(ticket.assignee_id) == str(user.id):
+        return True
+    # Legacy agent/admin/supervisor roles
+    if user.role.name in _AGENT_ROLES:
+        return True
+    return False
 
 
 async def _get_ticket_or_404(
@@ -58,8 +81,19 @@ async def _get_ticket_or_404(
     ticket = result.scalar_one_or_none()
     if ticket is None:
         raise NotFoundError(f"Ticket {ticket_id} not found.")
-    if _is_branch_user(user) and ticket.reporter_id != user.id:
-        raise AuthorizationError("You do not have access to this ticket.")
+    # Org-scoped visibility check
+    if not user.is_super_admin:
+        if user.org_unit_id:
+            accessible = await get_accessible_org_unit_ids(user, db)
+            if accessible is not None:
+                is_accessible = (
+                    ticket.org_unit_id in accessible
+                    or str(ticket.assignee_id) == str(user.id)
+                )
+                if not is_accessible:
+                    raise AuthorizationError("You do not have access to this ticket.")
+        elif _is_branch_user(user) and ticket.reporter_id != user.id:
+            raise AuthorizationError("You do not have access to this ticket.")
     return ticket
 
 
@@ -109,7 +143,15 @@ def _serialize_ticket(ticket: Ticket) -> dict:
         "assignee_id": str(ticket.assignee_id) if ticket.assignee_id else None,
         "assignee": {"id": str(ticket.assignee.id), "email": ticket.assignee.email, "full_name": ticket.assignee.full_name} if ticket.assignee else None,
         "branch_id": str(ticket.branch_id) if ticket.branch_id else None,
+        "org_unit_id": str(ticket.org_unit_id) if ticket.org_unit_id else None,
+        "org_unit": {
+            "id": str(ticket.org_unit.id),
+            "name": ticket.org_unit.name,
+            "code": ticket.org_unit.code,
+            "level": ticket.org_unit.hierarchy_level.name if ticket.org_unit.hierarchy_level else None,
+        } if ticket.org_unit else None,
         "department": ticket.department,
+        "reopen_count": ticket.reopen_count or 0,
         "tags": ticket.tags or [],
         "ai_category": ticket.ai_category,
         "ai_subcategory": ticket.ai_subcategory,
@@ -155,11 +197,13 @@ def _serialize_comment(comment: TicketComment) -> dict:
 # Ticket number generator
 # ---------------------------------------------------------------------------
 
-async def _generate_ticket_number(db: AsyncSession) -> str:
-    """Generate a sequential ticket number like TKT-000001."""
-    result = await db.execute(select(func.count(Ticket.id)))
-    count = result.scalar_one() or 0
-    return f"TKT-{count + 1:06d}"
+async def _generate_ticket_number(db: AsyncSession, org_unit_id: uuid.UUID | None = None) -> str:
+    """Generate ticket number: org-scoped format or legacy TKT-NNNNNN."""
+    if org_unit_id:
+        from app.services.ticket_seq_service import generate_ticket_number
+        return await generate_ticket_number(db, org_unit_id)
+    from app.services.ticket_seq_service import generate_ticket_number_legacy
+    return await generate_ticket_number_legacy(db)
 
 
 # ---------------------------------------------------------------------------
@@ -183,7 +227,7 @@ async def list_tickets(
     stmt = select(Ticket)
 
     # Visibility filter
-    access_filter = _ticket_access_filter(current_user)
+    access_filter = await _ticket_access_filter(current_user, db)
     if access_filter is not None:
         stmt = stmt.where(access_filter)
 
@@ -253,7 +297,9 @@ async def create_ticket(
     if not title:
         raise ValidationError("Title is required.")
 
-    ticket_number = await _generate_ticket_number(db)
+    # Determine org_unit_id from reporter (prefer explicit, fall back to user's org unit)
+    org_unit_id = current_user.org_unit_id
+    ticket_number = await _generate_ticket_number(db, org_unit_id)
 
     priority_val = payload.get("priority", "medium")
     try:
@@ -292,6 +338,7 @@ async def create_ticket(
         subcategory_id=subcategory_id,
         reporter_id=current_user.id,
         branch_id=current_user.branch_id,
+        org_unit_id=org_unit_id,
         department=payload.get("department"),
         tags=payload.get("tags"),
         internal_notes=payload.get("internal_notes"),
@@ -354,12 +401,16 @@ async def update_ticket(
 
     ticket = await _get_ticket_or_404(ticket_id, db, current_user)
 
-    # Branch users may only update their own tickets with restricted fields
-    if _is_branch_user(current_user):
+    if not _can_modify_ticket(ticket, current_user):
+        raise AuthorizationError("You do not have permission to modify this ticket.")
+
+    # Non-admin users may only update restricted fields
+    can_modify_all = current_user.is_super_admin or current_user.role.name in _AGENT_ROLES
+    if not can_modify_all:
         allowed_fields = {"description", "tags"}
         invalid = set(payload.keys()) - allowed_fields
         if invalid:
-            raise AuthorizationError(f"Branch users cannot modify: {', '.join(invalid)}")
+            raise AuthorizationError(f"You cannot modify: {', '.join(invalid)}")
 
     old_values: dict = {}
     new_values: dict = {}
@@ -445,8 +496,16 @@ async def transition_status(
     except ValueError:
         raise ValidationError(f"Invalid status: {new_status_val}")
 
-    # Branch users can only reopen or close their own tickets
-    if _is_branch_user(current_user) and new_status not in {TicketStatus.CLOSED, TicketStatus.REOPENED}:
+    # Only the raiser or agents can transition status
+    if not _can_modify_ticket(ticket, current_user):
+        raise AuthorizationError("You do not have permission to transition this ticket.")
+
+    # Org users (not agents) may only reopen or close their own tickets
+    is_agent = current_user.is_super_admin or current_user.role.name in _AGENT_ROLES
+    if not is_agent and not _is_branch_user(current_user):
+        if new_status not in {TicketStatus.CLOSED, TicketStatus.REOPENED}:
+            raise AuthorizationError("You may only close or reopen tickets.")
+    elif _is_branch_user(current_user) and new_status not in {TicketStatus.CLOSED, TicketStatus.REOPENED}:
         raise AuthorizationError("Branch users may only close or reopen tickets.")
 
     now = datetime.now(UTC)
@@ -459,6 +518,9 @@ async def transition_status(
         ticket.closed_at = now
     if new_status in {TicketStatus.IN_PROGRESS, TicketStatus.ACKNOWLEDGED} and not ticket.first_response_at:
         ticket.first_response_at = now
+    if new_status == TicketStatus.REOPENED:
+        ticket.reopen_count = (ticket.reopen_count or 0) + 1
+        ticket.resolved_at = None
 
     reason = payload.get("reason", "")
 

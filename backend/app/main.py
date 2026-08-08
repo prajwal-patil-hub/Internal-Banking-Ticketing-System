@@ -18,7 +18,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1.routes import ai_chat, audit, auth, categories, dashboard, health, tickets, users
+from app.api.v1.routes import ai_chat, audit, auth, categories, dashboard, health, org, reports, tickets, users
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
@@ -77,6 +77,8 @@ def create_app() -> FastAPI:
     app.include_router(ai_chat.router, prefix="/api/v1")
     app.include_router(dashboard.router, prefix="/api/v1")
     app.include_router(audit.router, prefix="/api/v1")
+    app.include_router(org.router, prefix="/api/v1")
+    app.include_router(reports.router, prefix="/api/v1")
 
     return app
 

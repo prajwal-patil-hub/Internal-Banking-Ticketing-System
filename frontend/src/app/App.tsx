@@ -10,6 +10,9 @@ import { TicketsPage } from '@/pages/TicketsPage';
 import { TicketDetailPage } from '@/pages/TicketDetailPage';
 import { CreateTicketPage } from '@/pages/CreateTicketPage';
 import { AuditPage } from '@/pages/AuditPage';
+import { OrgManagementPage } from '@/pages/OrgManagementPage';
+import { UsersPage } from '@/pages/UsersPage';
+import { ReportsPage } from '@/pages/ReportsPage';
 
 export default function App() {
   return (
@@ -55,8 +58,24 @@ export default function App() {
         <Route
           path="/users"
           element={
+            <RequireAuth roles={['admin', 'supervisor']}>
+              <UsersPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/org"
+          element={
             <RequireAuth roles={['admin']}>
-              <PlaceholderPage title="Users & Roles" phase="P1+" />
+              <OrgManagementPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/reports"
+          element={
+            <RequireAuth roles={['admin', 'supervisor', 'auditor']}>
+              <ReportsPage />
             </RequireAuth>
           }
         />

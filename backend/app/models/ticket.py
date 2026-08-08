@@ -102,7 +102,7 @@ class Ticket(UUIDPKMixin, TimestampMixin, Base):
 
     # Core identity
     ticket_number: Mapped[str] = mapped_column(
-        String(20), unique=True, index=True, nullable=False
+        String(50), unique=True, index=True, nullable=False
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -148,13 +148,20 @@ class Ticket(UUIDPKMixin, TimestampMixin, Base):
         nullable=True,
     )
 
-    # Branch / department
+    # Branch / department / org unit
     branch_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("branches.id", ondelete="SET NULL"),
         nullable=True,
     )
+    org_unit_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("org_units.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     department: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    reopen_count: Mapped[int] = mapped_column(default=0, nullable=False)
 
     # Tags
     tags: Mapped[list[str] | None] = mapped_column(
@@ -235,4 +242,7 @@ class Ticket(UUIDPKMixin, TimestampMixin, Base):
     )
     duplicate_of: Mapped[Ticket | None] = relationship(
         foreign_keys=[duplicate_of_id], remote_side="Ticket.id", lazy="selectin"
+    )
+    org_unit: Mapped[OrgUnit | None] = relationship(  # type: ignore[name-defined]  # noqa: F821
+        foreign_keys=[org_unit_id], lazy="selectin"
     )
