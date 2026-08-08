@@ -19,6 +19,7 @@ from app.models.sla import SLATracking
 from app.models.ticket import Ticket, TicketCategory, TicketPriority, TicketSource, TicketStatus
 from app.models.user import User
 from app.schemas.envelope import ok
+from app.services.org_service import get_accessible_org_unit_ids
 
 log = get_logger(__name__)
 
@@ -30,8 +31,21 @@ _OPEN_STATUSES = [
 ]
 
 
-def _branch_filter(user: User):
-    if user.role.name == "branch_user":
+async def _org_filter(user: User, db: AsyncSession):
+    """Return a SQLAlchemy WHERE clause restricting Ticket to user's accessible org units.
+
+    Returns None when no restriction applies (super admin or unrestricted manager).
+    """
+    if user.is_super_admin:
+        return None
+    if user.org_unit_id:
+        accessible = await get_accessible_org_unit_ids(user, db)
+        if accessible is not None:
+            from sqlalchemy import or_
+            return or_(Ticket.org_unit_id.in_(accessible), Ticket.assignee_id == user.id)
+        return None
+    # Fallback: non-org users see only their own reported tickets
+    if user.role and user.role.name == "branch_user":
         return Ticket.reporter_id == user.id
     return None
 
@@ -54,67 +68,59 @@ async def get_kpis(
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     thirty_days_ago = now - timedelta(days=30)
 
+    scope = await _org_filter(current_user, db)
+
+    def _base(extra=None):
+        clauses = [extra] if extra is not None else []
+        if scope is not None:
+            clauses.append(scope)
+        return select(func.count(Ticket.id)).where(*clauses)
+
     # Open tickets
     open_count = (await db.execute(
-        select(func.count(Ticket.id)).where(Ticket.status.in_(_OPEN_STATUSES))
+        _base(Ticket.status.in_(_OPEN_STATUSES))
     )).scalar_one()
 
     # SLA breached (open)
     sla_breached_count = (await db.execute(
-        select(func.count(Ticket.id)).where(
-            Ticket.sla_breached == True,  # noqa: E712
-            Ticket.status.in_(_OPEN_STATUSES),
-        )
+        _base().where(Ticket.sla_breached == True, Ticket.status.in_(_OPEN_STATUSES))  # noqa: E712
     )).scalar_one()
 
     # Resolved today
     resolved_today = (await db.execute(
-        select(func.count(Ticket.id)).where(
-            Ticket.status == TicketStatus.RESOLVED,
-            Ticket.resolved_at >= today_start,
-        )
+        _base().where(Ticket.status == TicketStatus.RESOLVED, Ticket.resolved_at >= today_start)
     )).scalar_one()
 
     # Average resolution hours (last 30 days)
-    avg_res_stmt = select(
-        func.avg(
-            func.extract("epoch", Ticket.resolved_at - Ticket.created_at) / 3600
-        )
-    ).where(
+    avg_res_clauses = [
         Ticket.resolved_at >= thirty_days_ago,
         Ticket.resolved_at.is_not(None),
-    )
+    ]
+    if scope is not None:
+        avg_res_clauses.append(scope)
+    avg_res_stmt = select(
+        func.avg(func.extract("epoch", Ticket.resolved_at - Ticket.created_at) / 3600)
+    ).where(*avg_res_clauses)
     avg_resolution_hours = (await db.execute(avg_res_stmt)).scalar_one() or 0
 
     # Critical open tickets
     critical_open = (await db.execute(
-        select(func.count(Ticket.id)).where(
-            Ticket.status.in_(_OPEN_STATUSES),
-            Ticket.priority == TicketPriority.CRITICAL,
-        )
+        _base().where(Ticket.status.in_(_OPEN_STATUSES), Ticket.priority == TicketPriority.CRITICAL)
     )).scalar_one()
 
     # AI auto-categorized (have ai_category set, last 7 days)
     ai_auto_categorized = (await db.execute(
-        select(func.count(Ticket.id)).where(
-            Ticket.ai_category.is_not(None),
-            Ticket.created_at >= now - timedelta(days=7),
-        )
+        _base().where(Ticket.ai_category.is_not(None), Ticket.created_at >= now - timedelta(days=7))
     )).scalar_one()
 
     # Email tickets created today
     email_tickets_today = (await db.execute(
-        select(func.count(Ticket.id)).where(
-            Ticket.source == TicketSource.EMAIL,
-            Ticket.created_at >= today_start,
-        )
+        _base().where(Ticket.source == TicketSource.EMAIL, Ticket.created_at >= today_start)
     )).scalar_one()
 
     # Active escalations
     escalations_active = (await db.execute(
-        select(func.count(Ticket.id)).where(
-            Ticket.status == TicketStatus.ESCALATED,
-        )
+        _base(Ticket.status == TicketStatus.ESCALATED)
     )).scalar_one()
 
     return ok({
@@ -202,6 +208,11 @@ async def get_category_distribution(
     current_user: User = Depends(get_current_user),
 ) -> dict:
     since = datetime.now(UTC) - timedelta(days=max(1, min(days, 365)))
+    scope = await _org_filter(current_user, db)
+
+    ticket_clauses = [(Ticket.created_at >= since) | (Ticket.id.is_(None))]
+    if scope is not None:
+        ticket_clauses.append(scope | Ticket.id.is_(None))
 
     stmt = (
         select(
@@ -211,7 +222,7 @@ async def get_category_distribution(
         .outerjoin(Ticket, Ticket.category_id == TicketCategory.id)
         .where(
             TicketCategory.is_active == True,  # noqa: E712
-            (Ticket.created_at >= since) | (Ticket.id.is_(None)),
+            *ticket_clauses,
         )
         .group_by(TicketCategory.name)
         .order_by(func.count(Ticket.id).desc())
@@ -247,6 +258,11 @@ async def get_department_load(
     current_user: User = Depends(get_current_user),
 ) -> dict:
     now = datetime.now(UTC)
+    scope = await _org_filter(current_user, db)
+
+    where_clauses = [Ticket.status.in_(_OPEN_STATUSES), Ticket.department.is_not(None)]
+    if scope is not None:
+        where_clauses.append(scope)
 
     stmt = (
         select(
@@ -259,10 +275,7 @@ async def get_department_load(
                 func.extract("epoch", now - Ticket.created_at) / 3600
             ).label("avg_age_hours"),
         )
-        .where(
-            Ticket.status.in_(_OPEN_STATUSES),
-            Ticket.department.is_not(None),
-        )
+        .where(*where_clauses)
         .group_by(Ticket.department)
         .order_by(func.count(Ticket.id).desc())
     )
@@ -286,14 +299,14 @@ async def get_department_load(
 # Recent Tickets
 # ---------------------------------------------------------------------------
 
-@router.get("/recent-tickets", summary="10 most recent tickets (role-filtered)")
+@router.get("/recent-tickets", summary="10 most recent tickets (org-scoped)")
 async def get_recent_tickets(
     request: Request,
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> dict:
     stmt = select(Ticket)
-    access_filter = _branch_filter(current_user)
+    access_filter = await _org_filter(current_user, db)
     if access_filter is not None:
         stmt = stmt.where(access_filter)
 

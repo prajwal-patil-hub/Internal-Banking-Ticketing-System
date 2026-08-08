@@ -24,10 +24,17 @@ export interface Ticket {
   source: TicketSource;
   category_id: string | null;
   subcategory_id: string | null;
+  category: { id: string; code: string; name: string } | null;
+  subcategory: { id: string; code: string; name: string } | null;
   reporter_id: string;
+  reporter: { id: string; email: string; full_name: string } | null;
   assignee_id: string | null;
+  assignee: { id: string; email: string; full_name: string } | null;
   branch_id: string | null;
+  org_unit_id: string | null;
+  org_unit: { id: string; name: string; code: string; level: string | null } | null;
   department: string | null;
+  reopen_count: number;
   tags: string[];
   ai_category: string | null;
   ai_confidence: number | null;
@@ -41,6 +48,7 @@ export interface Ticket {
   resolution_due_at: string | null;
   first_response_at: string | null;
   resolved_at: string | null;
+  closed_at: string | null;
   created_at: string;
   updated_at: string;
 }

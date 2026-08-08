@@ -225,7 +225,7 @@ export function TicketDetailPage() {
 
   if (ticketQuery.isError || !ticketQuery.data) {
     return (
-      <div className="flex flex-col items-center gap-3 py-16 text-center bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800">
+      <div className="card-sm flex flex-col items-center gap-3 py-16 text-center">
         <svg className="h-10 w-10 text-red-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <circle cx="12" cy="12" r="10" /><path d="M12 8v4M12 16h.01" />
         </svg>
@@ -302,7 +302,7 @@ export function TicketDetailPage() {
         <div className="xl:col-span-2 flex flex-col gap-4">
 
           {/* Description */}
-          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4">
+          <div className="card-sm p-4">
             <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2.5">Description</h2>
             <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed whitespace-pre-wrap">
               {ticket.description}
@@ -315,7 +315,7 @@ export function TicketDetailPage() {
           </div>
 
           {/* AI Insights (collapsible) */}
-          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 overflow-hidden">
+          <div className="card-sm overflow-hidden">
             {/* AI header */}
             <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-100 dark:border-slate-800">
               <div className="h-5 w-5 rounded bg-accent-100 dark:bg-accent-500/20 flex items-center justify-center shrink-0">
@@ -423,7 +423,7 @@ export function TicketDetailPage() {
           </div>
 
           {/* Comments */}
-          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4">
+          <div className="card-sm p-4">
             <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-3">
               Comments
               {comments.length > 0 && (
@@ -481,7 +481,7 @@ export function TicketDetailPage() {
 
           {/* Audit trail */}
           {isAgent && (
-            <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 overflow-hidden">
+            <div className="card-sm overflow-hidden">
               <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800">
                 <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">Audit Trail</span>
               </div>
@@ -518,23 +518,44 @@ export function TicketDetailPage() {
         <div className="flex flex-col gap-4">
 
           {/* Ticket info */}
-          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4">
+          <div className="card-sm p-4">
             <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Ticket Info</h2>
             <div className="flex flex-col">
-              <MetaRow label="Reporter"  value={ticket.reporter_id} mono />
-              <MetaRow label="Assignee"  value={ticket.assignee_id ?? 'Unassigned'} mono={!!ticket.assignee_id} />
+              <MetaRow label="Reporter"   value={ticket.reporter?.full_name ?? ticket.reporter_id} />
+              <MetaRow label="Assignee"   value={ticket.assignee?.full_name ?? 'Unassigned'} />
               <MetaRow label="Department" value={ticket.department} />
-              <MetaRow label="Source"    value={<span className="capitalize">{ticket.source}</span>} />
-              <MetaRow label="Category"  value={ticket.category_id} mono={!!ticket.category_id} />
-              <MetaRow label="Created"   value={fmtDate(ticket.created_at)} />
-              <MetaRow label="Updated"   value={fmtDate(ticket.updated_at)} />
+              <MetaRow label="Source"     value={<span className="capitalize">{ticket.source}</span>} />
+              <MetaRow label="Category"   value={ticket.category?.name ?? ticket.category_id ?? null} />
+              {ticket.subcategory && <MetaRow label="Subcategory" value={ticket.subcategory.name} />}
+              <MetaRow label="Created"    value={fmtDate(ticket.created_at)} />
+              <MetaRow label="Updated"    value={fmtDate(ticket.updated_at)} />
               {ticket.first_response_at && <MetaRow label="1st Response" value={fmtDate(ticket.first_response_at)} />}
-              {ticket.resolved_at       && <MetaRow label="Resolved At"  value={fmtDate(ticket.resolved_at)} />}
+              {ticket.resolved_at        && <MetaRow label="Resolved At"  value={fmtDate(ticket.resolved_at)} />}
+              {ticket.closed_at          && <MetaRow label="Closed At"    value={fmtDate(ticket.closed_at)} />}
+              {ticket.reopen_count > 0   && (
+                <MetaRow label="Reopens" value={
+                  <span className="pill bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 text-[10px]">
+                    {ticket.reopen_count}×
+                  </span>
+                } />
+              )}
             </div>
           </div>
 
+          {/* Org unit */}
+          {ticket.org_unit && (
+            <div className="card-sm p-4">
+              <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Organisation Unit</h2>
+              <div className="flex flex-col">
+                <MetaRow label="Name"  value={ticket.org_unit.name} />
+                <MetaRow label="Code"  value={<span className="font-mono text-xs">{ticket.org_unit.code}</span>} />
+                {ticket.org_unit.level && <MetaRow label="Level" value={ticket.org_unit.level} />}
+              </div>
+            </div>
+          )}
+
           {/* SLA + controls */}
-          <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4">
+          <div className="card-sm p-4">
             <div className="flex items-center justify-between mb-2">
               <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300">SLA</h2>
               {isAgent && (
@@ -556,7 +577,7 @@ export function TicketDetailPage() {
 
           {/* Tags + Sentiment combined */}
           {(ticket.tags.length > 0 || ticket.ai_sentiment) && (
-            <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 p-4">
+            <div className="card-sm p-4">
               {ticket.tags.length > 0 && (
                 <div className={cn(ticket.ai_sentiment ? 'mb-3 pb-3 border-b border-slate-100 dark:border-slate-800' : '')}>
                   <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Tags</h2>
