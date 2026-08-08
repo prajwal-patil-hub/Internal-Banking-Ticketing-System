@@ -1,6 +1,6 @@
-"""AI service — all Claude-powered operations for the banking ticketing system.
+"""AI service — GLM-4 (Zhipu AI) powered operations for the banking ticketing system.
 
-Uses the Anthropic SDK (synchronous client) wrapped in asyncio.run_in_executor
+Uses the zhipuai SDK (synchronous client) wrapped in asyncio.run_in_executor
 so it integrates cleanly with FastAPI's async request handlers.
 
 All AI calls are logged to AIInteractionLog for auditability, cost tracking,
@@ -15,7 +15,7 @@ import time
 import uuid
 from typing import Any
 
-import anthropic
+from zhipuai import ZhipuAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -27,14 +27,14 @@ log = get_logger(__name__)
 
 
 class AIService:
-    MODEL = "claude-sonnet-4-6"
+    MODEL = settings.LLM_MODEL or "glm-4"
 
     def __init__(
         self,
         db: AsyncSession,
         actor_id: str | None = None,
     ) -> None:
-        self.client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+        self.client = ZhipuAI(api_key=settings.GLM_API_KEY)
         self.db = db
         self.actor_id = actor_id
 
@@ -53,23 +53,37 @@ class AIService:
         *,
         system: str | None = None,
         max_tokens: int = 1024,
-    ) -> anthropic.types.Message:
-        """Synchronous Claude call — always call via _run_sync."""
-        kwargs: dict[str, Any] = {
-            "model": self.MODEL,
-            "max_tokens": max_tokens,
-            "messages": messages,
-        }
+    ) -> Any:
+        """Synchronous GLM-4 call — always call via _run_sync.
+
+        GLM-4 uses the OpenAI message format: system prompt goes as the first
+        message with role='system' rather than as a top-level parameter.
+        """
+        full_messages: list[dict] = []
         if system:
-            kwargs["system"] = system
-        return self.client.messages.create(**kwargs)
+            full_messages.append({"role": "system", "content": system})
+        full_messages.extend(messages)
+
+        return self.client.chat.completions.create(
+            model=self.MODEL,
+            max_tokens=max_tokens,
+            messages=full_messages,
+        )
+
+    def _extract_text(self, response: Any) -> str:
+        """Pull text content from a GLM-4 completion response."""
+        return response.choices[0].message.content
+
+    def _extract_tokens(self, response: Any) -> tuple[int, int]:
+        """Return (input_tokens, output_tokens) from a GLM-4 completion response."""
+        usage = response.usage
+        return usage.prompt_tokens, usage.completion_tokens
 
     def _parse_json_response(self, content: str) -> dict:
         """Strip markdown fences and parse JSON from model output."""
         text = content.strip()
         if text.startswith("```"):
             lines = text.split("\n")
-            # drop first line (```json) and last line (```)
             text = "\n".join(lines[1:-1]) if len(lines) > 2 else text
         return json.loads(text)
 
@@ -123,7 +137,7 @@ class AIService:
         description: str,
         source_email: str | None = None,
     ) -> AICategorizationResult:
-        """Use Claude to categorize a banking support ticket."""
+        """Use GLM-4 to categorize a banking support ticket."""
         prompt = f"""You are an expert banking operations analyst at SUCCESS Bank. Analyze this support ticket and provide structured categorization.
 
 Banking domains: payments, fraud, kyc, loans, compliance, it, operations, treasury, dispute, reconciliation, access
@@ -156,13 +170,10 @@ Only output valid JSON. No markdown, no explanation."""
         result_data: dict = {}
 
         try:
-            response: anthropic.types.Message = await self._run_sync(
-                self._create_message, messages, max_tokens=1024
-            )
+            response = await self._run_sync(self._create_message, messages, max_tokens=1024)
             latency_ms = int((time.monotonic() - start) * 1000)
-            tokens_in = response.usage.input_tokens
-            tokens_out = response.usage.output_tokens
-            raw_text = response.content[0].text
+            tokens_in, tokens_out = self._extract_tokens(response)
+            raw_text = self._extract_text(response)
             result_data = self._parse_json_response(raw_text)
         except Exception as exc:
             latency_ms = int((time.monotonic() - start) * 1000)
@@ -172,7 +183,6 @@ Only output valid JSON. No markdown, no explanation."""
                 "categorize", self.MODEL, 0, 0, latency_ms, None,
                 "ticket", None, success=False, error=error_msg,
             )
-            # Return a safe fallback
             return AICategorizationResult(
                 category="operations",
                 subcategory=None,
@@ -254,13 +264,10 @@ Only output valid JSON. No markdown, no explanation."""
         start = time.monotonic()
 
         try:
-            response: anthropic.types.Message = await self._run_sync(
-                self._create_message, messages, max_tokens=1024
-            )
+            response = await self._run_sync(self._create_message, messages, max_tokens=1024)
             latency_ms = int((time.monotonic() - start) * 1000)
-            tokens_in = response.usage.input_tokens
-            tokens_out = response.usage.output_tokens
-            result_data = self._parse_json_response(response.content[0].text)
+            tokens_in, tokens_out = self._extract_tokens(response)
+            result_data = self._parse_json_response(self._extract_text(response))
         except Exception as exc:
             latency_ms = int((time.monotonic() - start) * 1000)
             log.exception("ai.extract_email.failed", error=str(exc))
@@ -331,11 +338,10 @@ Write a concise summary only. No bullet points or headers."""
         start = time.monotonic()
 
         try:
-            response: anthropic.types.Message = await self._run_sync(
-                self._create_message, messages, max_tokens=512
-            )
+            response = await self._run_sync(self._create_message, messages, max_tokens=512)
             latency_ms = int((time.monotonic() - start) * 1000)
-            summary = response.content[0].text.strip()
+            tokens_in, tokens_out = self._extract_tokens(response)
+            summary = self._extract_text(response).strip()
         except Exception as exc:
             latency_ms = int((time.monotonic() - start) * 1000)
             log.exception("ai.summarize_ticket.failed", error=str(exc))
@@ -346,8 +352,7 @@ Write a concise summary only. No bullet points or headers."""
             return "Summary unavailable."
 
         await self._log_interaction(
-            "summarize", self.MODEL,
-            response.usage.input_tokens, response.usage.output_tokens,
+            "summarize", self.MODEL, tokens_in, tokens_out,
             latency_ms, None, "ticket", ticket_data.get("id"), success=True,
         )
         return summary
@@ -391,11 +396,10 @@ Only output valid JSON."""
         start = time.monotonic()
 
         try:
-            response: anthropic.types.Message = await self._run_sync(
-                self._create_message, messages, max_tokens=1024
-            )
+            response = await self._run_sync(self._create_message, messages, max_tokens=1024)
             latency_ms = int((time.monotonic() - start) * 1000)
-            result_data = self._parse_json_response(response.content[0].text)
+            tokens_in, tokens_out = self._extract_tokens(response)
+            result_data = self._parse_json_response(self._extract_text(response))
         except Exception as exc:
             latency_ms = int((time.monotonic() - start) * 1000)
             log.exception("ai.suggest_resolution.failed", error=str(exc))
@@ -411,8 +415,7 @@ Only output valid JSON."""
             )
 
         await self._log_interaction(
-            "suggest_resolution", self.MODEL,
-            response.usage.input_tokens, response.usage.output_tokens,
+            "suggest_resolution", self.MODEL, tokens_in, tokens_out,
             latency_ms, result_data.get("confidence"), "ticket", ticket.get("id"),
         )
 
@@ -451,11 +454,10 @@ Write the email body only."""
         start = time.monotonic()
 
         try:
-            response: anthropic.types.Message = await self._run_sync(
-                self._create_message, messages, max_tokens=512
-            )
+            response = await self._run_sync(self._create_message, messages, max_tokens=512)
             latency_ms = int((time.monotonic() - start) * 1000)
-            draft = response.content[0].text.strip()
+            tokens_in, tokens_out = self._extract_tokens(response)
+            draft = self._extract_text(response).strip()
         except Exception as exc:
             latency_ms = int((time.monotonic() - start) * 1000)
             log.exception("ai.generate_response_draft.failed", error=str(exc))
@@ -471,8 +473,7 @@ Write the email body only."""
             )
 
         await self._log_interaction(
-            "generate_response", self.MODEL,
-            response.usage.input_tokens, response.usage.output_tokens,
+            "generate_response", self.MODEL, tokens_in, tokens_out,
             latency_ms, None, "ticket", ticket.get("id"),
         )
         return draft
@@ -502,11 +503,10 @@ Only output valid JSON."""
         start = time.monotonic()
 
         try:
-            response: anthropic.types.Message = await self._run_sync(
-                self._create_message, messages, max_tokens=512
-            )
+            response = await self._run_sync(self._create_message, messages, max_tokens=512)
             latency_ms = int((time.monotonic() - start) * 1000)
-            result_data = self._parse_json_response(response.content[0].text)
+            tokens_in, tokens_out = self._extract_tokens(response)
+            result_data = self._parse_json_response(self._extract_text(response))
         except Exception as exc:
             latency_ms = int((time.monotonic() - start) * 1000)
             log.exception("ai.detect_sentiment.failed", error=str(exc))
@@ -517,8 +517,7 @@ Only output valid JSON."""
             return {"sentiment": "neutral", "urgency_level": "low", "urgency_signals": [], "confidence": 0.0}
 
         await self._log_interaction(
-            "detect_sentiment", self.MODEL,
-            response.usage.input_tokens, response.usage.output_tokens,
+            "detect_sentiment", self.MODEL, tokens_in, tokens_out,
             latency_ms, result_data.get("confidence"), None, None,
         )
         return result_data
@@ -575,16 +574,15 @@ If you don't know something, say so clearly rather than guessing."""
         start = time.monotonic()
 
         try:
-            response: anthropic.types.Message = await self._run_sync(
+            response = await self._run_sync(
                 self._create_message,
                 messages,
                 system=system_prompt,
                 max_tokens=2048,
             )
             latency_ms = int((time.monotonic() - start) * 1000)
-            tokens_in = response.usage.input_tokens
-            tokens_out = response.usage.output_tokens
-            reply = response.content[0].text.strip()
+            tokens_in, tokens_out = self._extract_tokens(response)
+            reply = self._extract_text(response).strip()
         except Exception as exc:
             latency_ms = int((time.monotonic() - start) * 1000)
             log.exception("ai.chat.failed", error=str(exc))
