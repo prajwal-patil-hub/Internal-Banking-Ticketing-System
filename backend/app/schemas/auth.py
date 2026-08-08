@@ -29,6 +29,24 @@ class TokenPair(BaseModel):
     token_type: str = "Bearer"
 
 
+class OrgUnitPublic(BaseModel):
+    id: uuid.UUID
+    name: str
+    code: str
+    level: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class OrgRolePublic(BaseModel):
+    id: uuid.UUID
+    name: str
+    can_manage_unit: bool
+    can_manage_subtree: bool
+
+    model_config = {"from_attributes": True}
+
+
 class UserPublic(BaseModel):
     id: uuid.UUID
     email: EmailStr
@@ -36,6 +54,11 @@ class UserPublic(BaseModel):
     role: str
     branch_id: uuid.UUID | None
     mfa_enabled: bool
+    org_unit_id: uuid.UUID | None = None
+    org_unit: OrgUnitPublic | None = None
+    org_role_id: uuid.UUID | None = None
+    org_role: OrgRolePublic | None = None
+    is_super_admin: bool = False
 
     model_config = {"from_attributes": True}
 

@@ -125,13 +125,22 @@ export function ReportsPage() {
   const lineRef = useRef<HTMLDivElement>(null);
   const priorityRef = useRef<HTMLDivElement>(null);
 
-  // Fetch dashboard data for charts
-  const { data: dashData } = useQuery({
-    queryKey: ['dashboard-stats'],
-    queryFn: async () => {
-      const res = await api.get('/dashboard/stats');
-      return res.data.data;
-    },
+  // Fetch dashboard data for charts (parallel from real endpoints)
+  const { data: kpis } = useQuery({
+    queryKey: ['dashboard-kpis'],
+    queryFn: async () => { const r = await api.get('/dashboard/kpis'); return r.data.data; },
+  });
+  const { data: categoryDist = [] } = useQuery({
+    queryKey: ['dashboard-categories'],
+    queryFn: async () => { const r = await api.get('/dashboard/category-distribution'); return r.data.data; },
+  });
+  const { data: deptLoad = [] } = useQuery({
+    queryKey: ['dashboard-dept-load'],
+    queryFn: async () => { const r = await api.get('/dashboard/department-load'); return r.data.data; },
+  });
+  const { data: recentTickets = [] } = useQuery({
+    queryKey: ['dashboard-recent'],
+    queryFn: async () => { const r = await api.get('/dashboard/recent-tickets'); return r.data.data; },
   });
 
   const handleDownload = async () => {
@@ -152,30 +161,46 @@ export function ReportsPage() {
     }
   };
 
+  // Derive status distribution from recent tickets (best available without a dedicated endpoint)
+  const statusCounts: Record<string, number> = {};
+  recentTickets.forEach((t: { status: string }) => {
+    statusCounts[t.status] = (statusCounts[t.status] || 0) + 1;
+  });
   const byStatus: Array<{ name: string; count: number; color: string }> =
-    Object.entries(dashData?.tickets_by_status ?? {}).map(([name, count]) => ({
-      name: name.replace('_', ' '),
-      count: count as number,
+    Object.entries(statusCounts).map(([name, count]) => ({
+      name: name.replace(/_/g, ' '),
+      count,
       color: STATUS_COLORS[name] ?? '#6B7280',
     }));
 
+  // Category distribution → use as pseudo "priority/type" breakdown
   const byPriority: Array<{ name: string; value: number; color: string }> =
-    Object.entries(dashData?.tickets_by_priority ?? {}).map(([name, value]) => ({
-      name,
-      value: value as number,
-      color: PRIORITY_COLORS[name] ?? '#6B7280',
+    (categoryDist as Array<{ category: string; count: number }>).slice(0, 6).map((d, i) => ({
+      name: d.category,
+      value: d.count,
+      color: Object.values(PRIORITY_COLORS)[i % 4],
     }));
 
-  const byDay: Array<{ date: string; count: number }> = dashData?.tickets_over_time ?? [];
+  // Department load → by-day stand-in (no time-series endpoint; show dept open counts)
+  const byDay: Array<{ date: string; count: number }> =
+    (deptLoad as Array<{ department: string; open_count: number }>).map(d => ({
+      date: d.department ?? 'Unknown',
+      count: d.open_count,
+    }));
 
-  const slaByDept: Array<{ name: string; compliance: number }> = (dashData?.department_sla ?? []).map(
-    (d: { department: string; compliance: number }) => ({ name: d.department, compliance: d.compliance })
-  );
+  // SLA compliance by department (derived from breached_count / open_count)
+  const slaByDept: Array<{ name: string; compliance: number }> =
+    (deptLoad as Array<{ department: string; open_count: number; breached_count: number }>).map(d => ({
+      name: d.department,
+      compliance: d.open_count > 0
+        ? Math.round(((d.open_count - d.breached_count) / d.open_count) * 100)
+        : 100,
+    }));
 
-  const totalTickets = dashData?.totals?.total ?? 0;
-  const openTickets = dashData?.totals?.open ?? 0;
-  const slaBreached = dashData?.totals?.sla_breached ?? 0;
-  const avgResolutionHrs = dashData?.totals?.avg_resolution_hrs ?? null;
+  const totalTickets = (kpis?.open_tickets ?? 0) + (kpis?.resolved_today ?? 0);
+  const openTickets = kpis?.open_tickets ?? 0;
+  const slaBreached = kpis?.sla_breached ?? 0;
+  const avgResolutionHrs: number | null = kpis?.avg_resolution_hours ?? null;
 
   return (
     <div className="flex flex-col gap-5">

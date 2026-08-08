@@ -92,7 +92,7 @@ async def list_users(
         from app.services.org_service import get_accessible_org_unit_ids
         accessible = await get_accessible_org_unit_ids(current_user, db)
         if accessible is not None:
-            stmt = stmt.where(User.org_unit_id.in_([str(uid) for uid in accessible]))
+            stmt = stmt.where(User.org_unit_id.in_(accessible))
 
     total = (await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
     stmt = stmt.order_by(User.full_name).offset((page - 1) * per_page).limit(per_page)

@@ -45,7 +45,7 @@ async def _ticket_access_filter(user: User, db: AsyncSession):
         accessible = await get_accessible_org_unit_ids(user, db)
         if accessible is not None:
             return or_(
-                Ticket.org_unit_id.in_([str(uid) for uid in accessible]),
+                Ticket.org_unit_id.in_(accessible),
                 Ticket.assignee_id == user.id,
             )
         return None  # subtree admin sees all

@@ -56,6 +56,21 @@ async def login(
                     "role": user.role.name,
                     "branch_id": user.branch_id,
                     "mfa_enabled": user.mfa_enabled,
+                    "org_unit_id": user.org_unit_id,
+                    "org_unit": {
+                        "id": user.org_unit.id,
+                        "name": user.org_unit.name,
+                        "code": user.org_unit.code,
+                        "level": user.org_unit.hierarchy_level.name if user.org_unit.hierarchy_level else None,
+                    } if user.org_unit else None,
+                    "org_role_id": user.org_role_id,
+                    "org_role": {
+                        "id": user.org_role.id,
+                        "name": user.org_role.name,
+                        "can_manage_unit": user.org_role.can_manage_unit,
+                        "can_manage_subtree": user.org_role.can_manage_subtree,
+                    } if user.org_role else None,
+                    "is_super_admin": user.is_super_admin,
                 }
             ),
             tokens=TokenPair(
