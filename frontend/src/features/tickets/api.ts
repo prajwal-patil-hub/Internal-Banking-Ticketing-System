@@ -115,6 +115,7 @@ export interface TicketListParams {
   page?: number;
   page_size?: number;
   my_tickets?: boolean;
+  sla_breached?: boolean;
 }
 
 export interface PaginatedResponse<T> {

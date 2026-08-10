@@ -13,6 +13,8 @@ import { AuditPage } from '@/pages/AuditPage';
 import { OrgManagementPage } from '@/pages/OrgManagementPage';
 import { UsersPage } from '@/pages/UsersPage';
 import { ReportsPage } from '@/pages/ReportsPage';
+import { SLAMonitorPage } from '@/pages/SLAMonitorPage';
+import { EscalationsPage } from '@/pages/EscalationsPage';
 
 export default function App() {
   return (
@@ -35,7 +37,7 @@ export default function App() {
           path="/sla"
           element={
             <RequireAuth roles={['admin', 'supervisor']}>
-              <PlaceholderPage title="SLA Monitor" phase="P4 / P7" />
+              <SLAMonitorPage />
             </RequireAuth>
           }
         />
@@ -43,17 +45,13 @@ export default function App() {
           path="/escalations"
           element={
             <RequireAuth roles={['admin', 'supervisor']}>
-              <PlaceholderPage title="Escalations" phase="P5" />
+              <EscalationsPage />
             </RequireAuth>
           }
         />
         <Route
           path="/branches"
-          element={
-            <RequireAuth roles={['admin']}>
-              <PlaceholderPage title="Branches" phase="P2" />
-            </RequireAuth>
-          }
+          element={<Navigate to="/org" replace />}
         />
         <Route
           path="/users"

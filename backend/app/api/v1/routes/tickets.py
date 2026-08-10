@@ -221,6 +221,7 @@ async def list_tickets(
     category_id: Annotated[uuid.UUID | None, Query()] = None,
     search: Annotated[str | None, Query(max_length=200)] = None,
     my_tickets: Annotated[bool, Query()] = False,
+    sla_breached: Annotated[bool | None, Query()] = None,
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> dict:
@@ -234,6 +235,9 @@ async def list_tickets(
     # my_tickets filter (agents requesting only their assigned tickets)
     if my_tickets and not _is_branch_user(current_user):
         stmt = stmt.where(Ticket.assignee_id == current_user.id)
+
+    if sla_breached is not None:
+        stmt = stmt.where(Ticket.sla_breached == sla_breached)
 
     if status:
         try:
