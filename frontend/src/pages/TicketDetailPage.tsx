@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/Button';
 import { Badge } from '@/components/Badge';
+import { EscalationTimeline } from '@/components/EscalationTimeline';
 import { StatusBadge } from '@/components/StatusBadge';
 import { PriorityBadge } from '@/components/PriorityBadge';
 import { SLABadge } from '@/components/SLABadge';
@@ -516,6 +517,9 @@ export function TicketDetailPage() {
 
         {/* ── Right column ─────────────────────────────────────────────── */}
         <div className="flex flex-col gap-4">
+
+          {/* Full history, merged from comments, audit rows and escalations */}
+          <EscalationTimeline ticket={ticket} />
 
           {/* Ticket info */}
           <div className="card-sm p-4">

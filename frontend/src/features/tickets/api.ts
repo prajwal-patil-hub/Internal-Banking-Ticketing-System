@@ -245,3 +245,42 @@ export async function getAuditLog(params?: {
     total_pages: pg.pages      ?? 1,
   };
 }
+
+// ── Timeline ─────────────────────────────────────────────────────────────────
+
+export type TimelineKind =
+  | 'created' | 'comment' | 'internal_note' | 'status_change'
+  | 'assignment' | 'escalation' | 'resolved' | 'closed';
+
+export interface TimelineEvent {
+  kind: TimelineKind;
+  /** ISO timestamp. */
+  at: string;
+  title: string;
+  detail: string;
+  actor: string | null;
+  /** Escalations only: raised by the SLA worker rather than a person. */
+  automatic?: boolean;
+}
+
+/** The ticket's full history, merged from comments, audit rows and escalations. */
+export async function getTicketTimeline(ticketId: string): Promise<TimelineEvent[]> {
+  const { data } = await api.get(`/tickets/${ticketId}/timeline`);
+  return data.data;
+}
+
+export interface EscalateResult {
+  ticket: Ticket;
+  escalated_to: { id: string; full_name: string } | null;
+  rule: string | null;
+}
+
+/** Run the escalation engine by hand — same path the breach worker takes. */
+export async function escalateTicket(
+  ticketId: string,
+  reason: string,
+  trigger: 'manual' | 'high_risk' | 'regulatory' | 'vip_customer' = 'manual',
+): Promise<EscalateResult> {
+  const { data } = await api.post(`/tickets/${ticketId}/escalate`, { reason, trigger });
+  return data.data;
+}

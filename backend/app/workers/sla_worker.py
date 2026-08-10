@@ -61,7 +61,16 @@ async def check_sla_breaches_job() -> None:
                     await db.commit()
                     return
 
-                breached_ticket_ids = []
+                from app.services.escalation_service import (
+                    EscalationService,
+                    notify_escalation_outcome,
+                )
+
+                escalator = EscalationService(db)
+                breached_ticket_ids: list[str] = []
+                # (ticket, outcome) pairs to notify once the commit lands.
+                pending_notifications = []
+
                 for tracking in newly_breached:
                     tracking.is_resolution_breached = True
                     tracking.breach_notified_at = now
@@ -72,35 +81,39 @@ async def check_sla_breaches_job() -> None:
                         select(Ticket).where(Ticket.id == tracking.ticket_id)
                     )
                     ticket = ticket_result.scalar_one_or_none()
-                    if ticket:
-                        ticket.sla_breached = True
+                    if not ticket:
+                        continue
+                    ticket.sla_breached = True
+
+                    # Apply the escalation rules. This is the step that was
+                    # missing: the worker marked the breach and stopped, so
+                    # rules were never evaluated, no event was ever written,
+                    # and escalation depended on somebody noticing the red row.
+                    outcome = await escalator.escalate_breached(ticket)
+                    if outcome.escalated:
+                        pending_notifications.append((ticket, outcome))
+                    else:
+                        log.debug(
+                            "sla_breach_not_escalated",
+                            ticket_id=str(ticket.id),
+                            reason=outcome.reason,
+                        )
 
                 await db.commit()
 
                 log.warning(
                     "sla_breaches_detected",
                     count=len(newly_breached),
+                    escalated=len(pending_notifications),
                     ticket_ids=breached_ticket_ids,
                 )
 
-                # Notify managers — NotificationService will be fully implemented
-                # when the notification subsystem is wired up.  The intended call is:
-                #
-                #   notification_service = NotificationService(db)
-                #   for tracking in newly_breached:
-                #       await notification_service.notify_sla_breach(
-                #           ticket_id=tracking.ticket_id,
-                #           manager_emails=settings.manager_email_list,
-                #       )
-                #
-                # For now we log the recipient list.
-                if settings.manager_email_list:
-                    log.info(
-                        "sla_breach_notification_queued",
-                        recipients=settings.manager_email_list,
-                        ticket_count=len(newly_breached),
-                    )
-                else:
+                # After the commit: an undelivered email is recoverable, a
+                # rolled-back escalation is not.
+                for ticket, outcome in pending_notifications:
+                    await notify_escalation_outcome(db, ticket, outcome)
+
+                if not settings.manager_email_list:
                     log.warning("sla_breach_no_manager_emails_configured")
 
             except Exception:

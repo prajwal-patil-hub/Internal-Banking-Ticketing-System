@@ -113,6 +113,33 @@ stolen access token must not be enough to strip the second factor.
 There are no printed backup codes yet, so a lost device is recovered by an
 admin clearing the enrolment (`POST /api/v1/users/{id}/mfa/reset`).
 
+## Escalation
+
+When the SLA worker finds a breach it now evaluates the escalation rules rather
+than only marking the ticket red. The matching rule — most specific first, with
+`priority_threshold` read as a minimum so a "high" rule also covers critical —
+decides who the ticket goes to; the ticket moves to `escalated`, is reassigned
+to the least-loaded holder of the target role, an `escalation_events` row is
+written, and the target plus the manager list are emailed.
+
+Anyone with agent rights can also escalate by hand from the ticket page, which
+runs the same engine so manual and automatic escalations leave identical
+evidence.
+
+Two guarantees worth knowing:
+
+- **It will not escalate the same ticket twice.** The worker revisits every
+  overdue ticket each run, so an unresolved event for the same trigger
+  suppresses another. Without that the event log would gain a row per ticket
+  per run and the target would be emailed every five minutes.
+- **A failed email does not lose the escalation.** Notifications are sent after
+  the state change is committed, and a delivery failure is logged rather than
+  raised.
+
+`GET /api/v1/tickets/{id}/timeline` returns the ticket's whole history —
+creation, comments, status changes from the audit log, and escalations — merged
+into one chronological feed, which is what the ticket page's timeline renders.
+
 ## How the AI assistant works
 
 The assistant is **grounded**: before each reply the server assembles a CONTEXT

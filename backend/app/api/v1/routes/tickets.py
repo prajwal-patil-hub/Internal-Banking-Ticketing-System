@@ -16,6 +16,7 @@ from app.core.exceptions import AuthorizationError, NotFoundError, ValidationErr
 from app.core.logging import get_logger
 from app.models.audit import AuditAction, AuditLog
 from app.models.comment import CommentSource, TicketComment
+from app.models.escalation import EscalationEvent, EscalationTrigger
 from app.models.ticket import OPEN_STATUSES as _OPEN_STATUSES
 from app.models.ticket import Ticket, TicketSource, TicketStatus
 from app.models.user import User
@@ -1012,6 +1013,185 @@ async def ai_suggest(
     await db.commit()
     return ok(result)
 
+
+
+
+@router.post(
+    "/{ticket_id}/escalate",
+    summary="Escalate a ticket by hand",
+    dependencies=[Depends(require_roles("agent", "supervisor", "admin"))],
+)
+async def escalate_ticket(
+    ticket_id: uuid.UUID,
+    payload: dict,
+    request: Request,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Raise a ticket to the escalation target for its rule.
+
+    Escalating was previously just a status change: the ticket turned red and
+    nothing else happened — no event recorded, nobody reassigned, nobody told.
+    This runs the same engine the breach worker uses, so a manual escalation
+    and an automatic one leave identical evidence behind.
+    """
+    from app.services.escalation_service import (
+        EscalationService,
+        notify_escalation_outcome,
+    )
+
+    authz.assert_can_write(current_user, "escalate tickets")
+    ticket = await _get_ticket_or_404(ticket_id, db, current_user)
+
+    reason = str(payload.get("reason", "")).strip() or "Escalated manually."
+    trigger_name = str(payload.get("trigger", "manual"))
+    try:
+        trigger = EscalationTrigger(trigger_name)
+    except ValueError:
+        raise ValidationError(
+            f"Invalid trigger: {trigger_name}. "
+            f"Expected one of: {', '.join(t.value for t in EscalationTrigger)}"
+        )
+
+    outcome = await EscalationService(db).escalate(
+        ticket, trigger=trigger, reason=reason, actor_id=current_user.id
+    )
+
+    if not outcome.escalated:
+        raise ValidationError(outcome.reason)
+
+    await _record_audit(
+        db,
+        action=AuditAction.ESCALATION,
+        entity_id=str(ticket.id),
+        user=current_user,
+        request=request,
+        new_values={
+            "trigger": trigger.value,
+            "reason": reason,
+            "escalated_to": str(outcome.assignee.id) if outcome.assignee else None,
+        },
+    )
+    await db.commit()
+    await db.refresh(ticket)
+
+    await notify_escalation_outcome(db, ticket, outcome)
+
+    log.info(
+        "ticket_escalated_manually",
+        ticket_id=str(ticket.id),
+        actor=str(current_user.id),
+        to=str(outcome.assignee.id) if outcome.assignee else None,
+    )
+    return ok({
+        "ticket": _serialize_ticket(ticket),
+        "escalated_to": (
+            {"id": str(outcome.assignee.id), "full_name": outcome.assignee.full_name}
+            if outcome.assignee else None
+        ),
+        "rule": outcome.rule.name if outcome.rule else None,
+    })
+
+@router.get("/{ticket_id}/timeline", summary="Chronological history of a ticket")
+async def get_ticket_timeline(
+    ticket_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """One ordered feed of everything that happened to this ticket.
+
+    The facts live in three tables — comments, the audit log, and escalation
+    events — and reading a ticket's history meant looking in all three. This
+    merges them into the single narrative a person actually wants: raised,
+    commented, reassigned, escalated, resolved.
+    """
+    ticket = await _get_ticket_or_404(ticket_id, db, current_user)
+    events: list[dict] = []
+
+    events.append({
+        "kind": "created",
+        "at": ticket.created_at.isoformat(),
+        "title": f"Ticket created by {ticket.reporter.full_name}" if ticket.reporter else "Ticket created",
+        "detail": f"Priority {ticket.priority.value} · via {ticket.source.value}",
+        "actor": ticket.reporter.full_name if ticket.reporter else None,
+    })
+
+    # Comments. Internal notes stay hidden from branch users, matching the
+    # comment list endpoint — the timeline must not become a way around that.
+    comment_stmt = select(TicketComment).where(TicketComment.ticket_id == ticket_id)
+    if _is_branch_user(current_user):
+        comment_stmt = comment_stmt.where(TicketComment.is_internal.is_(False))
+    for comment in (await db.execute(comment_stmt)).scalars().all():
+        events.append({
+            "kind": "internal_note" if comment.is_internal else "comment",
+            "at": comment.created_at.isoformat(),
+            "title": (
+                f"{comment.author.full_name if comment.author else 'System'} "
+                f"{'added an internal note' if comment.is_internal else 'commented'}"
+            ),
+            "detail": comment.body[:200],
+            "actor": comment.author.full_name if comment.author else None,
+        })
+
+    # Status changes and assignments, from the audit trail.
+    audit_rows = (await db.execute(
+        select(AuditLog).where(
+            AuditLog.entity_type == "ticket",
+            AuditLog.entity_id == str(ticket_id),
+            AuditLog.action.in_([AuditAction.STATUS_CHANGE, AuditAction.ASSIGNMENT]),
+        )
+    )).scalars().all()
+    for row in audit_rows:
+        new_values = row.new_values or {}
+        old_values = row.old_values or {}
+        if row.action == AuditAction.STATUS_CHANGE:
+            old = str(old_values.get("status", "?")).replace("_", " ")
+            new = str(new_values.get("status", "?")).replace("_", " ")
+            title = f"Status changed from {old} to {new}"
+            detail = new_values.get("reason") or ""
+        else:
+            title = "Ticket reassigned"
+            detail = ""
+        events.append({
+            "kind": "status_change" if row.action == AuditAction.STATUS_CHANGE else "assignment",
+            "at": row.created_at.isoformat(),
+            "title": title,
+            "detail": detail,
+            "actor": row.actor_email,
+        })
+
+    # Escalations.
+    for event in (await db.execute(
+        select(EscalationEvent).where(EscalationEvent.ticket_id == ticket_id)
+    )).scalars().all():
+        target = event.escalated_to.full_name if event.escalated_to else None
+        automatic = event.escalated_by_id is None
+        events.append({
+            "kind": "escalation",
+            "at": event.triggered_at.isoformat(),
+            "title": (
+                f"{'Auto-escalated' if automatic else 'Escalated'} — "
+                f"{event.trigger.value.replace('_', ' ')}"
+            ),
+            "detail": event.reason or "",
+            "actor": target,
+            "automatic": automatic,
+        })
+
+    if ticket.resolved_at:
+        events.append({
+            "kind": "resolved", "at": ticket.resolved_at.isoformat(),
+            "title": "Ticket resolved", "detail": "", "actor": None,
+        })
+    if ticket.closed_at:
+        events.append({
+            "kind": "closed", "at": ticket.closed_at.isoformat(),
+            "title": "Ticket closed", "detail": "", "actor": None,
+        })
+
+    events.sort(key=lambda e: e["at"])
+    return ok(events)
 
 @router.get(
     "/{ticket_id}/audit",

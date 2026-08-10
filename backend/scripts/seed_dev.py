@@ -148,6 +148,7 @@ ESCALATION_RULES = [
     ("High priority ageing → Supervisor", "sla_breach", 360, "supervisor", "high"),
     ("Fraud detected → Risk lead",        "high_risk",  None, "supervisor", "high"),
     ("Regulatory matter → Compliance",    "regulatory", None, "admin",      None),
+    ("Manual escalation → Supervisor",    "manual",     None, "supervisor", None),
 ]
 
 # ---------------------------------------------------------------------------
