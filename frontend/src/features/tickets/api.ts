@@ -162,12 +162,12 @@ export async function updateTicketStatus(
   status: TicketStatus,
   comment?: string,
 ): Promise<Ticket> {
-  const { data } = await api.patch(`/tickets/${id}/status`, { status, comment });
+  const { data } = await api.post(`/tickets/${id}/status`, { status, reason: comment });
   return data.data;
 }
 
 export async function assignTicket(id: string, assignee_id: string): Promise<Ticket> {
-  const { data } = await api.patch(`/tickets/${id}/assign`, { assignee_id });
+  const { data } = await api.post(`/tickets/${id}/assign`, { assignee_id });
   return data.data;
 }
 
@@ -193,22 +193,22 @@ export async function getCategories(): Promise<Category[]> {
 }
 
 export async function aiSummarize(ticketId: string): Promise<{ summary: string; sentiment: string; risk_score: number }> {
-  const { data } = await api.post(`/tickets/${ticketId}/ai/summarize`);
+  const { data } = await api.post(`/tickets/${ticketId}/ai-summarize`);
   return data.data;
 }
 
 export async function aiSuggest(ticketId: string): Promise<{ suggestions: string[]; next_actions: string[] }> {
-  const { data } = await api.post(`/tickets/${ticketId}/ai/suggest`);
+  const { data } = await api.post(`/tickets/${ticketId}/ai-suggest`);
   return data.data;
 }
 
 export async function pauseSLA(ticketId: string, reason?: string): Promise<Ticket> {
-  const { data } = await api.post(`/tickets/${ticketId}/sla/pause`, { reason });
+  const { data } = await api.post(`/tickets/${ticketId}/pause-sla`, { reason });
   return data.data;
 }
 
 export async function resumeSLA(ticketId: string): Promise<Ticket> {
-  const { data } = await api.post(`/tickets/${ticketId}/sla/resume`);
+  const { data } = await api.post(`/tickets/${ticketId}/resume-sla`);
   return data.data;
 }
 

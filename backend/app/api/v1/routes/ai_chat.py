@@ -304,8 +304,9 @@ async def chat(
 
     return ok({
         "session_id": str(session.id),
-        "message": {
+        "assistant_message": {
             "id": str(assistant_msg.id),
+            "session_id": str(session.id),
             "role": "assistant",
             "content": ai_text,
             "input_tokens": input_tokens,
@@ -400,17 +401,21 @@ async def categorize_text(
         raise ValidationError("AI features are not enabled.")
 
     title = payload.get("title", "").strip()
-    description = payload.get("description", "").strip()
+    # Accept both `text` (frontend key) and `description` (legacy key)
+    description = (payload.get("text") or payload.get("description") or "").strip()
 
-    if not title:
-        raise ValidationError("title is required.")
+    if not title and not description:
+        raise ValidationError("title or text is required.")
 
     # Build categorization prompt
     prompt = (
         f"Analyze the following bank support ticket and provide categorization.\n\n"
         f"Title: {title}\n"
         f"Description: {description}\n\n"
-        "Respond with a JSON object containing: category, subcategory, priority, sentiment, confidence (0-1), reasoning."
+        "Respond with a JSON object containing ONLY: "
+        "category (one of: payments|fraud|kyc|loans|compliance|it|operations|treasury|dispute|reconciliation|access), "
+        "subcategory, priority (critical|high|medium|low), sentiment (positive|neutral|negative|urgent), "
+        "confidence (0.0-1.0), department (responsible team name), tags (array of keyword strings)."
     )
 
     import time
@@ -421,15 +426,15 @@ async def categorize_text(
     # Parse response (best-effort JSON extraction)
     import json as json_lib
     result_data: dict = {
-        "category": None,
+        "category": "operations",
         "subcategory": None,
         "priority": "medium",
         "sentiment": "neutral",
-        "confidence": 0.0,
-        "reasoning": ai_text,
+        "confidence": 0.5,
+        "department": None,
+        "tags": [],
     }
     try:
-        # Try to extract JSON from AI response
         import re
         json_match = re.search(r"\{.*\}", ai_text, re.DOTALL)
         if json_match:
@@ -437,6 +442,10 @@ async def categorize_text(
             result_data.update(parsed)
     except Exception as exc:
         log.debug("categorize_json_parse_failed", error=str(exc))
+
+    # Ensure tags is always a list
+    if not isinstance(result_data.get("tags"), list):
+        result_data["tags"] = []
 
     await _log_ai_interaction(
         db,
@@ -451,10 +460,14 @@ async def categorize_text(
     )
     await db.commit()
 
+    # Return in CategorizeResponse format (matching frontend interface)
     return ok({
-        "title": title,
-        "description": description,
-        "categorization": result_data,
+        "category":   result_data.get("category", "operations"),
+        "subcategory": result_data.get("subcategory"),
+        "confidence":  float(result_data.get("confidence", 0.5)),
+        "priority":    result_data.get("priority", "medium"),
+        "tags":        result_data.get("tags", []),
+        "department":  result_data.get("department"),
     })
 
 

@@ -666,7 +666,7 @@ async def pause_sla(
     await db.commit()
     await db.refresh(ticket)
     log.info("sla_paused", ticket_id=str(ticket.id))
-    return ok({"ticket_id": str(ticket.id), "sla_paused_at": now.isoformat()})
+    return ok(_serialize_ticket(ticket))
 
 
 @router.post(
@@ -712,7 +712,7 @@ async def resume_sla(
     await db.commit()
     await db.refresh(ticket)
     log.info("sla_resumed", ticket_id=str(ticket.id))
-    return ok({"ticket_id": str(ticket.id), "sla_resumed_at": now.isoformat()})
+    return ok(_serialize_ticket(ticket))
 
 
 @router.get("/{ticket_id}/comments", summary="List comments for a ticket")
@@ -844,10 +844,9 @@ async def ai_summarize(
         raise ValidationError("AI features are not enabled.")
 
     result = {
-        "ticket_id": str(ticket.id),
-        "ticket_number": ticket.ticket_number,
-        "summary": ticket.ai_summary or "Summary not yet generated. Trigger AI categorization first.",
-        "status": "ai_summarize_triggered",
+        "summary": ticket.ai_summary or "AI summary not yet generated. The ticket will be categorized on the next processing cycle.",
+        "sentiment": ticket.ai_sentiment or "neutral",
+        "risk_score": ticket.ai_risk_score or 0.0,
     }
 
     await _record_audit(
@@ -879,34 +878,22 @@ async def ai_suggest(
     if not settings.AI_ENABLED:
         raise ValidationError("AI features are not enabled.")
 
-    # Build contextual suggestions based on category
-    suggestions: list[dict] = [
-        {
-            "rank": 1,
-            "suggestion": "Review the customer's transaction history in the core banking system.",
-            "confidence": 0.85,
-        },
-        {
-            "rank": 2,
-            "suggestion": "Check if there are any pending maintenance windows affecting this service.",
-            "confidence": 0.72,
-        },
-        {
-            "rank": 3,
-            "suggestion": "Escalate to the relevant department head if unresolved within SLA.",
-            "confidence": 0.65,
-        },
+    # Build contextual suggestions based on category and priority
+    suggestions: list[str] = [
+        "Review the customer's transaction history and any recent account activity.",
+        f"This is a {ticket.priority.value}-priority ticket — ensure SLA targets are tracked.",
+        "Check if there are any pending maintenance windows or known incidents affecting this service.",
     ]
+    next_actions: list[str] = [
+        "Assign to the appropriate department team for investigation.",
+        "Escalate to the relevant department head if unresolved within SLA.",
+    ]
+    if ticket.ai_category:
+        suggestions.insert(0, f"Based on AI categorization ({ticket.ai_category}): verify all related systems are checked.")
 
     result = {
-        "ticket_id": str(ticket.id),
-        "ticket_number": ticket.ticket_number,
         "suggestions": suggestions,
-        "based_on": {
-            "title": ticket.title,
-            "category": ticket.ai_category,
-            "priority": ticket.priority.value,
-        },
+        "next_actions": next_actions,
     }
 
     await _record_audit(
