@@ -11,6 +11,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import get_current_user, get_session, require_roles
+from app.core import authz
 from app.core.exceptions import AuthorizationError, NotFoundError, ValidationError
 from app.core.logging import get_logger
 from app.models.audit import AuditAction, AuditLog
@@ -19,6 +20,7 @@ from app.models.ticket import Ticket, TicketStatus
 from app.models.user import User
 from app.schemas.envelope import ok, paginated
 from app.services.org_service import get_accessible_org_unit_ids
+from app.services.ticket_service import VALID_TRANSITIONS
 
 log = get_logger(__name__)
 
@@ -28,8 +30,10 @@ router = APIRouter(prefix="/tickets", tags=["tickets"])
 # Helpers
 # ---------------------------------------------------------------------------
 
-_BRANCH_USER_ROLE = "branch_user"
-_AGENT_ROLES = {"agent", "supervisor", "admin", "auditor"}
+_BRANCH_USER_ROLE = authz.BRANCH_USER
+#: Roles permitted to act on other people's tickets. Sourced from the central
+#: policy — `auditor` used to be in this set and silently held write access.
+_AGENT_ROLES = authz.TICKET_WRITE_ROLES
 
 
 def _is_branch_user(user: User) -> bool:
@@ -297,6 +301,8 @@ async def create_ticket(
 ) -> dict:
     from app.models.ticket import TicketPriority, TicketSource, TicketStatus
 
+    authz.assert_can_write(current_user, "raise tickets")
+
     title = payload.get("title", "").strip()
     if not title:
         raise ValidationError("Title is required.")
@@ -403,6 +409,8 @@ async def update_ticket(
 ) -> dict:
     from app.models.ticket import TicketPriority
 
+    authz.assert_can_write(current_user, "modify tickets")
+
     ticket = await _get_ticket_or_404(ticket_id, db, current_user)
 
     if not _can_modify_ticket(ticket, current_user):
@@ -501,19 +509,33 @@ async def transition_status(
         raise ValidationError(f"Invalid status: {new_status_val}")
 
     # Only the raiser or agents can transition status
+    authz.assert_can_write(current_user, "change ticket status")
+
     if not _can_modify_ticket(ticket, current_user):
         raise AuthorizationError("You do not have permission to transition this ticket.")
 
     # Org users (not agents) may only reopen or close their own tickets
-    is_agent = current_user.is_super_admin or current_user.role.name in _AGENT_ROLES
+    is_agent = authz.can_write_tickets(current_user)
     if not is_agent and not _is_branch_user(current_user):
         if new_status not in {TicketStatus.CLOSED, TicketStatus.REOPENED}:
             raise AuthorizationError("You may only close or reopen tickets.")
     elif _is_branch_user(current_user) and new_status not in {TicketStatus.CLOSED, TicketStatus.REOPENED}:
         raise AuthorizationError("Branch users may only close or reopen tickets.")
 
+    # Enforce the lifecycle. VALID_TRANSITIONS was previously consulted only by
+    # TicketService, which this endpoint never calls — so the state machine was
+    # documentation rather than a constraint, and a new ticket could be marked
+    # resolved without ever being assigned.
+    old_status = ticket.status if isinstance(ticket.status, TicketStatus) else TicketStatus(ticket.status)
+    if new_status != old_status:
+        allowed = VALID_TRANSITIONS.get(old_status, [])
+        if new_status not in allowed:
+            raise ValidationError(
+                f"Cannot move a ticket from '{old_status.value}' to '{new_status.value}'. "
+                f"Allowed from here: {', '.join(s.value for s in allowed) or 'nothing'}."
+            )
+
     now = datetime.now(UTC)
-    old_status = ticket.status
     ticket.status = new_status
 
     if new_status == TicketStatus.RESOLVED and not ticket.resolved_at:
@@ -755,6 +777,8 @@ async def add_comment(
     body = payload.get("body", "").strip()
     if not body:
         raise ValidationError("Comment body cannot be empty.")
+
+    authz.assert_can_write(current_user, "comment on tickets")
 
     is_internal = bool(payload.get("is_internal", False))
     # Branch users cannot post internal comments

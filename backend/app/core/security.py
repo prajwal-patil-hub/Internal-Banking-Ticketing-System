@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
@@ -79,3 +80,71 @@ def generate_refresh_token() -> tuple[str, str, datetime]:
 
 def hash_refresh_token(raw: str) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
+
+
+# --- Multi-factor authentication (TOTP) ------------------------------------
+
+#: Minutes an MFA challenge token stays valid — long enough to read a code off
+#: a phone, short enough that a leaked challenge is near-worthless.
+MFA_CHALLENGE_TTL_MINUTES = 5
+
+#: Accept the adjacent 30s step either side, covering modest clock drift.
+_TOTP_VALID_WINDOW = 1
+
+
+def generate_mfa_secret() -> str:
+    """A fresh base32 TOTP secret."""
+    import pyotp
+
+    return pyotp.random_base32()
+
+
+def mfa_provisioning_uri(secret: str, email: str, issuer: str = "SUCCESS Bank") -> str:
+    """otpauth:// URI that authenticator apps read from a QR code."""
+    import pyotp
+
+    return pyotp.TOTP(secret).provisioning_uri(name=email, issuer_name=issuer)
+
+
+def mfa_qr_svg(uri: str) -> str | None:
+    """Inline SVG QR code for an otpauth URI, or None if unavailable.
+
+    Returns None rather than raising when the QR library is missing — the
+    enrolment screen also shows the secret for manual entry, so a container
+    built before `segno` was added degrades to that instead of erroring.
+    """
+    try:
+        import segno
+    except ImportError:  # pragma: no cover - depends on the installed image
+        return None
+
+    buf = io.BytesIO()
+    segno.make(uri, error="m").save(buf, kind="svg", scale=5, border=2, xmldecl=False)
+    return buf.getvalue().decode()
+
+
+def verify_totp(secret: str, code: str) -> bool:
+    """Check a 6-digit code against the secret."""
+    import pyotp
+
+    if not secret or not code:
+        return False
+    return pyotp.TOTP(secret).verify(code.strip().replace(" ", ""), valid_window=_TOTP_VALID_WINDOW)
+
+
+def create_mfa_challenge_token(*, subject: str) -> tuple[str, datetime]:
+    """Short-lived token proving the password step passed.
+
+    Typed `mfa` rather than `access`, so `get_current_user` rejects it — a
+    half-authenticated session must not reach any protected route.
+    """
+    now = datetime.now(UTC)
+    exp = now + timedelta(minutes=MFA_CHALLENGE_TTL_MINUTES)
+    payload: dict[str, Any] = {
+        "sub": subject,
+        "type": "mfa",
+        "iat": int(now.timestamp()),
+        "exp": int(exp.timestamp()),
+        "jti": secrets.token_hex(16),
+    }
+    return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM), exp

@@ -13,6 +13,7 @@ import { AuditPage } from '@/pages/AuditPage';
 import { OrgManagementPage } from '@/pages/OrgManagementPage';
 import { UsersPage } from '@/pages/UsersPage';
 import { ReportsPage } from '@/pages/ReportsPage';
+import { SecurityPage } from '@/pages/SecurityPage';
 import { SLAMonitorPage } from '@/pages/SLAMonitorPage';
 import { EscalationsPage } from '@/pages/EscalationsPage';
 
@@ -85,6 +86,8 @@ export default function App() {
             </RequireAuth>
           }
         />
+        {/* Personal account security — available to every signed-in role. */}
+        <Route path="/security" element={<SecurityPage />} />
         <Route path="/forbidden" element={<ForbiddenPage />} />
       </Route>
 

@@ -6,8 +6,8 @@ import {
 } from 'recharts';
 import { Button } from '@/components/Button';
 import { cn } from '@/lib/cn';
-import { downloadTicketReport, type ReportFormat } from '@/features/reports/api';
-import { api } from '@/lib/api';
+import { downloadTicketReport, exportAnalytics, type ReportFormat, type AnalyticsFormat } from '@/features/reports/api';
+import { api, extractError } from '@/lib/api';
 
 // ── Chart colors ──────────────────────────────────────────────────────────────
 
@@ -32,34 +32,51 @@ const PRIORITY_COLORS: Record<string, string> = {
 
 // ── Chart download helper ─────────────────────────────────────────────────────
 
-function downloadChartAsPng(ref: React.RefObject<HTMLDivElement>, name: string) {
-  const svg = ref.current?.querySelector('svg');
-  if (!svg) return;
+/**
+ * Rasterise a rendered Recharts SVG to a PNG data URL.
+ *
+ * Resolves to null rather than rejecting when there is nothing to draw, so an
+ * export can carry on and produce the data-only version of the document.
+ */
+function chartToPngDataUrl(ref: React.RefObject<HTMLDivElement>): Promise<string | null> {
+  return new Promise((resolve) => {
+    const svg = ref.current?.querySelector('svg');
+    if (!svg) return resolve(null);
 
-  const serializer = new XMLSerializer();
-  const svgStr = serializer.serializeToString(svg);
-  const svgBlob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
-  const svgUrl = URL.createObjectURL(svgBlob);
+    const svgStr = new XMLSerializer().serializeToString(svg);
+    const svgUrl = URL.createObjectURL(new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' }));
 
-  const img = new Image();
-  img.onload = () => {
-    const canvas = document.createElement('canvas');
-    canvas.width = svg.clientWidth * 2;
-    canvas.height = svg.clientHeight * 2;
-    const ctx = canvas.getContext('2d')!;
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    const pngUrl = canvas.toDataURL('image/png');
-    const a = document.createElement('a');
-    a.href = pngUrl;
-    a.download = `${name}.png`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(svgUrl);
-  };
-  img.src = svgUrl;
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = (svg.clientWidth || 600) * 2;
+      canvas.height = (svg.clientHeight || 300) * 2;
+      const ctx = canvas.getContext('2d')!;
+      // Charts use currentColor for axes and labels, which is near-white in
+      // dark mode; paint a white ground so the export is legible on paper.
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(svgUrl);
+      resolve(canvas.toDataURL('image/png'));
+    };
+    img.onerror = () => { URL.revokeObjectURL(svgUrl); resolve(null); };
+    img.src = svgUrl;
+  });
+}
+
+function triggerDownload(href: string, filename: string) {
+  const a = document.createElement('a');
+  a.href = href;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+async function downloadChartAsPng(ref: React.RefObject<HTMLDivElement>, name: string) {
+  const png = await chartToPngDataUrl(ref);
+  if (png) triggerDownload(png, `${name}.png`);
 }
 
 // ── Stat cards ────────────────────────────────────────────────────────────────
@@ -85,25 +102,71 @@ function StatCard({ label, value, sub, tone = 'default' }: {
 
 // ── Chart section wrapper ─────────────────────────────────────────────────────
 
-function ChartSection({ title, chartRef, children }: {
+function ChartSection({ title, chartRef, rows, columns, children }: {
   title: string;
   chartRef: React.RefObject<HTMLDivElement>;
+  /** The series behind the chart — exported as the data table / worksheet. */
+  rows: Array<Record<string, unknown>>;
+  columns?: string[];
   children: React.ReactNode;
 }) {
+  const [busy, setBusy] = useState<AnalyticsFormat | 'png' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const slug = title.replace(/\s+/g, '_').toLowerCase();
+
+  const run = async (format: AnalyticsFormat | 'png') => {
+    setBusy(format);
+    setError(null);
+    try {
+      if (format === 'png') {
+        await downloadChartAsPng(chartRef, slug);
+        return;
+      }
+      // Strip the colour key — it drives rendering, not reporting.
+      const clean = rows.map(({ color: _color, ...rest }) => rest);
+      await exportAnalytics(
+        {
+          title,
+          filename: slug,
+          generated_at: new Date().toLocaleString(),
+          charts: [{
+            title,
+            columns: columns ?? (clean[0] ? Object.keys(clean[0]) : []),
+            rows: clean,
+            image: format === 'pdf' ? await chartToPngDataUrl(chartRef) : null,
+          }],
+        },
+        format,
+      );
+    } catch (e) {
+      setError(extractError(e).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <div className="card-sm flex flex-col gap-3">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <h3 className="text-sm font-semibold text-[var(--tx)]">{title}</h3>
-        <button
-          onClick={() => downloadChartAsPng(chartRef, title.replace(/\s+/g, '_').toLowerCase())}
-          className="btn-ghost !py-1 !px-2 text-xs gap-1"
-        >
-          <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <div className="flex items-center gap-1">
+          <svg className="h-3.5 w-3.5 text-[var(--tx-3)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
           </svg>
-          PNG
-        </button>
+          {([['png', 'PNG'], ['pdf', 'PDF'], ['xlsx', 'Excel']] as const).map(([fmt, label]) => (
+            <button
+              key={fmt}
+              onClick={() => run(fmt)}
+              disabled={busy !== null}
+              className="btn-ghost !py-1 !px-2 text-xs disabled:opacity-50"
+              title={`Download this chart as ${label}`}
+            >
+              {busy === fmt ? '…' : label}
+            </button>
+          ))}
+        </div>
       </div>
+      {error && <p className="text-xs text-[var(--err)]">{error}</p>}
       <div ref={chartRef}>{children}</div>
     </div>
   );
@@ -118,6 +181,8 @@ export function ReportsPage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [priorityFilter, setPriorityFilter] = useState('');
   const [downloading, setDownloading] = useState(false);
+  const [exporting, setExporting] = useState<AnalyticsFormat | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
   const barRef = useRef<HTMLDivElement>(null);
@@ -202,6 +267,56 @@ export function ReportsPage() {
   const slaBreached = kpis?.sla_breached ?? 0;
   const avgResolutionHrs: number | null = kpis?.avg_resolution_hours ?? null;
 
+  /** One document containing every KPI tile and every chart on the page. */
+  const exportDashboard = async (format: AnalyticsFormat) => {
+    setExporting(format);
+    setExportError(null);
+    try {
+      const strip = (rows: Array<Record<string, unknown>>) =>
+        rows.map(({ color: _color, ...rest }) => rest);
+
+      const sections: Array<[string, React.RefObject<HTMLDivElement>, Array<Record<string, unknown>>, string[]]> = [
+        ['Tickets by Status', barRef, byStatus, ['name', 'count']],
+        ['Tickets by Priority', priorityRef, byPriority, ['name', 'value']],
+        ['Tickets Over Time', lineRef, byDay, ['date', 'count']],
+        ['SLA Compliance by Department', pieRef, slaByDept, ['name', 'compliance']],
+      ];
+
+      // Images only go in the PDF — a workbook has nowhere to put them.
+      const charts = await Promise.all(
+        sections.map(async ([title, ref, rows, columns]) => ({
+          title,
+          columns,
+          rows: strip(rows),
+          image: format === 'pdf' ? await chartToPngDataUrl(ref) : null,
+        })),
+      );
+
+      await exportAnalytics(
+        {
+          title: 'SUCCESS Bank — Ticket Analytics',
+          filename: 'ticket_analytics',
+          generated_at: new Date().toLocaleString(),
+          kpis: [
+            { label: 'Total tickets', value: totalTickets },
+            { label: 'Open tickets', value: openTickets },
+            { label: 'SLA breached', value: slaBreached },
+            {
+              label: 'Average resolution (hours)',
+              value: avgResolutionHrs != null ? avgResolutionHrs.toFixed(1) : '—',
+            },
+          ],
+          charts,
+        },
+        format,
+      );
+    } catch (e) {
+      setExportError(extractError(e).message);
+    } finally {
+      setExporting(null);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-5">
       <div>
@@ -210,6 +325,23 @@ export function ReportsPage() {
       </div>
 
       {/* KPIs */}
+      <div className="flex items-center justify-between gap-2 flex-wrap -mb-1">
+        <h2 className="text-sm font-semibold text-[var(--tx)]">Key metrics</h2>
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-[var(--tx-3)] mr-1">Export everything</span>
+          {([['pdf', 'PDF'], ['xlsx', 'Excel']] as const).map(([fmt, label]) => (
+            <button
+              key={fmt}
+              onClick={() => exportDashboard(fmt)}
+              disabled={exporting !== null}
+              className="btn-ghost !py-1 !px-2 text-xs disabled:opacity-50"
+            >
+              {exporting === fmt ? 'Preparing…' : label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {exportError && <p className="text-xs text-[var(--err)] -mt-2">{exportError}</p>}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <StatCard label="Total Tickets" value={totalTickets} />
         <StatCard label="Open" value={openTickets} tone="warning" />
@@ -223,7 +355,7 @@ export function ReportsPage() {
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <ChartSection title="Tickets by Status" chartRef={barRef}>
+        <ChartSection title="Tickets by Status" chartRef={barRef} rows={byStatus} columns={['name', 'count']}>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={byStatus} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--sh-dark)" />
@@ -239,7 +371,7 @@ export function ReportsPage() {
           </ResponsiveContainer>
         </ChartSection>
 
-        <ChartSection title="Tickets by Priority" chartRef={priorityRef}>
+        <ChartSection title="Tickets by Priority" chartRef={priorityRef} rows={byPriority} columns={['name', 'value']}>
           <ResponsiveContainer width="100%" height={220}>
             <PieChart>
               <Pie data={byPriority} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={false}>
@@ -253,7 +385,7 @@ export function ReportsPage() {
           </ResponsiveContainer>
         </ChartSection>
 
-        <ChartSection title="Tickets Over Time" chartRef={lineRef}>
+        <ChartSection title="Tickets Over Time" chartRef={lineRef} rows={byDay} columns={['date', 'count']}>
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={byDay} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--sh-dark)" />
@@ -265,7 +397,7 @@ export function ReportsPage() {
           </ResponsiveContainer>
         </ChartSection>
 
-        <ChartSection title="SLA Compliance by Department" chartRef={pieRef}>
+        <ChartSection title="SLA Compliance by Department" chartRef={pieRef} rows={slaByDept} columns={['name', 'compliance']}>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={slaByDept} layout="vertical" margin={{ top: 4, right: 8, left: 60, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--sh-dark)" />

@@ -81,6 +81,10 @@ VALID_TRANSITIONS: dict[TicketStatus, list[TicketStatus]] = {
     TicketStatus.REOPENED: [
         TicketStatus.ASSIGNED,
         TicketStatus.IN_PROGRESS,
+        # Every other open state can be closed directly, and a reporter who
+        # reopened by mistake needs the same exit; without this the reporter's
+        # close permission is unreachable from the one state they can create.
+        TicketStatus.CLOSED,
     ],
 }
 

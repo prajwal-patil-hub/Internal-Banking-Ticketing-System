@@ -8,7 +8,7 @@ import { Logo } from '@/components/Logo';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
 import { Badge } from '@/components/Badge';
-import { login } from '@/features/auth/api';
+import { login, verifyMFALogin } from '@/features/auth/api';
 import { extractError } from '@/lib/api';
 import { useAuth } from '@/store/auth';
 
@@ -24,6 +24,10 @@ export function LoginPage() {
   const loc = useLocation();
   const setSession = useAuth((s) => s.setSession);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  /** Set once the password step passes on an MFA-protected account. */
+  const [mfaToken, setMfaToken] = useState<string | null>(null);
+  const [mfaCode, setMfaCode] = useState('');
+  const [verifying, setVerifying] = useState(false);
 
   const {
     register,
@@ -34,19 +38,41 @@ export function LoginPage() {
     defaultValues: { email: '', password: '' },
   });
 
+  const finish = (user: Parameters<typeof setSession>[0]['user'], tokens: { access_token: string; refresh_token: string }) => {
+    setSession({
+      user,
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+    });
+    const redirectTo = (loc.state as { from?: string } | null)?.from ?? '/dashboard';
+    nav(redirectTo, { replace: true });
+  };
+
   const onSubmit = async (values: FormValues) => {
     setSubmitError(null);
     try {
-      const { user, tokens } = await login(values.email, values.password);
-      setSession({
-        user,
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token,
-      });
-      const redirectTo = (loc.state as { from?: string } | null)?.from ?? '/dashboard';
-      nav(redirectTo, { replace: true });
+      const result = await login(values.email, values.password);
+      if (result.kind === 'mfa_required') {
+        setMfaToken(result.mfaToken);
+        return;
+      }
+      finish(result.user, result.tokens);
     } catch (e) {
       setSubmitError(extractError(e).message);
+    }
+  };
+
+  const onVerifyMfa = async () => {
+    setSubmitError(null);
+    setVerifying(true);
+    try {
+      const { user, tokens } = await verifyMFALogin(mfaToken!, mfaCode);
+      finish(user, tokens);
+    } catch (e) {
+      setSubmitError(extractError(e).message);
+      setMfaCode('');
+    } finally {
+      setVerifying(false);
     }
   };
 
@@ -78,6 +104,42 @@ export function LoginPage() {
             </div>
           )}
 
+          {/* Second factor — replaces the credential form once the password
+              step passes, so there is no way to skip back past it. */}
+          {mfaToken ? (
+            <div className="mt-6 flex flex-col gap-4">
+              <div>
+                <span className="block mb-1 text-sm font-medium text-[var(--tx-2)]">
+                  Authentication code
+                </span>
+                <p className="text-xs text-[var(--tx-3)] mb-2">
+                  Enter the six-digit code from your authenticator app.
+                </p>
+                <input
+                  className="input text-lg font-mono tracking-[0.4em] text-center"
+                  value={mfaCode}
+                  onChange={(e) => setMfaCode(e.target.value.replace(/[^\d]/g, '').slice(0, 6))}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && mfaCode.length === 6) onVerifyMfa(); }}
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  placeholder="000000"
+                  autoFocus
+                />
+              </div>
+
+              <Button onClick={onVerifyMfa} disabled={mfaCode.length !== 6 || verifying}>
+                {verifying ? 'Verifying…' : 'Verify'}
+              </Button>
+
+              <button
+                type="button"
+                className="text-xs text-[var(--tx-3)] hover:text-[var(--tx-2)] underline"
+                onClick={() => { setMfaToken(null); setMfaCode(''); setSubmitError(null); }}
+              >
+                Back to sign in
+              </button>
+            </div>
+          ) : (
           <form className="mt-6 flex flex-col gap-4" onSubmit={handleSubmit(onSubmit)} noValidate>
             <label className="text-sm">
               <span className="block mb-1 font-medium text-[var(--tx-2)]">Work email</span>
@@ -110,9 +172,10 @@ export function LoginPage() {
             </Button>
 
             <p className="text-xs text-[var(--tx-3)] text-center">
-              MFA prompt appears after first login (P8).
+              Accounts with two-factor authentication will be asked for a code next.
             </p>
           </form>
+          )}
         </Card>
       </div>
     </div>

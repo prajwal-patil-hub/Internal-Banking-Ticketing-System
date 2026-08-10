@@ -42,6 +42,7 @@ The stack seeds itself on first boot. Sign in with any of these:
 | Email | Password | Role |
 |---|---|---|
 | `admin@successbank.local` | `Admin@123456` | admin |
+| `super.admin@successbank.local` | `Passw0rd@123` | admin + **super admin** |
 | `priya.sharma@successbank.local` | `Passw0rd@123` | supervisor |
 | `meera.nair@successbank.local` | `Passw0rd@123` | supervisor |
 | `rahul.verma@successbank.local` | `Passw0rd@123` | agent |
@@ -55,6 +56,38 @@ The seed also loads 21 demo tickets spanning every status, priority, and SLA
 state (breached / at-risk / on-time), plus comments and escalation events — so
 Tickets, SLA Monitor, and Escalations all have real data to show. Re-running
 the seed is safe; it detects the demo set and skips it.
+
+## Roles
+
+One role per user, enforced centrally in `backend/app/core/authz.py`:
+
+| Role | Can do |
+|---|---|
+| `branch_user` | Raise tickets, see only their own, comment, close/reopen them |
+| `agent` | Work any ticket: assign, progress, resolve, pause SLA, AI helpers |
+| `supervisor` | Agent powers plus the escalation queue, SLA monitor, user directory |
+| `admin` | All of the above plus user, org and category administration |
+| `auditor` | **Read only** — tickets, audit log, dashboards, reports. No writes at all |
+
+`is_super_admin` is a second tier on top of `admin`: only a super admin can grant
+the super-admin flag or modify another super admin's account. Without that,
+any admin could reset the super admin's password and take the account over.
+
+The ticket lifecycle is enforced on the API, not just documented — illegal jumps
+(`new → resolved`, `closed → new`) are rejected with the list of moves that are
+actually available from the current state.
+
+## Two-factor authentication
+
+Any user can enrol from **Security** in the sidebar: scan the QR code with an
+authenticator app, confirm one code, and MFA is on. After that, signing in asks
+for a code before issuing any token.
+
+Turning MFA off requires the account password, not just a live session — a
+stolen access token must not be enough to strip the second factor.
+
+There are no printed backup codes yet, so a lost device is recovered by an
+admin clearing the enrolment (`POST /api/v1/users/{id}/mfa/reset`).
 
 ## Local AI (Ollama)
 

@@ -31,6 +31,9 @@ const NAV: NavItem[] = [
     roles: ['admin', 'supervisor', 'auditor'] },
   { to: '/audit',       label: 'Audit Log',   icon: 'M9 12h6M9 16h6M5 4h14v16H5z',
     roles: ['auditor', 'admin'] },
+  // No `roles`: two-factor authentication is a personal account setting, so
+  // every signed-in user needs to reach it.
+  { to: '/security',    label: 'Security',    icon: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10zM9 12l2 2 4-4' },
 ];
 
 function Icon({ d, className }: { d: string; className?: string }) {

@@ -72,6 +72,20 @@ class ConflictError(AppException):
     message = "Resource conflict."
 
 
+class MFARequiredError(AppException):
+    """Password accepted, second factor still owed.
+
+    Carries the challenge token in `details` so the client can complete the
+    login without re-sending the password. Deliberately not a 401: the
+    credentials were correct, so the frontend's refresh-and-retry interceptor
+    must not treat this as an expired session.
+    """
+
+    status_code = 403
+    code = "MFA_REQUIRED"
+    message = "Multi-factor authentication code required."
+
+
 class RateLimitError(AppException):
     status_code = 429
     code = "RATE_LIMITED"

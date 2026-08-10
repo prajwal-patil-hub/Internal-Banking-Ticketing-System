@@ -11,9 +11,12 @@ from typing import Any
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.logging import get_logger
 from app.models.ticket import Ticket, TicketStatus
 from app.models.user import User
 from app.services.org_service import get_hierarchy_chain
+
+log = get_logger(__name__)
 
 
 REPORT_COLUMNS = [
@@ -291,6 +294,200 @@ async def generate_pdf(db: AsyncSession, filters: dict, current_user: User) -> b
         ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
     ]))
     story.append(t)
+
+    doc.build(story)
+    return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Analytics export — charts and KPI tiles
+# ---------------------------------------------------------------------------
+#
+# The dashboard could only save a chart as a PNG, produced in the browser from
+# the SVG. These build the other two formats server-side using the libraries
+# the ticket report already depends on, so the frontend needs no new packages:
+# a PDF that embeds the rendered chart image above its data, and a workbook
+# with one sheet per chart plus the KPI tiles.
+
+
+def _decode_chart_png(image_data_url: str | None) -> bytes | None:
+    """Pull raw PNG bytes out of a `data:image/png;base64,...` URL."""
+    if not image_data_url:
+        return None
+    import base64
+
+    _, _, encoded = image_data_url.partition("base64,")
+    if not encoded:
+        return None
+    try:
+        # validate=True so junk raises instead of silently decoding to b'' —
+        # empty bytes would sail past this guard and fail deeper in the PDF
+        # builder, where the cause is much harder to see.
+        decoded = base64.b64decode(encoded, validate=True)
+    except Exception:  # noqa: BLE001 - a bad image must not fail the export
+        log.warning("chart_export.bad_image_payload")
+        return None
+    return decoded or None
+
+
+def generate_analytics_excel(payload: dict) -> bytes:
+    """Workbook: a KPI summary sheet, then one sheet per chart's data."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill("solid", fgColor="1A5276")
+    title_font = Font(bold=True, size=13)
+
+    wb = Workbook()
+    wb.remove(wb.active)  # drop the default sheet; every sheet below is named
+
+    kpis = payload.get("kpis") or []
+    if kpis:
+        ws = wb.create_sheet("Summary")
+        ws["A1"] = payload.get("title") or "Dashboard Summary"
+        ws["A1"].font = title_font
+        if generated := payload.get("generated_at"):
+            ws["A2"] = f"Generated {generated}"
+        for col, header in enumerate(("Metric", "Value"), start=1):
+            cell = ws.cell(row=4, column=col, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+        for row_idx, kpi in enumerate(kpis, start=5):
+            ws.cell(row=row_idx, column=1, value=str(kpi.get("label", "")))
+            ws.cell(row=row_idx, column=2, value=kpi.get("value"))
+        ws.column_dimensions["A"].width = 34
+        ws.column_dimensions["B"].width = 18
+
+    for index, chart in enumerate(payload.get("charts") or [], start=1):
+        # Excel sheet names cap at 31 chars and reject : \ / ? * [ ]
+        raw_name = str(chart.get("title") or f"Chart {index}")
+        safe = "".join("-" if ch in ':\\/?*[]' else ch for ch in raw_name)[:31] or f"Chart {index}"
+        while safe in wb.sheetnames:  # titles need not be unique; sheets do
+            safe = f"{safe[:28]}_{index}"
+        ws = wb.create_sheet(safe)
+
+        rows = chart.get("rows") or []
+        columns = chart.get("columns") or (list(rows[0].keys()) if rows else [])
+
+        ws["A1"] = raw_name
+        ws["A1"].font = title_font
+        for col_idx, key in enumerate(columns, start=1):
+            cell = ws.cell(row=3, column=col_idx, value=str(key).replace("_", " ").title())
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal="center")
+        for row_idx, row in enumerate(rows, start=4):
+            for col_idx, key in enumerate(columns, start=1):
+                ws.cell(row=row_idx, column=col_idx, value=row.get(key))
+        for col_idx in range(1, max(len(columns), 1) + 1):
+            ws.column_dimensions[get_column_letter(col_idx)].width = 22
+        if rows:
+            ws.freeze_panes = "A4"
+
+    if not wb.sheetnames:  # nothing supplied — still return a valid workbook
+        wb.create_sheet("Empty")
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def generate_analytics_pdf(payload: dict) -> bytes:
+    """PDF: each chart's rendered image above the numbers behind it."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.units import cm
+    from reportlab.lib.utils import ImageReader
+    from reportlab.platypus import (
+        Image,
+        PageBreak,
+        Paragraph,
+        SimpleDocTemplate,
+        Spacer,
+        Table,
+        TableStyle,
+    )
+
+    styles = getSampleStyleSheet()
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        leftMargin=1.6 * cm, rightMargin=1.6 * cm,
+        topMargin=1.4 * cm, bottomMargin=1.4 * cm,
+    )
+    usable_width = doc.width
+    story: list = []
+
+    story.append(Paragraph(payload.get("title") or "Dashboard Report", styles["Title"]))
+    if generated := payload.get("generated_at"):
+        story.append(Paragraph(f"Generated {generated}", styles["Normal"]))
+    story.append(Spacer(1, 0.6 * cm))
+
+    if kpis := payload.get("kpis") or []:
+        story.append(Paragraph("Key metrics", styles["Heading2"]))
+        table = Table(
+            [["Metric", "Value"]] + [[str(k.get("label", "")), str(k.get("value", ""))] for k in kpis],
+            colWidths=[usable_width * 0.62, usable_width * 0.38],
+        )
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1A5276")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#B0B7C3")),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F2F4F8")]),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("PADDING", (0, 0), (-1, -1), 5),
+        ]))
+        story.append(table)
+        story.append(Spacer(1, 0.7 * cm))
+
+    charts = payload.get("charts") or []
+    for index, chart in enumerate(charts):
+        story.append(Paragraph(str(chart.get("title") or f"Chart {index + 1}"), styles["Heading2"]))
+        story.append(Spacer(1, 0.25 * cm))
+
+        if image_bytes := _decode_chart_png(chart.get("image")):
+            try:
+                reader = ImageReader(io.BytesIO(image_bytes))
+                src_w, src_h = reader.getSize()
+                # Scale to the text column, capping height so the data table
+                # below still shares the page.
+                width = min(usable_width, src_w)
+                height = width * src_h / src_w
+                max_height = 9 * cm
+                if height > max_height:
+                    height, width = max_height, max_height * src_w / src_h
+                story.append(Image(io.BytesIO(image_bytes), width=width, height=height))
+                story.append(Spacer(1, 0.4 * cm))
+            except Exception:  # noqa: BLE001 - fall back to the table alone
+                log.warning("chart_export.image_render_failed", chart=chart.get("title"))
+
+        rows = chart.get("rows") or []
+        columns = chart.get("columns") or (list(rows[0].keys()) if rows else [])
+        if rows and columns:
+            header = [str(c).replace("_", " ").title() for c in columns]
+            body = [[str(r.get(c, "")) for c in columns] for r in rows]
+            table = Table([header] + body, colWidths=[usable_width / len(columns)] * len(columns))
+            table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1A5276")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#B0B7C3")),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F2F4F8")]),
+                ("PADDING", (0, 0), (-1, -1), 4),
+            ]))
+            story.append(table)
+
+        if index < len(charts) - 1:
+            story.append(PageBreak())
+
+    if not story:
+        story.append(Paragraph("No data available.", styles["Normal"]))
 
     doc.build(story)
     return buf.getvalue()

@@ -11,6 +11,10 @@ from pydantic import BaseModel, Field
 class LoginRequest(BaseModel):
     email: str
     password: str = Field(min_length=8, max_length=200)
+    #: Optional TOTP code, letting a client that already has one skip the
+    #: separate challenge round-trip. Omit it and an MFA account replies with
+    #: an MFA_REQUIRED challenge instead of tokens.
+    mfa_code: str | None = Field(default=None, max_length=10)
 
 
 class RefreshRequest(BaseModel):

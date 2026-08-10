@@ -14,14 +14,16 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from app.core.exceptions import AuthenticationError
+from app.core.exceptions import AuthenticationError, MFARequiredError
 from app.core.security import (
     create_access_token,
+    create_mfa_challenge_token,
     generate_refresh_token,
     hash_password,
     hash_refresh_token,
     needs_rehash,
     verify_password,
+    verify_totp,
 )
 from app.models.auth import LoginAttempt, RefreshToken
 from app.models.user import User
@@ -49,7 +51,13 @@ class AuthService:
     # ---- Login -----------------------------------------------------------
 
     async def login(
-        self, *, email: str, password: str, ip: str, user_agent: str
+        self,
+        *,
+        email: str,
+        password: str,
+        ip: str,
+        user_agent: str,
+        mfa_code: str | None = None,
     ) -> tuple[User, str, datetime, str, datetime]:
         email = email.lower().strip()
         user = await self.users.get_by_email(email)
@@ -75,6 +83,28 @@ class AuthService:
             await self._record_attempt(email, ip, user_agent, success=False, reason="bad_password")
             raise AuthenticationError("Invalid credentials.")
 
+        # Password is correct. If a second factor is enrolled it must clear
+        # before any token is issued — the counters below stay untouched until
+        # then, so a correct password with a wrong code is still a failed login.
+        if user.mfa_enabled and user.mfa_secret:
+            if not mfa_code:
+                challenge, _exp = create_mfa_challenge_token(subject=str(user.id))
+                await self._record_attempt(
+                    email, ip, user_agent, success=False, reason="mfa_required"
+                )
+                raise MFARequiredError(details={"mfa_token": challenge})
+
+            if not verify_totp(user.mfa_secret, mfa_code):
+                user.failed_login_count += 1
+                if user.failed_login_count >= LOCK_THRESHOLD:
+                    user.locked_until = datetime.now(UTC) + LOCK_DURATION
+                    user.failed_login_count = 0
+                await self.users.update(user)
+                await self._record_attempt(
+                    email, ip, user_agent, success=False, reason="bad_mfa_code"
+                )
+                raise AuthenticationError("Invalid authentication code.")
+
         # Success — reset counters, optionally rehash.
         user.failed_login_count = 0
         user.locked_until = None
@@ -84,6 +114,36 @@ class AuthService:
         await self.users.update(user)
 
         await self._record_attempt(email, ip, user_agent, success=True, reason="ok")
+
+        access, access_exp = create_access_token(subject=str(user.id), role=user.role.name)
+        refresh_raw, refresh_exp = await self._issue_refresh(user.id, ip, user_agent)
+        return user, access, access_exp, refresh_raw, refresh_exp
+
+    async def login_verified(
+        self, *, user: User, code: str, ip: str, user_agent: str
+    ) -> tuple[User, str, datetime, str, datetime]:
+        """Finish a login whose password step already passed, given a TOTP code.
+
+        Used by the /auth/mfa/verify step. Applies the same lockout counters as
+        a password failure, so brute-forcing the six-digit code is bounded by
+        the same threshold rather than being unlimited.
+        """
+        if not verify_totp(user.mfa_secret or "", code):
+            user.failed_login_count += 1
+            if user.failed_login_count >= LOCK_THRESHOLD:
+                user.locked_until = datetime.now(UTC) + LOCK_DURATION
+                user.failed_login_count = 0
+            await self.users.update(user)
+            await self._record_attempt(
+                user.email, ip, user_agent, success=False, reason="bad_mfa_code"
+            )
+            raise AuthenticationError("Invalid authentication code.")
+
+        user.failed_login_count = 0
+        user.locked_until = None
+        user.last_login_at = datetime.now(UTC)
+        await self.users.update(user)
+        await self._record_attempt(user.email, ip, user_agent, success=True, reason="ok_mfa")
 
         access, access_exp = create_access_token(subject=str(user.id), role=user.role.name)
         refresh_raw, refresh_exp = await self._issue_refresh(user.id, ip, user_agent)

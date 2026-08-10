@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import get_current_user, get_session, require_roles
+from app.core import authz
 from app.core.exceptions import AuthorizationError, ConflictError, NotFoundError, ValidationError
 from app.models.org import OrgRole, OrgUnit
 from app.models.role import Role
@@ -114,7 +115,7 @@ async def get_user(
 async def create_user(
     payload: dict,
     db: AsyncSession = Depends(get_session),
-    _: User = Depends(require_roles("admin")),
+    current_user: User = Depends(require_roles("admin")),
 ) -> dict:
     from app.core.security import hash_password
 
@@ -155,6 +156,11 @@ async def create_user(
         if not orole.scalar_one_or_none():
             raise ValidationError(f"OrgRole '{org_role_id}' not found.")
 
+    # An ordinary admin must not be able to mint a super admin: they choose the
+    # password too, so it would be a two-call path to full control.
+    wants_super = bool(payload.get("is_super_admin", False))
+    authz.assert_can_grant_super_admin(current_user, wants_super)
+
     user = User(
         email=email,
         full_name=full_name,
@@ -162,7 +168,7 @@ async def create_user(
         role_id=role.id,
         org_unit_id=org_unit_id,
         org_role_id=org_role_id,
-        is_super_admin=bool(payload.get("is_super_admin", False)),
+        is_super_admin=wants_super,
         is_active=bool(payload.get("is_active", True)),
     )
     db.add(user)
@@ -179,12 +185,21 @@ async def update_user(
     current_user: User = Depends(require_roles("admin")),
 ) -> dict:
     user = await _get_user_or_404(user_id, db)
+    # Without this an admin could reset a super admin's password and sign in
+    # as them — the whole privilege ladder in one call.
+    authz.assert_can_manage_user(current_user, user)
+
+    if "is_super_admin" in payload:
+        authz.assert_can_grant_super_admin(current_user, bool(payload["is_super_admin"]))
+
+    if "role" in payload and str(user.id) == str(current_user.id):
+        raise AuthorizationError("You cannot change your own role.")
 
     if "full_name" in payload:
         user.full_name = payload["full_name"]
     if "is_active" in payload:
         user.is_active = bool(payload["is_active"])
-    if "is_super_admin" in payload and current_user.is_super_admin:
+    if "is_super_admin" in payload:
         user.is_super_admin = bool(payload["is_super_admin"])
 
     if "role" in payload:
@@ -225,6 +240,27 @@ async def update_user(
     return ok(_serialize_user(user))
 
 
+@router.post("/{user_id}/mfa/reset", summary="Clear a user's MFA enrolment (admin)")
+async def reset_user_mfa(
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_roles("admin")),
+) -> dict:
+    """Recovery path for a lost authenticator device.
+
+    There are no printed backup codes, so without this an enrolled user who
+    loses their phone is permanently locked out — a password reset alone would
+    not help, because the second factor is still demanded.
+    """
+    user = await _get_user_or_404(user_id, db)
+    authz.assert_can_manage_user(current_user, user)
+
+    user.mfa_enabled = False
+    user.mfa_secret = None
+    await db.commit()
+    return ok({"user_id": str(user_id), "mfa_enabled": False})
+
+
 @router.delete("/{user_id}")
 async def deactivate_user(
     user_id: uuid.UUID,
@@ -234,6 +270,7 @@ async def deactivate_user(
     if str(user_id) == str(current_user.id):
         raise AuthorizationError("Cannot deactivate your own account.")
     user = await _get_user_or_404(user_id, db)
+    authz.assert_can_manage_user(current_user, user)
     user.is_active = False
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -5,6 +5,7 @@ skips any entity that already exists.
 
 Seeded logins (all demo users share the same password):
   admin@successbank.local        / Admin@123456    — admin
+  super.admin@successbank.local  / Passw0rd@123    — admin + super admin
   priya.sharma@successbank.local / Passw0rd@123    — supervisor
   meera.nair@successbank.local   / Passw0rd@123    — supervisor
   rahul.verma@successbank.local  / Passw0rd@123    — agent
@@ -62,16 +63,20 @@ DEMO_PASSWORD = "Passw0rd@123"
 # Marks every row this script creates so re-runs can detect and skip them.
 DEMO_TAG = "demo-seed"
 
-# (email_local_part, full_name, role)
+# (email_local_part, full_name, role, is_super_admin)
 DEMO_USERS = [
-    ("priya.sharma",  "Priya Sharma",  "supervisor"),
-    ("meera.nair",    "Meera Nair",    "supervisor"),
-    ("rahul.verma",   "Rahul Verma",   "agent"),
-    ("aisha.khan",    "Aisha Khan",    "agent"),
-    ("vikram.rao",    "Vikram Rao",    "agent"),
-    ("deepak.iyer",   "Deepak Iyer",   "auditor"),
-    ("sunita.desai",  "Sunita Desai",  "branch_user"),
-    ("arjun.mehta",   "Arjun Mehta",   "branch_user"),
+    # One super admin, distinct from the ordinary admin, so the two privilege
+    # tiers can be told apart when testing (only a super admin may grant the
+    # super-admin flag or manage another super admin).
+    ("super.admin",   "Ravi Deshmukh", "admin",       True),
+    ("priya.sharma",  "Priya Sharma",  "supervisor",  False),
+    ("meera.nair",    "Meera Nair",    "supervisor",  False),
+    ("rahul.verma",   "Rahul Verma",   "agent",       False),
+    ("aisha.khan",    "Aisha Khan",    "agent",       False),
+    ("vikram.rao",    "Vikram Rao",    "agent",       False),
+    ("deepak.iyer",   "Deepak Iyer",   "auditor",     False),
+    ("sunita.desai",  "Sunita Desai",  "branch_user", False),
+    ("arjun.mehta",   "Arjun Mehta",   "branch_user", False),
 ]
 
 # (code, name, department, banking_domain, subcategories)
@@ -697,7 +702,7 @@ async def seed_demo_users(db: AsyncSession) -> None:
     # Hashing is deliberately slow — do it once and reuse for every demo user.
     demo_hash = hash_password(DEMO_PASSWORD)
 
-    for local_part, full_name, role_name in DEMO_USERS:
+    for local_part, full_name, role_name, is_super in DEMO_USERS:
         email = f"{local_part}@successbank.local"
         if email in existing_emails:
             continue
@@ -711,9 +716,10 @@ async def seed_demo_users(db: AsyncSession) -> None:
             full_name=full_name,
             password_hash=demo_hash,
             role_id=role.id,
+            is_super_admin=is_super,
             is_active=True,
         ))
-        created.append(f"{email} ({role_name})")
+        created.append(f"{email} ({role_name}{', super admin' if is_super else ''})")
 
     if created:
         await db.flush()
