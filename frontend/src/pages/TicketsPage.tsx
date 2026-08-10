@@ -6,7 +6,7 @@ import { TicketCard } from '@/components/TicketCard';
 import { useAuth } from '@/store/auth';
 import { cn } from '@/lib/cn';
 import { listTickets } from '@/features/tickets/api';
-import type { TicketStatus, TicketPriority } from '@/features/tickets/api';
+import type { TicketSource, TicketStatus, TicketPriority } from '@/features/tickets/api';
 
 const STALE = 30_000;
 const PAGE_SIZE = 20;
@@ -93,6 +93,17 @@ export function TicketsPage() {
   const myTickets = searchParams.get('mine') === '1';
   const page     = parseInt(searchParams.get('page') ?? '1', 10);
 
+  // Drill-down filters. These arrive from the dashboard KPI cards rather than
+  // the filter drawer, so they are read straight from the URL and surfaced as
+  // removable chips — otherwise a card would land the user on a list that
+  // silently disagrees with the number they just clicked.
+  const slaBreached  = searchParams.get('sla_breached') === '1';
+  const statusGroup  = searchParams.get('status_group') as 'open' | 'closed' | null;
+  const source       = (searchParams.get('source') ?? '') as TicketSource | '';
+  const aiCategorized = searchParams.get('ai_categorized') === '1';
+  const createdFrom  = searchParams.get('created_from') ?? '';
+  const resolvedFrom = searchParams.get('resolved_from') ?? '';
+
   // Local draft state for filter panel (applied on button click)
   const [draftStatus,    setDraftStatus]   = useState(status);
   const [draftPriority,  setDraftPriority] = useState(priority);
@@ -135,11 +146,16 @@ export function TicketsPage() {
     setDraftPriority('');
     setDraftMine(false);
     setSearchInput('');
-    setSearchParams({});
+    setSearchParams({});   // also clears any drill-down the URL carried
     setFiltersOpen(false);
   };
 
-  const removeFilter = (key: 'status' | 'priority' | 'mine' | 'q') => {
+  type FilterKey =
+    | 'status' | 'priority' | 'mine' | 'q'
+    | 'sla_breached' | 'status_group' | 'source' | 'ai_categorized'
+    | 'created_from' | 'resolved_from';
+
+  const removeFilter = (key: FilterKey) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       next.delete(key);
@@ -161,13 +177,23 @@ export function TicketsPage() {
   };
 
   // Active filter count (for badge)
-  const activeCount = [status, priority, myTickets ? '1' : '', search].filter(Boolean).length;
+  const activeCount = [
+    status, priority, myTickets ? '1' : '', search,
+    slaBreached ? '1' : '', statusGroup ?? '', source,
+    aiCategorized ? '1' : '', createdFrom, resolvedFrom,
+  ].filter(Boolean).length;
 
   const queryParams = {
     ...(status    ? { status }             : {}),
     ...(priority  ? { priority }           : {}),
     ...(search    ? { search }             : {}),
     ...(myTickets && user ? { assignee_id: user.id } : {}),
+    ...(slaBreached    ? { sla_breached: true }        : {}),
+    ...(statusGroup    ? { status_group: statusGroup } : {}),
+    ...(source         ? { source }                    : {}),
+    ...(aiCategorized  ? { ai_categorized: true }      : {}),
+    ...(createdFrom    ? { created_from: createdFrom } : {}),
+    ...(resolvedFrom   ? { resolved_from: resolvedFrom } : {}),
     page,
     page_size: PAGE_SIZE,
   };
@@ -346,6 +372,14 @@ export function TicketsPage() {
           {status    && <FilterChip label={`Status: ${status.replace('_', ' ')}`} onRemove={() => removeFilter('status')} />}
           {priority  && <FilterChip label={`Priority: ${priority}`}              onRemove={() => removeFilter('priority')} />}
           {myTickets && <FilterChip label="My tickets"                           onRemove={() => removeFilter('mine')} />}
+          {/* Drill-downs arriving from a dashboard card. Naming them here is
+              what makes a filtered count legible instead of mysterious. */}
+          {statusGroup   && <FilterChip label={statusGroup === 'open' ? 'Open tickets' : 'Closed tickets'} onRemove={() => removeFilter('status_group')} />}
+          {slaBreached   && <FilterChip label="SLA breached"                      onRemove={() => removeFilter('sla_breached')} />}
+          {source        && <FilterChip label={`Source: ${source}`}               onRemove={() => removeFilter('source')} />}
+          {aiCategorized && <FilterChip label="AI categorised"                    onRemove={() => removeFilter('ai_categorized')} />}
+          {createdFrom   && <FilterChip label={`Created since ${createdFrom.slice(0, 10)}`}  onRemove={() => removeFilter('created_from')} />}
+          {resolvedFrom  && <FilterChip label={`Resolved since ${resolvedFrom.slice(0, 10)}`} onRemove={() => removeFilter('resolved_from')} />}
         </div>
       )}
 

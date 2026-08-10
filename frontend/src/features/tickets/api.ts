@@ -116,6 +116,13 @@ export interface TicketListParams {
   page_size?: number;
   my_tickets?: boolean;
   sla_breached?: boolean;
+  source?: TicketSource;
+  /** All statuses with outstanding work, or everything finished. */
+  status_group?: 'open' | 'closed';
+  ai_categorized?: boolean;
+  /** ISO date or datetime; a bare date means midnight UTC. */
+  created_from?: string;
+  resolved_from?: string;
 }
 
 export interface PaginatedResponse<T> {

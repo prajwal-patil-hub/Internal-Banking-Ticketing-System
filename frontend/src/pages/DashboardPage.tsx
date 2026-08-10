@@ -31,9 +31,14 @@ interface KPICardProps {
   tone?: 'default' | 'danger' | 'success' | 'warning';
   icon: string;
   delta?: { value: number; label: string };
+  /** Where this number lives in full. Omit to leave the card inert. */
+  to?: string;
+  /** Tooltip naming the drill-down, so the destination is not a surprise. */
+  hint?: string;
 }
 
-function KPICard({ label, value, suffix, tone = 'default', icon, delta }: KPICardProps) {
+function KPICard({ label, value, suffix, tone = 'default', icon, delta, to, hint }: KPICardProps) {
+  const navigate = useNavigate();
   const toneClasses = {
     default: { value: 'text-[var(--tx)]',   icon: 'bg-[var(--brand-xs)] text-[var(--brand)]' },
     danger:  { value: 'text-[var(--err)]',  icon: 'bg-[var(--err-bg)] text-[var(--err)]' },
@@ -41,8 +46,8 @@ function KPICard({ label, value, suffix, tone = 'default', icon, delta }: KPICar
     warning: { value: 'text-[var(--warn)]', icon: 'bg-[var(--warn-bg)] text-[var(--warn)]' },
   }[tone];
 
-  return (
-    <div className="card-sm flex flex-col gap-2.5">
+  const body = (
+    <>
       <div className="flex items-center justify-between">
         <span className="text-[11px] uppercase tracking-widest text-[var(--tx-3)] font-semibold truncate pr-2">
           {label}
@@ -69,13 +74,43 @@ function KPICard({ label, value, suffix, tone = 'default', icon, delta }: KPICar
           <span className="text-[10px] text-[var(--tx-3)]">{delta.label}</span>
         </div>
       )}
-    </div>
+    </>
+  );
+
+  if (!to) {
+    return <div className="card-sm flex flex-col gap-2.5">{body}</div>;
+  }
+
+  // A real <button>, not a div with onClick: this gets keyboard activation,
+  // focus-visible and screen-reader semantics for free.
+  return (
+    <button
+      type="button"
+      onClick={() => navigate(to)}
+      title={hint}
+      aria-label={`${label}: ${value}${suffix ? ' ' + suffix : ''}. ${hint ?? 'View details'}`}
+      className={cn(
+        'card-sm flex flex-col gap-2.5 text-left w-full group',
+        'transition-transform duration-150 hover:-translate-y-0.5',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)] focus-visible:ring-offset-2',
+        'focus-visible:ring-offset-[var(--bg)] cursor-pointer',
+      )}
+    >
+      {body}
+      <span className="text-[10px] text-[var(--tx-3)] opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
+        View
+        <svg className="h-2.5 w-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M9 18l6-6-6-6" />
+        </svg>
+      </span>
+    </button>
   );
 }
 
 // ── SLA Health ────────────────────────────────────────────────────────────────
 
 function SLAHealthCard({ sla }: { sla: SLAStatus }) {
+  const navigate = useNavigate();
   const total = sla.on_time + sla.at_risk + sla.breached;
   const pct = (n: number) => (total > 0 ? (n / total) * 100 : 0);
 
@@ -108,17 +143,31 @@ function SLAHealthCard({ sla }: { sla: SLAStatus }) {
 
       <div className="grid grid-cols-3 gap-2 text-center">
         {[
-          { label: 'On Time',  count: sla.on_time,  color: 'bg-emerald-500' },
-          { label: 'At Risk',  count: sla.at_risk,  color: 'bg-amber-400' },
-          { label: 'Breached', count: sla.breached, color: 'bg-red-500' },
-        ].map(({ label, count, color }) => (
-          <div key={label} className="flex flex-col items-center gap-0.5">
+          // At Risk has no server-side filter of its own — it is a derived
+          // "due within the hour" window — so it opens the SLA Monitor, which
+          // computes exactly that. The other two map to real filters.
+          { label: 'On Time',  count: sla.on_time,  color: 'bg-emerald-500', to: '/sla' },
+          { label: 'At Risk',  count: sla.at_risk,  color: 'bg-amber-400',   to: '/sla' },
+          { label: 'Breached', count: sla.breached, color: 'bg-red-500',
+            to: '/tickets?status_group=open&sla_breached=1' },
+        ].map(({ label, count, color, to }) => (
+          <button
+            key={label}
+            type="button"
+            onClick={() => navigate(to)}
+            aria-label={`${label}: ${count}. View these tickets.`}
+            className={cn(
+              'flex flex-col items-center gap-0.5 rounded-lg py-1 -my-1 transition-colors',
+              'hover:bg-[var(--inset)] cursor-pointer',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]',
+            )}
+          >
             <div className="flex items-center gap-1">
               <span className={cn('h-2 w-2 rounded-full inline-block', color)} />
               <span className="text-xs font-bold tabular-nums text-[var(--tx)]">{count}</span>
             </div>
             <span className="text-[10px] text-[var(--tx-3)]">{label}</span>
-          </div>
+          </button>
         ))}
       </div>
     </div>
@@ -260,6 +309,13 @@ function ErrorCard({ message, onRetry }: { message: string; onRetry: () => void 
 // ── Main Dashboard ────────────────────────────────────────────────────────────
 
 export function DashboardPage() {
+  // The KPI queries count from midnight UTC; the drill-downs must use the same
+  // boundary or the list will not match the number the user clicked.
+  const todayUtc = new Date().toISOString().slice(0, 10);
+  // "AI Sorted" counts the last seven days, so its drill-down has to as well —
+  // otherwise the card says 28 and the list it opens shows every ticket ever.
+  const sevenDaysAgo = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
+
   const { user } = useAuth();
   const navigate = useNavigate();
 
@@ -315,13 +371,13 @@ export function DashboardPage() {
         <ErrorCard message="Failed to load KPI data" onRetry={() => kpiQuery.refetch()} />
       ) : kpis ? (
         <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-3">
-          <KPICard label="Open"         value={kpis.open_tickets}       tone="default"                                           icon="M9 12h6M9 16h6M13 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-5-5z" />
-          <KPICard label="SLA Breached" value={kpis.sla_breached}       tone="danger"                                            icon="M12 9v4M12 17h.01M4.93 19h14.14L12 5z" />
-          <KPICard label="Resolved"     value={kpis.resolved_today}     tone="success"                                           icon="M5 13l4 4L19 7" />
-          <KPICard label="Critical"     value={kpis.critical_open}      tone={kpis.critical_open > 0 ? 'danger' : 'default'}    icon="M12 8v4M12 16h.01M4.93 19h14.14L12 5z" />
-          <KPICard label="AI Sorted"    value={kpis.ai_auto_categorized} tone="default"                                          icon="M12 2a10 10 0 0 1 0 20M12 2a10 10 0 0 0 0 20M12 8v4M12 16h.01" />
-          <KPICard label="Via Email"    value={kpis.email_tickets_today} tone="default"                                          icon="M4 4h16v16H4V4zm0 0l8 9 8-9" />
-          <KPICard label="Escalated"    value={kpis.escalations_active} tone={kpis.escalations_active > 0 ? 'warning' : 'default'} icon="M12 9v4M12 17h.01M4.93 19h14.14L12 5z" />
+          <KPICard label="Open"         value={kpis.open_tickets}       tone="default" to="/tickets?status_group=open" hint="Show all open tickets"                                           icon="M9 12h6M9 16h6M13 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-5-5z" />
+          <KPICard label="SLA Breached" value={kpis.sla_breached}       tone="danger" to="/tickets?status_group=open&sla_breached=1" hint="Show open tickets past their SLA"                                            icon="M12 9v4M12 17h.01M4.93 19h14.14L12 5z" />
+          <KPICard label="Resolved"     value={kpis.resolved_today}     tone="success" to={`/tickets?status=resolved&resolved_from=${todayUtc}`} hint="Show tickets resolved today"                                           icon="M5 13l4 4L19 7" />
+          <KPICard label="Critical"     value={kpis.critical_open}      tone={kpis.critical_open > 0 ? 'danger' : 'default'} to="/tickets?status_group=open&priority=critical" hint="Show open critical tickets"    icon="M12 8v4M12 16h.01M4.93 19h14.14L12 5z" />
+          <KPICard label="AI Sorted"    value={kpis.ai_auto_categorized} tone="default" to={`/tickets?ai_categorized=1&created_from=${sevenDaysAgo}`} hint="Show tickets the AI categorised"                                          icon="M12 2a10 10 0 0 1 0 20M12 2a10 10 0 0 0 0 20M12 8v4M12 16h.01" />
+          <KPICard label="Via Email"    value={kpis.email_tickets_today} tone="default" to={`/tickets?source=email&created_from=${todayUtc}`} hint="Show tickets that arrived by email today"                                          icon="M4 4h16v16H4V4zm0 0l8 9 8-9" />
+          <KPICard label="Escalated"    value={kpis.escalations_active} tone={kpis.escalations_active > 0 ? 'warning' : 'default'} to="/escalations" hint="Open the escalation queue" icon="M12 9v4M12 17h.01M4.93 19h14.14L12 5z" />
           <KPICard
             label="Avg Resolve"
             value={kpis.avg_resolution_hours < 24
@@ -329,6 +385,8 @@ export function DashboardPage() {
               : (kpis.avg_resolution_hours / 24).toFixed(1)}
             suffix={kpis.avg_resolution_hours < 24 ? 'h' : 'd'}
             tone="default"
+            to="/reports"
+            hint="Open reports and resolution trends"
             icon="M12 8v4l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"
           />
         </div>

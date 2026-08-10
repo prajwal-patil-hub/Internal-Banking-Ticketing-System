@@ -45,12 +45,37 @@ class TicketStatus(str, enum.Enum):
     REOPENED = "reopened"
 
 
+#: Statuses where work is still outstanding.
+#:
+#: One definition, because there were six and they disagreed: the dashboard and
+#: the SLA worker excluded ON_HOLD while the ticket list and the AI's workspace
+#: digest included it, so "Open: 15" on the dashboard and the list it linked to
+#: showed different totals. A ticket on hold is unresolved work — it is paused,
+#: not finished — so it counts as open everywhere.
+OPEN_STATUSES: tuple["TicketStatus", ...] = ()  # populated below
+
+
 class TicketSource(str, enum.Enum):
     EMAIL = "email"
     PORTAL = "portal"
     PHONE = "phone"
     CHAT = "chat"
     API = "api"
+
+
+OPEN_STATUSES = (
+    TicketStatus.NEW,
+    TicketStatus.ACKNOWLEDGED,
+    TicketStatus.ASSIGNED,
+    TicketStatus.IN_PROGRESS,
+    TicketStatus.ON_HOLD,
+    TicketStatus.ESCALATED,
+    TicketStatus.REOPENED,
+)
+
+#: Same set as raw strings, for the queries that compare against the column
+#: value rather than the enum member.
+OPEN_STATUS_VALUES: frozenset[str] = frozenset(s.value for s in OPEN_STATUSES)
 
 
 class TicketCategory(UUIDPKMixin, TimestampMixin, Base):

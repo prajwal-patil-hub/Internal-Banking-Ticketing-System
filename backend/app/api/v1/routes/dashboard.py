@@ -18,7 +18,10 @@ from app.api.v1.deps import get_current_user, get_session, require_roles
 from app.core.logging import get_logger
 from app.models.ai_interaction import AIInteractionLog
 from app.models.sla import SLATracking
-from app.models.ticket import Ticket, TicketCategory, TicketPriority, TicketSource, TicketStatus
+from app.models.ticket import (
+    OPEN_STATUSES as _OPEN_STATUSES,
+    Ticket, TicketCategory, TicketPriority, TicketSource, TicketStatus,
+)
 from app.models.user import User
 from app.schemas.envelope import ok
 from app.services.org_service import get_accessible_org_unit_ids
@@ -27,10 +30,6 @@ log = get_logger(__name__)
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
-_OPEN_STATUSES = [
-    TicketStatus.NEW, TicketStatus.ACKNOWLEDGED, TicketStatus.ASSIGNED,
-    TicketStatus.IN_PROGRESS, TicketStatus.ESCALATED, TicketStatus.REOPENED,
-]
 
 
 async def _org_filter(user: User, db: AsyncSession):

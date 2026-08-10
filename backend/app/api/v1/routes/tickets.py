@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request, status
@@ -16,7 +16,8 @@ from app.core.exceptions import AuthorizationError, NotFoundError, ValidationErr
 from app.core.logging import get_logger
 from app.models.audit import AuditAction, AuditLog
 from app.models.comment import CommentSource, TicketComment
-from app.models.ticket import Ticket, TicketStatus
+from app.models.ticket import OPEN_STATUSES as _OPEN_STATUSES
+from app.models.ticket import Ticket, TicketSource, TicketStatus
 from app.models.user import User
 from app.schemas.envelope import ok, paginated
 from app.services.org_service import get_accessible_org_unit_ids
@@ -38,8 +39,18 @@ _BRANCH_USER_ROLE = authz.BRANCH_USER
 _AGENT_ROLES = authz.TICKET_WRITE_ROLES
 
 
+
 def _is_branch_user(user: User) -> bool:
     return user.role.name == _BRANCH_USER_ROLE
+
+
+def _parse_dt(value: str, field: str) -> datetime:
+    """Accept an ISO date or datetime; `2026-08-10` means midnight UTC."""
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        raise ValidationError(f"{field} must be an ISO 8601 date or datetime.")
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 async def _ticket_access_filter(user: User, db: AsyncSession):
@@ -228,9 +239,21 @@ async def list_tickets(
     search: Annotated[str | None, Query(max_length=200)] = None,
     my_tickets: Annotated[bool, Query()] = False,
     sla_breached: Annotated[bool | None, Query()] = None,
+    source: Annotated[str | None, Query()] = None,
+    status_group: Annotated[str | None, Query(pattern="^(open|closed)$")] = None,
+    ai_categorized: Annotated[bool | None, Query()] = None,
+    created_from: Annotated[str | None, Query()] = None,
+    resolved_from: Annotated[str | None, Query()] = None,
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> dict:
+    """List tickets.
+
+    The filters beyond status/priority exist so every dashboard KPI has a
+    destination that reproduces its own number. A card reading "9 breached"
+    that links to an unfiltered list is worse than a card that does nothing —
+    it looks like the count is wrong.
+    """
     stmt = select(Ticket)
 
     # Visibility filter
@@ -244,6 +267,32 @@ async def list_tickets(
 
     if sla_breached is not None:
         stmt = stmt.where(Ticket.sla_breached == sla_breached)
+
+    # `open` covers every status where work is still outstanding — the same
+    # set the dashboard counts, so "Open: 27" and this filter agree.
+    if status_group == "open":
+        stmt = stmt.where(Ticket.status.in_(_OPEN_STATUSES))
+    elif status_group == "closed":
+        stmt = stmt.where(Ticket.status.notin_(_OPEN_STATUSES))
+
+    if source:
+        try:
+            stmt = stmt.where(Ticket.source == TicketSource(source))
+        except ValueError:
+            raise ValidationError(f"Invalid source: {source}")
+
+    if ai_categorized is not None:
+        stmt = stmt.where(
+            Ticket.ai_category.is_not(None) if ai_categorized
+            else Ticket.ai_category.is_(None)
+        )
+
+    # Date bounds back the "today" cards (resolved today, arrived by email
+    # today) without inventing a separate endpoint for each.
+    if created_from:
+        stmt = stmt.where(Ticket.created_at >= _parse_dt(created_from, "created_from"))
+    if resolved_from:
+        stmt = stmt.where(Ticket.resolved_at >= _parse_dt(resolved_from, "resolved_from"))
 
     if status:
         try:

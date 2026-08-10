@@ -32,22 +32,12 @@ from app.core import authz
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.comment import TicketComment
-from app.models.ticket import Ticket, TicketStatus
+from app.models.ticket import OPEN_STATUSES, Ticket, TicketStatus
 from app.models.user import User
 from app.services.org_service import get_accessible_org_unit_ids
 
 log = get_logger(__name__)
 
-#: Statuses that count as live work.
-OPEN_STATUSES = [
-    TicketStatus.NEW,
-    TicketStatus.ACKNOWLEDGED,
-    TicketStatus.ASSIGNED,
-    TicketStatus.IN_PROGRESS,
-    TicketStatus.ON_HOLD,
-    TicketStatus.ESCALATED,
-    TicketStatus.REOPENED,
-]
 
 #: How many recent comments of the focused ticket to include.
 MAX_COMMENTS = 5

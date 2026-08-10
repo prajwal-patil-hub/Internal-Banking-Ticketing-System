@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import authz
 from app.core.logging import get_logger
 from app.models.role import Role
+from app.models.ticket import OPEN_STATUS_VALUES as _OPEN_STATUSES
 from app.models.ticket import Ticket, TicketStatus
 from app.models.user import User
 
@@ -28,15 +29,6 @@ AGENT_ROLE = authz.AGENT
 #: having the lowest workload would funnel every new ticket to them.
 ASSIGNABLE_ROLES = (authz.AGENT, authz.SUPERVISOR)
 
-# Statuses that count toward an agent's active workload
-_OPEN_STATUSES = {
-    TicketStatus.NEW.value,
-    TicketStatus.ACKNOWLEDGED.value,
-    TicketStatus.ASSIGNED.value,
-    TicketStatus.IN_PROGRESS.value,
-    TicketStatus.ESCALATED.value,
-    TicketStatus.REOPENED.value,
-}
 
 
 class RoutingService:

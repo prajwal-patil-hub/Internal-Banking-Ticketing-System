@@ -33,18 +33,11 @@ async def check_sla_breaches_job() -> None:
                 from sqlalchemy import and_, select
 
                 from app.models.sla import SLATracking
-                from app.models.ticket import Ticket, TicketStatus
+                from app.models.ticket import OPEN_STATUSES as open_statuses
+                from app.models.ticket import Ticket
 
                 now = datetime.now(UTC)
 
-                open_statuses = [
-                    TicketStatus.NEW,
-                    TicketStatus.ACKNOWLEDGED,
-                    TicketStatus.ASSIGNED,
-                    TicketStatus.IN_PROGRESS,
-                    TicketStatus.ESCALATED,
-                    TicketStatus.REOPENED,
-                ]
 
                 # Find sla_tracking rows whose resolution deadline has passed
                 # but have not yet been flagged as breached.

@@ -18,19 +18,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.sla import SLAPolicy, SLATracking
+from app.models.ticket import OPEN_STATUS_VALUES as _OPEN_STATUSES
 from app.models.ticket import Ticket, TicketPriority, TicketStatus
 
 log = get_logger(__name__)
 
 # Open statuses where SLA is still running
-_OPEN_STATUSES = {
-    TicketStatus.NEW.value,
-    TicketStatus.ACKNOWLEDGED.value,
-    TicketStatus.ASSIGNED.value,
-    TicketStatus.IN_PROGRESS.value,
-    TicketStatus.ESCALATED.value,
-    TicketStatus.REOPENED.value,
-}
 
 # Default response/resolution minutes when no DB policy exists
 _DEFAULTS: dict[str, tuple[int, int]] = {

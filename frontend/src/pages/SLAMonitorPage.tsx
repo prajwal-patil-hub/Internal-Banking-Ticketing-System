@@ -54,12 +54,16 @@ function Sk({ className }: { className?: string }) {
 // ── Metric Card ───────────────────────────────────────────────────────────────
 
 function MetricCard({
-  label, value, tone = 'default', icon,
+  label, value, tone = 'default', icon, onSelect, active,
 }: {
   label: string;
   value: number;
   tone?: 'default' | 'danger' | 'success' | 'warning';
   icon: string;
+  /** Selecting the matching tab below — the card and the table are the same
+      data at two levels of detail, so the card should drive the table. */
+  onSelect?: () => void;
+  active?: boolean;
 }) {
   const tones = {
     default: { value: 'text-[var(--tx)]',   icon: 'bg-[var(--brand-xs)] text-[var(--brand)]' },
@@ -68,8 +72,8 @@ function MetricCard({
     warning: { value: 'text-[var(--warn)]', icon: 'bg-[var(--warn-bg)] text-[var(--warn)]' },
   }[tone];
 
-  return (
-    <div className="card-sm flex flex-col gap-2.5">
+  const body = (
+    <>
       <div className="flex items-center justify-between">
         <span className="text-[11px] uppercase tracking-widest text-[var(--tx-3)] font-semibold">{label}</span>
         <div className={cn('h-7 w-7 rounded-lg flex items-center justify-center', tones.icon)}>
@@ -79,7 +83,29 @@ function MetricCard({
         </div>
       </div>
       <span className={cn('text-2xl font-bold tabular-nums', tones.value)}>{value}</span>
-    </div>
+    </>
+  );
+
+  if (!onSelect) {
+    return <div className="card-sm flex flex-col gap-2.5">{body}</div>;
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={active}
+      aria-label={`${label}: ${value}. Filter the table to these tickets.`}
+      className={cn(
+        'card-sm flex flex-col gap-2.5 text-left w-full',
+        'transition-transform duration-150 hover:-translate-y-0.5 cursor-pointer',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]',
+        'focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg)]',
+        active && 'ring-2 ring-[var(--brand)]',
+      )}
+    >
+      {body}
+    </button>
   );
 }
 
@@ -243,18 +269,24 @@ export function SLAMonitorPage() {
             value={sla.breached}
             tone={sla.breached > 0 ? 'danger' : 'default'}
             icon="M12 9v4M12 17h.01M4.93 19h14.14L12 5z"
+            onSelect={() => setActiveTab(activeTab === 'breached' ? 'all' : 'breached')}
+            active={activeTab === 'breached'}
           />
           <MetricCard
             label="At Risk (< 1h)"
             value={sla.at_risk}
             tone={sla.at_risk > 0 ? 'warning' : 'default'}
             icon="M12 8v4l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"
+            onSelect={() => setActiveTab(activeTab === 'at_risk' ? 'all' : 'at_risk')}
+            active={activeTab === 'at_risk'}
           />
           <MetricCard
             label="On Time"
             value={sla.on_time}
             tone="success"
             icon="M5 13l4 4L19 7"
+            onSelect={() => setActiveTab(activeTab === 'on_time' ? 'all' : 'on_time')}
+            active={activeTab === 'on_time'}
           />
         </div>
       ) : null}
