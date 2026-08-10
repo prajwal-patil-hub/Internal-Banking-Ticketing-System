@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Annotated
@@ -73,7 +73,7 @@ async def update_level(
     return ok(_serialize_level(lvl))
 
 
-@router.delete("/levels/{level_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/levels/{level_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
 async def delete_level(
     level_id: uuid.UUID,
     db: AsyncSession = Depends(get_session),
@@ -182,7 +182,7 @@ async def update_unit(
     return ok(_serialize_unit(unit))
 
 
-@router.delete("/units/{unit_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/units/{unit_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
 async def delete_unit(
     unit_id: uuid.UUID,
     db: AsyncSession = Depends(get_session),
@@ -265,7 +265,7 @@ async def update_org_role(
     return ok(_serialize_org_role(role))
 
 
-@router.delete("/roles/{role_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/roles/{role_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
 async def delete_org_role(
     role_id: uuid.UUID,
     db: AsyncSession = Depends(get_session),
