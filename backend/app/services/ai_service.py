@@ -36,10 +36,15 @@ class AIService:
         actor_id: str | None = None,
     ) -> None:
         # Ollama exposes an OpenAI-compatible API at /v1 — api_key is required
-        # by the SDK but ignored by Ollama
+        # by the SDK but ignored by Ollama.
+        # The default 600s timeout is far too patient for a request a user is
+        # waiting on, and the default 2 retries triples the worst case; a local
+        # model that missed AI_TIMEOUT_SECONDS once will miss it again.
         self.client = OpenAI(
             base_url=f"{settings.LLM_BASE_URL}/v1",
             api_key="ollama",
+            timeout=settings.AI_TIMEOUT_SECONDS,
+            max_retries=1,
         )
         self.db = db
         self.actor_id = actor_id
@@ -74,6 +79,9 @@ class AIService:
             model=self.MODEL,
             max_tokens=max_tokens,
             messages=full_messages,
+            # Ollama-specific: keep weights resident between calls so only the
+            # first request after an idle period pays the model-load cost.
+            extra_body={"keep_alive": settings.AI_KEEP_ALIVE},
         )
 
     def _extract_text(self, response: Any) -> str:

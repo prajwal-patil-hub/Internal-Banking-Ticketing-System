@@ -1,10 +1,15 @@
-"""AIService unit tests — mocked Anthropic client."""
+"""AIService unit tests — mocked OpenAI-compatible (Ollama) client.
+
+AIService talks to Ollama through the `openai` SDK's chat.completions API,
+so these tests stub `svc.client.chat.completions.create` and assert on the
+service's parsing, fallback, and history-capping behaviour.
+"""
 
 from __future__ import annotations
 
 import json
 import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -14,19 +19,36 @@ def _mock_db() -> AsyncMock:
     db.add = MagicMock()
     db.commit = AsyncMock()
     db.flush = AsyncMock()
+    db.execute = AsyncMock(
+        return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None))
+    )
     return db
 
 
-def _mock_anthropic_response(content: str) -> MagicMock:
-    """Build a mock Anthropic message response."""
-    msg = MagicMock()
-    block = MagicMock()
-    block.text = content
-    msg.content = [block]
-    msg.usage = MagicMock()
-    msg.usage.input_tokens = 100
-    msg.usage.output_tokens = 50
-    return msg
+def _mock_completion(content: str) -> MagicMock:
+    """Build a mock OpenAI-style chat completion response."""
+    response = MagicMock()
+    choice = MagicMock()
+    choice.message.content = content
+    response.choices = [choice]
+    response.usage.prompt_tokens = 100
+    response.usage.completion_tokens = 50
+    return response
+
+
+def _service_with_reply(content: str | None = None, *, error: Exception | None = None):
+    """Return (service, create_mock) with the LLM call stubbed out."""
+    from app.services.ai_service import AIService
+
+    svc = AIService(_mock_db(), actor_id=str(uuid.uuid4()))
+    create = MagicMock()
+    if error is not None:
+        create.side_effect = error
+    else:
+        create.return_value = _mock_completion(content or "")
+    svc.client = MagicMock()
+    svc.client.chat.completions.create = create
+    return svc, create
 
 
 # ---------------------------------------------------------------------------
@@ -35,11 +57,6 @@ def _mock_anthropic_response(content: str) -> MagicMock:
 
 @pytest.mark.asyncio
 async def test_categorize_ticket_returns_result() -> None:
-    from app.services.ai_service import AIService
-
-    db = _mock_db()
-    db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
-
     ai_json = json.dumps({
         "category": "payments",
         "subcategory": "UPI",
@@ -54,18 +71,9 @@ async def test_categorize_ticket_returns_result() -> None:
         "is_regulatory": False,
         "sentiment": "negative",
     })
+    svc, _ = _service_with_reply(ai_json)
 
-    mock_response = _mock_anthropic_response(ai_json)
-
-    with patch("anthropic.Anthropic") as MockClient:
-        mock_instance = MockClient.return_value
-        mock_instance.messages.create.return_value = mock_response
-
-        with patch("app.services.ai_service.anthropic.Anthropic", MockClient):
-            svc = AIService(db, actor_id=str(uuid.uuid4()))
-            svc.client = mock_instance
-
-            result = await svc.categorize_ticket("Payment failed", "UPI transfer stuck for 2 hours")
+    result = await svc.categorize_ticket("Payment failed", "UPI transfer stuck for 2 hours")
 
     assert result.category == "payments"
     assert result.confidence == 0.95
@@ -73,26 +81,24 @@ async def test_categorize_ticket_returns_result() -> None:
 
 
 @pytest.mark.asyncio
+async def test_categorize_ticket_strips_markdown_fences() -> None:
+    """Local models often wrap JSON in ```json fences — that must still parse."""
+    payload = json.dumps({"category": "fraud", "priority": "critical", "confidence": 0.88})
+    svc, _ = _service_with_reply(f"```json\n{payload}\n```")
+
+    result = await svc.categorize_ticket("Card fraud", "Unauthorised debits overnight")
+
+    assert result.category == "fraud"
+    assert result.priority == "critical"
+
+
+@pytest.mark.asyncio
 async def test_categorize_ticket_handles_invalid_json() -> None:
-    """If AI returns invalid JSON, service returns a fallback result."""
-    from app.services.ai_service import AIService
+    """If the model returns prose, the service falls back instead of raising."""
+    svc, _ = _service_with_reply("I cannot determine the category.")
 
-    db = _mock_db()
-    db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
+    result = await svc.categorize_ticket("Test title", "Test description")
 
-    mock_response = _mock_anthropic_response("I cannot determine the category.")
-
-    with patch("anthropic.Anthropic") as MockClient:
-        mock_instance = MockClient.return_value
-        mock_instance.messages.create.return_value = mock_response
-
-        with patch("app.services.ai_service.anthropic.Anthropic", MockClient):
-            svc = AIService(db, actor_id=str(uuid.uuid4()))
-            svc.client = mock_instance
-
-            result = await svc.categorize_ticket("Test title", "Test description")
-
-    # Fallback: should still return a result, not raise
     assert result is not None
     assert isinstance(result.confidence, float)
     assert 0.0 <= result.confidence <= 1.0
@@ -100,24 +106,14 @@ async def test_categorize_ticket_handles_invalid_json() -> None:
 
 @pytest.mark.asyncio
 async def test_categorize_ticket_handles_api_failure() -> None:
-    """If Anthropic API raises, service returns a safe fallback."""
-    from app.services.ai_service import AIService
+    """If Ollama is unreachable, the service returns a safe fallback."""
+    svc, _ = _service_with_reply(error=Exception("Connection refused"))
 
-    db = _mock_db()
-    db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
-
-    with patch("anthropic.Anthropic") as MockClient:
-        mock_instance = MockClient.return_value
-        mock_instance.messages.create.side_effect = Exception("API unavailable")
-
-        with patch("app.services.ai_service.anthropic.Anthropic", MockClient):
-            svc = AIService(db, actor_id=str(uuid.uuid4()))
-            svc.client = mock_instance
-
-            result = await svc.categorize_ticket("Test", "Test")
+    result = await svc.categorize_ticket("Test", "Test")
 
     assert result is not None
     assert result.confidence == 0.0  # fallback confidence
+    assert result.category == "operations"
 
 
 # ---------------------------------------------------------------------------
@@ -126,11 +122,6 @@ async def test_categorize_ticket_handles_api_failure() -> None:
 
 @pytest.mark.asyncio
 async def test_extract_email_entities() -> None:
-    from app.services.ai_service import AIService
-
-    db = _mock_db()
-    db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
-
     ai_json = json.dumps({
         "title": "UPI payment stuck",
         "summary": "Customer reports payment debited but beneficiary not credited.",
@@ -144,26 +135,31 @@ async def test_extract_email_entities() -> None:
         },
         "risk_score": 0.3,
     })
+    svc, _ = _service_with_reply(ai_json)
 
-    mock_response = _mock_anthropic_response(ai_json)
-
-    with patch("anthropic.Anthropic") as MockClient:
-        mock_instance = MockClient.return_value
-        mock_instance.messages.create.return_value = mock_response
-
-        with patch("app.services.ai_service.anthropic.Anthropic", MockClient):
-            svc = AIService(db, actor_id=str(uuid.uuid4()))
-            svc.client = mock_instance
-
-            result = await svc.extract_email_entities(
-                subject="URGENT: UPI payment stuck - please help",
-                body="My UPI payment of Rs 50000 is stuck. UTR: UTR123456",
-                from_address="customer@gmail.com",
-            )
+    result = await svc.extract_email_entities(
+        subject="URGENT: UPI payment stuck - please help",
+        body="My UPI payment of Rs 50000 is stuck. UTR: UTR123456",
+        from_address="customer@gmail.com",
+    )
 
     assert result.title == "UPI payment stuck"
     assert result.category == "payments"
     assert "UTR123456" in result.entities["transaction_refs"]
+
+
+@pytest.mark.asyncio
+async def test_extract_email_entities_falls_back_to_subject() -> None:
+    svc, _ = _service_with_reply(error=Exception("timeout"))
+
+    result = await svc.extract_email_entities(
+        subject="Card blocked",
+        body="Please unblock my card.",
+        from_address="customer@gmail.com",
+    )
+
+    assert result.title == "Card blocked"
+    assert result.confidence == 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -172,34 +168,48 @@ async def test_extract_email_entities() -> None:
 
 @pytest.mark.asyncio
 async def test_detect_sentiment_urgency() -> None:
-    from app.services.ai_service import AIService
-
-    db = _mock_db()
-    db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
-
     ai_json = json.dumps({
         "sentiment": "negative",
         "urgency": "high",
         "escalation_risk": 0.8,
         "key_phrases": ["account blocked", "money missing"],
     })
+    svc, _ = _service_with_reply(ai_json)
 
-    mock_response = _mock_anthropic_response(ai_json)
-
-    with patch("anthropic.Anthropic") as MockClient:
-        mock_instance = MockClient.return_value
-        mock_instance.messages.create.return_value = mock_response
-
-        with patch("app.services.ai_service.anthropic.Anthropic", MockClient):
-            svc = AIService(db, actor_id=str(uuid.uuid4()))
-            svc.client = mock_instance
-
-            result = await svc.detect_sentiment_urgency(
-                "My account has been blocked and all my money is missing!"
-            )
+    result = await svc.detect_sentiment_urgency(
+        "My account has been blocked and all my money is missing!"
+    )
 
     assert result["sentiment"] == "negative"
     assert result["urgency"] == "high"
+
+
+# ---------------------------------------------------------------------------
+# Summarize / draft
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_summarize_ticket_returns_text() -> None:
+    svc, _ = _service_with_reply("Customer's NEFT transfer failed; NPCI query raised.")
+
+    summary = await svc.summarize_ticket({
+        "id": str(uuid.uuid4()),
+        "title": "NEFT failed",
+        "description": "Transfer debited but not credited.",
+        "status": "in_progress",
+        "comments": [],
+    })
+
+    assert "NPCI" in summary
+
+
+@pytest.mark.asyncio
+async def test_summarize_ticket_falls_back_on_error() -> None:
+    svc, _ = _service_with_reply(error=Exception("model not found"))
+
+    summary = await svc.summarize_ticket({"id": str(uuid.uuid4()), "title": "x", "comments": []})
+
+    assert summary == "Summary unavailable."
 
 
 # ---------------------------------------------------------------------------
@@ -208,60 +218,60 @@ async def test_detect_sentiment_urgency() -> None:
 
 @pytest.mark.asyncio
 async def test_chat_assistant_returns_response() -> None:
-    from app.services.ai_service import AIService
-
-    db = _mock_db()
-    db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
-
-    mock_response = _mock_anthropic_response(
+    svc, _ = _service_with_reply(
         "For critical tickets, the SLA is 30 minutes response and 2 hours resolution."
     )
 
-    with patch("anthropic.Anthropic") as MockClient:
-        mock_instance = MockClient.return_value
-        mock_instance.messages.create.return_value = mock_response
+    response, input_tokens, output_tokens = await svc.chat_with_assistant(
+        message="What is the SLA for critical tickets?",
+        session_history=[],
+    )
 
-        with patch("app.services.ai_service.anthropic.Anthropic", MockClient):
-            svc = AIService(db, actor_id=str(uuid.uuid4()))
-            svc.client = mock_instance
+    assert "30 minutes" in response
+    assert input_tokens == 100
+    assert output_tokens == 50
 
-            response, input_tokens, output_tokens = await svc.chat_with_assistant(
-                message="What is the SLA for critical tickets?",
-                session_history=[],
-            )
 
-    assert "30 minutes" in response or len(response) > 0
-    assert input_tokens >= 0
-    assert output_tokens >= 0
+@pytest.mark.asyncio
+async def test_chat_assistant_falls_back_on_error() -> None:
+    """A failed call must degrade to an apology, never raise into the route."""
+    svc, _ = _service_with_reply(error=Exception("Connection refused"))
+
+    response, input_tokens, output_tokens = await svc.chat_with_assistant(
+        message="Anything?", session_history=[]
+    )
+
+    assert "trouble" in response.lower()
+    assert (input_tokens, output_tokens) == (0, 0)
 
 
 @pytest.mark.asyncio
 async def test_chat_assistant_respects_history_cap() -> None:
     """History is capped at 20 turns to prevent token overflow."""
-    from app.services.ai_service import AIService
-
-    db = _mock_db()
-    db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
-
-    # 30 history turns — only last 20 should be passed to the API
     long_history = [
         {"role": "user" if i % 2 == 0 else "assistant", "content": f"msg {i}"}
         for i in range(30)
     ]
+    svc, create = _service_with_reply("Acknowledged.")
 
-    mock_response = _mock_anthropic_response("Acknowledged.")
+    await svc.chat_with_assistant("New question", long_history)
 
-    with patch("anthropic.Anthropic") as MockClient:
-        mock_instance = MockClient.return_value
-        mock_instance.messages.create.return_value = mock_response
+    messages = create.call_args.kwargs["messages"]
+    # 1 system + 20 capped history turns + 1 new user message
+    assert len(messages) == 22
+    assert messages[0]["role"] == "system"
+    assert messages[-1]["content"] == "New question"
+    # The oldest 10 turns were dropped.
+    assert all(m["content"] != "msg 0" for m in messages)
 
-        with patch("app.services.ai_service.anthropic.Anthropic", MockClient):
-            svc = AIService(db, actor_id=str(uuid.uuid4()))
-            svc.client = mock_instance
 
-            await svc.chat_with_assistant("New question", long_history)
+@pytest.mark.asyncio
+async def test_chat_assistant_injects_context() -> None:
+    svc, create = _service_with_reply("Noted.")
 
-    # Check that messages.create was called with <= 21 messages (20 history + 1 new)
-    call_args = mock_instance.messages.create.call_args
-    messages_passed = call_args.kwargs.get("messages") or call_args.args[0] if call_args.args else []
-    assert len(messages_passed) <= 21
+    await svc.chat_with_assistant(
+        "What is this about?", [], context={"ticket_number": "TKT-20260101-00001"}
+    )
+
+    system_prompt = create.call_args.kwargs["messages"][0]["content"]
+    assert "TKT-20260101-00001" in system_prompt

@@ -1,4 +1,4 @@
-import { api } from '@/lib/api';
+import { api, AI_TIMEOUT_MS } from '@/lib/api';
 
 export type TicketStatus =
   | 'new'
@@ -194,12 +194,16 @@ export async function getCategories(): Promise<Category[]> {
 }
 
 export async function aiSummarize(ticketId: string): Promise<{ summary: string; sentiment: string; risk_score: number }> {
-  const { data } = await api.post(`/tickets/${ticketId}/ai-summarize`);
+  const { data } = await api.post(`/tickets/${ticketId}/ai-summarize`, undefined, {
+    timeout: AI_TIMEOUT_MS,
+  });
   return data.data;
 }
 
 export async function aiSuggest(ticketId: string): Promise<{ suggestions: string[]; next_actions: string[] }> {
-  const { data } = await api.post(`/tickets/${ticketId}/ai-suggest`);
+  const { data } = await api.post(`/tickets/${ticketId}/ai-suggest`, undefined, {
+    timeout: AI_TIMEOUT_MS,
+  });
   return data.data;
 }
 

@@ -78,6 +78,10 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-success}:${POSTGRES_PASSWORD:-success_dev_pw}@postgres:5432/${POSTGRES_DB:-success_bank}
       REDIS_URL: redis://redis:6379/0
       S3_ENDPOINT_URL: http://minio:9000
+    # Docker Desktop (Mac/Windows) provides host.docker.internal automatically;
+    # on Linux it must be mapped explicitly. Needed to reach Ollama on the host.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy

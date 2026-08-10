@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { cn } from '@/lib/cn';
-import { sendChatMessage } from '@/features/ai/api';
+import { extractError } from '@/lib/api';
+import { sendChatMessage, getAIHealth } from '@/features/ai/api';
 
 interface DisplayMessage {
   id: string;
@@ -74,9 +75,17 @@ export function AIChatWidget() {
       };
 
       setMessages((prev) => [...prev.filter((m) => m.id !== 'typing'), assistantMsg]);
-    } catch {
+    } catch (err) {
       setMessages((prev) => prev.filter((m) => m.id !== 'typing'));
-      setError('Failed to get a response. Please try again.');
+      // A failed call is usually a local-Ollama setup problem, not a bug in the
+      // app — ask the backend what is actually wrong so the user sees the fix.
+      const base = extractError(err).message;
+      try {
+        const health = await getAIHealth();
+        setError(health.hint ? `${base} — ${health.hint}` : base);
+      } catch {
+        setError(base);
+      }
     } finally {
       setSending(false);
     }
@@ -133,7 +142,7 @@ export function AIChatWidget() {
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-sm font-semibold text-white leading-tight">AI Assistant</div>
-              <div className="text-xs text-white/70 leading-tight">Banking AI · Powered by Claude</div>
+              <div className="text-xs text-white/70 leading-tight">Banking AI · Local model</div>
             </div>
             <div className="flex items-center gap-1">
               <button
@@ -230,11 +239,11 @@ export function AIChatWidget() {
             ))}
 
             {error && (
-              <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 text-xs">
-                <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <div className="flex items-start gap-2 px-3 py-2 rounded-xl bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 text-xs">
+                <svg className="h-4 w-4 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M12 9v4M12 17h.01M4.93 19h14.14L12 5z" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
-                {error}
+                <span className="whitespace-pre-line">{error}</span>
               </div>
             )}
 
@@ -270,7 +279,9 @@ export function AIChatWidget() {
               </button>
             </div>
             <p className="text-[10px] text-slate-400 mt-1.5 text-center">
-              Shift+Enter for newline · Powered by Claude
+              {sending
+                ? 'Generating… the first reply after an idle period can take up to a minute.'
+                : 'Shift+Enter for newline · Powered by a local LLM'}
             </p>
           </div>
         </div>

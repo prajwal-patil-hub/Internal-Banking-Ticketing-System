@@ -37,6 +37,49 @@ docker compose -f infra/docker-compose.yml up -d
 #    MinIO UI  : http://localhost:9001
 ```
 
+The stack seeds itself on first boot. Sign in with any of these:
+
+| Email | Password | Role |
+|---|---|---|
+| `admin@successbank.local` | `Admin@123456` | admin |
+| `priya.sharma@successbank.local` | `Passw0rd@123` | supervisor |
+| `meera.nair@successbank.local` | `Passw0rd@123` | supervisor |
+| `rahul.verma@successbank.local` | `Passw0rd@123` | agent |
+| `aisha.khan@successbank.local` | `Passw0rd@123` | agent |
+| `vikram.rao@successbank.local` | `Passw0rd@123` | agent |
+| `deepak.iyer@successbank.local` | `Passw0rd@123` | auditor |
+| `sunita.desai@successbank.local` | `Passw0rd@123` | branch_user |
+| `arjun.mehta@successbank.local` | `Passw0rd@123` | branch_user |
+
+The seed also loads 21 demo tickets spanning every status, priority, and SLA
+state (breached / at-risk / on-time), plus comments and escalation events — so
+Tickets, SLA Monitor, and Escalations all have real data to show. Re-running
+the seed is safe; it detects the demo set and skips it.
+
+## Local AI (Ollama)
+
+The AI assistant runs against a local model, so nothing leaves your machine and
+there is no API key. Install [Ollama](https://ollama.com), then:
+
+```bash
+ollama pull glm4          # or set LLM_MODEL to any model you have
+```
+
+**macOS: Ollama binds to `127.0.0.1` by default, which the Docker VM cannot
+reach.** Without this step the assistant will report that it cannot connect:
+
+```bash
+launchctl setenv OLLAMA_HOST 0.0.0.0   # then restart Ollama
+```
+
+To check the wiring, call `GET /api/v1/ai/health` (or just send a chat message —
+failures come back as a plain-English explanation rather than a generic error).
+It reports whether Ollama is reachable, which models it has, and what to fix.
+
+Note that the first reply after an idle period is slow — the model has to load
+before it emits a token, which on an M2 Mac can take under a minute. Timeouts on
+both sides are sized for that (`AI_TIMEOUT_SECONDS`, default 180s).
+
 ## Repository layout
 
 ```

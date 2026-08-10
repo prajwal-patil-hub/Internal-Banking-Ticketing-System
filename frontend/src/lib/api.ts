@@ -2,6 +2,18 @@ import axios, { AxiosError, AxiosInstance, AxiosRequestConfig } from 'axios';
 
 const baseURL = import.meta.env.VITE_API_BASE_URL ?? '/api/v1';
 
+/**
+ * Timeout for AI-backed calls.
+ *
+ * The 15s default is right for CRUD but far too short for a local LLM: a cold
+ * GLM-4 request on Ollama has to load the weights before emitting a token and
+ * routinely takes 30-90s. Anything AI-backed must opt into this longer budget,
+ * otherwise axios aborts a request the backend is still happily serving.
+ * Kept slightly above the backend's AI_TIMEOUT_SECONDS so the server's own
+ * timeout (with its actionable error message) is what the user sees.
+ */
+export const AI_TIMEOUT_MS = 190_000;
+
 export const api: AxiosInstance = axios.create({
   baseURL,
   withCredentials: false,
@@ -72,8 +84,23 @@ export interface ApiError {
 }
 
 export function extractError(err: unknown): ApiError {
-  if (err instanceof AxiosError && err.response?.data?.error) {
-    return err.response.data.error as ApiError;
+  if (err instanceof AxiosError) {
+    if (err.response?.data?.error) {
+      return err.response.data.error as ApiError;
+    }
+    if (err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT') {
+      return {
+        code: 'TIMEOUT',
+        message: 'The request timed out. The local AI model may still be loading — try again.',
+      };
+    }
+    if (!err.response) {
+      return {
+        code: 'NETWORK_ERROR',
+        message: 'Could not reach the API. Check that the backend is running.',
+      };
+    }
+    return { code: `HTTP_${err.response.status}`, message: err.message };
   }
   return { code: 'NETWORK_ERROR', message: 'Network error.' };
 }

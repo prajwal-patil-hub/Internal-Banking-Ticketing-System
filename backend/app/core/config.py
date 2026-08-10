@@ -74,6 +74,11 @@ class Settings(BaseSettings):
     AI_ENABLED: bool = True
     AI_MAX_TOKENS: int = 1024
     AI_CONFIDENCE_THRESHOLD: float = 0.7
+    # Local models are slow on first token (model load + no GPU batching).
+    # GLM-4 on an M2 Mac routinely needs 30-90s for a cold request.
+    AI_TIMEOUT_SECONDS: float = 180.0
+    # Keep the model resident in Ollama between requests to avoid cold starts.
+    AI_KEEP_ALIVE: str = "10m"
 
     # --- Email Ingestion (IMAP) ---
     IMAP_ENABLED: bool = False
