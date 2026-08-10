@@ -6,6 +6,7 @@ import { z } from 'zod';
 
 import { Logo } from '@/components/Logo';
 import { Button } from '@/components/Button';
+import { CodeInput } from '@/components/CodeInput';
 import { Card } from '@/components/Card';
 import { Badge } from '@/components/Badge';
 import { login, verifyMFALogin } from '@/features/auth/api';
@@ -115,15 +116,12 @@ export function LoginPage() {
                 <p className="text-xs text-[var(--tx-3)] mb-2">
                   Enter the six-digit code from your authenticator app.
                 </p>
-                <input
-                  className="input text-lg font-mono tracking-[0.4em] text-center"
+                <CodeInput
                   value={mfaCode}
-                  onChange={(e) => setMfaCode(e.target.value.replace(/[^\d]/g, '').slice(0, 6))}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && mfaCode.length === 6) onVerifyMfa(); }}
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  placeholder="000000"
+                  onChange={setMfaCode}
+                  disabled={verifying}
                   autoFocus
+                  onComplete={onVerifyMfa}
                 />
               </div>
 

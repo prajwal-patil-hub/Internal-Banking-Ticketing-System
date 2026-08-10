@@ -23,6 +23,8 @@ const NAV: NavItem[] = [
     roles: ['admin', 'supervisor'] },
   { to: '/escalations', label: 'Escalations', icon: 'M12 9v4M12 17h.01M4.93 19h14.14L12 5z',
     roles: ['admin', 'supervisor'] },
+  { to: '/branches',    label: 'Branches',    icon: 'M3 21h18M5 21V8l7-5 7 5v13M9 21v-6h6v6',
+    roles: ['admin', 'supervisor'] },
   { to: '/org',         label: 'Org Hierarchy', icon: 'M3 21V8l9-5 9 5v13M9 21V12h6v9',
     roles: ['admin'] },
   { to: '/users',       label: 'Users',       icon: 'M16 11a4 4 0 10-8 0 4 4 0 008 0zM2 21a8 8 0 1116 0',

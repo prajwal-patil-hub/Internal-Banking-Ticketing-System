@@ -81,6 +81,23 @@ agents entirely. Auditors and branch users are never candidates.
 Pass `auto_assign: false` when creating a ticket to leave it unassigned for
 manual triage.
 
+## Branch network
+
+**Branches** in the sidebar shows the physical network: which branches are
+serving customers, who manages each, and how much work they are carrying
+against their capacity. `/branches` used to redirect to the org hierarchy,
+which answers a different question — org units are the reporting tree, branches
+are places with staff and a service state.
+
+`status` is deliberately separate from `is_active`: a decommissioned branch is
+inactive, a branch with a dead ATM is active but degraded, and one boolean
+cannot express both.
+
+Ticket counts and load are computed per request rather than stored on the row.
+A denormalised counter would need every ticket transition to remember to adjust
+it, and the first missed update leaves a number that is wrong forever with
+nothing to reveal it.
+
 ## Roles
 
 One role per user, enforced centrally in `backend/app/core/authz.py`:

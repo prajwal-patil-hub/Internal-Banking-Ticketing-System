@@ -856,6 +856,10 @@ async def seed(db: AsyncSession) -> None:
     # --- Demo tickets, comments, escalation events ---------------------------
     await seed_demo_tickets(db)
 
+    # --- Branch network -----------------------------------------------------
+    await seed_branches(db)
+    await assign_tickets_to_branches(db)
+
     # --- AI interaction history (drives the dashboard's AI panel) ------------
     await seed_ai_interaction_logs(db)
 
@@ -1134,6 +1138,102 @@ async def seed_demo_tickets(db: AsyncSession) -> None:
         f"{comment_count} comments, {escalation_count} escalation events"
     )
 
+
+
+# (code, name, region, status, capacity, note)
+#
+# A believable Maharashtra network: mostly operational, with a couple of
+# branches degraded so the Branch Management screen has something to show
+# besides a wall of green.
+BRANCHES = [
+    ("MH-001", "Mumbai HQ",         "Mumbai Metro", "operational", 30, ""),
+    ("PU-002", "Pune Central",      "Pune",         "operational", 20, ""),
+    ("NK-003", "Nashik",            "North Maharashtra", "maintenance", 12,
+     "Scheduled core-banking upgrade until 18:00"),
+    ("AU-004", "Aurangabad",        "Marathwada",   "operational", 12, ""),
+    ("NG-005", "Nagpur",            "Vidarbha",     "incident",    16,
+     "Lobby ATM offline since 06:00"),
+    ("TN-006", "Thane",             "Mumbai Metro", "operational", 18, ""),
+    ("KL-007", "Kolhapur",          "Western Maharashtra", "operational", 10, ""),
+    ("SL-008", "Solapur",           "Western Maharashtra", "maintenance", 10,
+     "Power maintenance, generator in use"),
+    ("NM-009", "Navi Mumbai",       "Mumbai Metro", "operational", 18, ""),
+    ("BO-010", "Borivali",          "Mumbai Metro", "operational", 14, ""),
+    ("AN-011", "Andheri East",      "Mumbai Metro", "operational", 22, ""),
+    ("PI-012", "Pimpri-Chinchwad",  "Pune",         "operational", 14, ""),
+]
+
+
+async def seed_branches(db: AsyncSession) -> None:
+    """Create the branch network and give each one a manager."""
+    from app.models.branch import Branch, BranchStatus
+
+    existing = {
+        b.code for b in (await db.execute(select(Branch))).scalars().all()
+    }
+    # Supervisors and admins run branches; agents work tickets at them.
+    managers = [
+        u for u in (await db.execute(select(User))).scalars().all()
+        if u.role and u.role.name in ("supervisor", "admin")
+    ]
+
+    created = 0
+    for index, (code, name, region, status, capacity, note) in enumerate(BRANCHES):
+        if code in existing:
+            continue
+        db.add(Branch(
+            id=uuid.uuid4(),
+            code=code,
+            name=name,
+            region=region,
+            address=f"{name} Branch, {region}, Maharashtra",
+            ifsc=f"SUCC0{code.replace('-', '')}",
+            contact_email=f"{code.lower()}@successbank.local",
+            contact_phone=f"+91 22 {4000 + index:04d} {1000 + index:04d}",
+            status=BranchStatus(status),
+            status_note=note,
+            ticket_capacity=capacity,
+            manager_id=managers[index % len(managers)].id if managers else None,
+            is_active=True,
+        ))
+        created += 1
+
+    if created:
+        await db.flush()
+        print(f"  [seed] Created {created} branches")
+    else:
+        print("  [seed] Branches already exist — skipped")
+
+
+async def assign_tickets_to_branches(db: AsyncSession) -> None:
+    """Spread the demo tickets across the network.
+
+    Without this every branch reads zero open tickets and the load bars are
+    all empty, which makes the whole screen look broken rather than idle.
+    """
+    from app.models.branch import Branch
+
+    branches = (await db.execute(
+        select(Branch).where(Branch.is_active.is_(True)).order_by(Branch.code)
+    )).scalars().all()
+    if not branches:
+        return
+
+    tickets = (await db.execute(
+        select(Ticket).where(Ticket.tags.any(DEMO_TAG), Ticket.branch_id.is_(None))
+    )).scalars().all()
+    if not tickets:
+        print("  [seed] Tickets already attached to branches — skipped")
+        return
+
+    # Weighted so the bigger branches carry more, matching their capacity.
+    rng = random.Random(77)
+    weights = [b.ticket_capacity for b in branches]
+    for ticket in tickets:
+        ticket.branch_id = rng.choices(branches, weights=weights)[0].id
+
+    await db.flush()
+    print(f"  [seed] Attached {len(tickets)} tickets to branches")
 
 
 async def seed_ai_interaction_logs(db: AsyncSession) -> None:

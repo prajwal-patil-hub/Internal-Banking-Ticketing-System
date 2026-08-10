@@ -1,12 +1,69 @@
 import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { Button } from '@/components/Button';
+import { CodeInput } from '@/components/CodeInput';
 import { cn } from '@/lib/cn';
 import { extractError } from '@/lib/api';
 import { useAuth } from '@/store/auth';
 import { startMFASetup, enableMFA, disableMFA, type MFASetup } from '@/features/auth/mfa';
 
 type Stage = 'idle' | 'enrolling' | 'disabling';
+
+
+/**
+ * Three-step progress rail.
+ *
+ * The enrolment is genuinely sequential and can fail at the last step, so
+ * showing where you are — and that a confirmed code is still owed — stops the
+ * QR screen reading like the end of the process.
+ */
+function StepRail({ current }: { current: 1 | 2 | 3 }) {
+  const steps = ['Verify password', 'Scan QR code', 'Confirm code'] as const;
+  return (
+    <ol className="flex items-center justify-center gap-2 sm:gap-4" aria-label="Enrolment progress">
+      {steps.map((label, i) => {
+        const step = (i + 1) as 1 | 2 | 3;
+        const done = step < current;
+        const active = step === current;
+        return (
+          <li key={label} className="flex items-center gap-2 sm:gap-4">
+            <div className="flex flex-col items-center gap-1.5">
+              <span
+                aria-current={active ? 'step' : undefined}
+                className={cn(
+                  'h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold',
+                  'transition-colors',
+                  done && 'bg-[var(--brand)] text-white',
+                  active && 'bg-[var(--brand-xs)] text-[var(--brand)] ring-2 ring-[var(--brand)]',
+                  !done && !active && 'bg-[var(--inset)] text-[var(--tx-3)]',
+                )}
+              >
+                {done ? (
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                       strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M20 6 9 17l-5-5" />
+                  </svg>
+                ) : step}
+              </span>
+              <span className={cn(
+                'text-[10px] whitespace-nowrap',
+                active ? 'text-[var(--tx)] font-medium' : 'text-[var(--tx-3)]',
+              )}>
+                {label}
+              </span>
+            </div>
+            {i < steps.length - 1 && (
+              <span className={cn(
+                'h-px w-8 sm:w-16 -mt-5',
+                done ? 'bg-[var(--brand)]' : 'bg-[var(--line)]',
+              )} />
+            )}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
 
 export function SecurityPage() {
   const user = useAuth((s) => s.user);
@@ -136,74 +193,74 @@ export function SecurityPage() {
 
         {/* ── Enrolling ────────────────────────────────────────────────── */}
         {stage === 'enrolling' && setup && (
-          <div className="mt-5 space-y-5">
-            <ol className="space-y-5">
-              <li>
-                <p className="text-sm font-medium text-[var(--tx)]">
-                  1. Scan this with your authenticator app
-                </p>
-                <p className="text-xs text-[var(--tx-3)] mt-0.5">
-                  Google Authenticator, 1Password, Authy — any TOTP app works.
-                </p>
-                {setup.qr_svg ? (
-                  <div
-                    className="mt-3 inline-block rounded-lg bg-white p-3 border border-[var(--line)]"
-                    // Server-generated SVG from our own otpauth URI.
-                    dangerouslySetInnerHTML={{ __html: setup.qr_svg }}
-                  />
-                ) : (
-                  <p className="mt-3 text-sm text-[var(--warn)]">
-                    QR code unavailable on this server build — use the setup key below.
-                  </p>
-                )}
-              </li>
+          <div className="mt-6 flex flex-col items-center gap-6">
+            {/* Password was verified to reach this screen, so step 1 is done;
+                the code decides whether step 3 completes. */}
+            <StepRail current={code.length === 6 ? 3 : 2} />
 
-              <li>
-                <p className="text-sm font-medium text-[var(--tx)]">
-                  Can&apos;t scan? Enter the key by hand
-                </p>
-                <div className="mt-2 flex items-center gap-2 flex-wrap">
-                  <code className="text-sm font-mono px-2 py-1 rounded bg-[var(--bg-2)] border border-[var(--line)] tracking-wider">
-                    {secretShown ? setup.secret : '•'.repeat(setup.secret.length)}
-                  </code>
-                  <Button variant="ghost" onClick={() => setSecretShown((v) => !v)}>
-                    {secretShown ? 'Hide' : 'Show'}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    onClick={() => navigator.clipboard?.writeText(setup.secret)}
-                  >
-                    Copy
-                  </Button>
-                </div>
-              </li>
+            {setup.qr_svg ? (
+              <div className="rounded-2xl bg-white p-4 border border-[var(--line)] shadow-sm">
+                {/* Server-generated SVG from our own otpauth URI. */}
+                <div dangerouslySetInnerHTML={{ __html: setup.qr_svg }} />
+              </div>
+            ) : (
+              <p className="text-sm text-[var(--warn)] text-center max-w-sm">
+                QR code unavailable on this server build — use the setup key below.
+              </p>
+            )}
 
-              <li>
-                <label htmlFor="mfa-code" className="text-sm font-medium text-[var(--tx)]">
-                  2. Enter the six-digit code it shows
-                </label>
-                <div className="mt-2 flex items-center gap-2 flex-wrap">
-                  <input
-                    id="mfa-code"
-                    value={code}
-                    onChange={(e) => setCode(e.target.value.replace(/[^\d]/g, '').slice(0, 6))}
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    placeholder="000000"
-                    className="w-32 rounded-lg border border-[var(--line)] bg-[var(--bg)] px-3 py-2 text-lg font-mono tracking-[0.3em] text-[var(--tx)] outline-none focus:border-[var(--brand)]"
-                  />
-                  <Button
-                    onClick={() => enableMutation.mutate()}
-                    disabled={code.length !== 6 || enableMutation.isPending}
-                  >
-                    {enableMutation.isPending ? 'Verifying…' : 'Verify and turn on'}
-                  </Button>
-                  <Button variant="ghost" onClick={reset}>Cancel</Button>
-                </div>
-              </li>
-            </ol>
+            <p className="text-sm text-[var(--tx-2)] text-center max-w-sm">
+              Open <strong>Google Authenticator</strong>, <strong>Authy</strong> or any
+              TOTP app and scan the code above.
+            </p>
 
-            <p className="text-xs text-[var(--tx-3)] border-t border-[var(--line)] pt-3">
+            <div className="w-full max-w-sm">
+              <p className="text-[11px] uppercase tracking-widest text-[var(--tx-3)] font-semibold mb-2">
+                Or enter the setup key manually
+              </p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 text-sm font-mono px-3 py-2.5 rounded-lg bg-[var(--inset)] border border-[var(--line)] tracking-[0.15em] text-[var(--tx)] break-all">
+                  {secretShown
+                    ? setup.secret.replace(/(.{4})/g, '$1 ').trim()
+                    : '•'.repeat(setup.secret.length)}
+                </code>
+                <Button variant="ghost" onClick={() => setSecretShown((v) => !v)}
+                        title={secretShown ? 'Hide the key' : 'Show the key'}>
+                  {secretShown ? 'Hide' : 'Show'}
+                </Button>
+                <Button variant="ghost"
+                        onClick={() => navigator.clipboard?.writeText(setup.secret)}
+                        title="Copy the key">
+                  Copy
+                </Button>
+              </div>
+            </div>
+
+            <div className="w-full max-w-sm flex flex-col items-center gap-3">
+              <p className="text-[11px] uppercase tracking-widest text-[var(--tx-3)] font-semibold">
+                Enter the 6-digit code from your app
+              </p>
+              <CodeInput
+                value={code}
+                onChange={setCode}
+                disabled={enableMutation.isPending}
+                autoFocus
+                onComplete={() => enableMutation.mutate()}
+              />
+            </div>
+
+            <div className="flex gap-2 w-full max-w-sm">
+              <Button
+                onClick={() => enableMutation.mutate()}
+                disabled={code.length !== 6 || enableMutation.isPending}
+                className="flex-1"
+              >
+                {enableMutation.isPending ? 'Verifying…' : 'Verify & Enable MFA'}
+              </Button>
+              <Button variant="ghost" onClick={reset}>Cancel</Button>
+            </div>
+
+            <p className="text-xs text-[var(--tx-3)] text-center max-w-sm border-t border-[var(--line)] pt-4">
               Keep the setup key somewhere safe. There are no printed backup codes yet —
               if you lose the device, an administrator has to clear the enrolment for you.
             </p>

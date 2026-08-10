@@ -13,6 +13,7 @@ import { AuditPage } from '@/pages/AuditPage';
 import { OrgManagementPage } from '@/pages/OrgManagementPage';
 import { UsersPage } from '@/pages/UsersPage';
 import { ReportsPage } from '@/pages/ReportsPage';
+import { BranchesPage } from '@/pages/BranchesPage';
 import { SecurityPage } from '@/pages/SecurityPage';
 import { SLAMonitorPage } from '@/pages/SLAMonitorPage';
 import { EscalationsPage } from '@/pages/EscalationsPage';
@@ -52,7 +53,11 @@ export default function App() {
         />
         <Route
           path="/branches"
-          element={<Navigate to="/org" replace />}
+          element={
+            <RequireAuth roles={['admin', 'supervisor']}>
+              <BranchesPage />
+            </RequireAuth>
+          }
         />
         <Route
           path="/users"
