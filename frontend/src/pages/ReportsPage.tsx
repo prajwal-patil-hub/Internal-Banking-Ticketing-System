@@ -207,6 +207,10 @@ export function ReportsPage() {
     queryKey: ['dashboard-recent'],
     queryFn: async () => { const r = await api.get('/dashboard/recent-tickets'); return r.data.data; },
   });
+  const { data: trend = [] } = useQuery({
+    queryKey: ['dashboard-trend'],
+    queryFn: async () => { const r = await api.get('/dashboard/ticket-trend', { params: { days: 30 } }); return r.data.data; },
+  });
 
   const handleDownload = async () => {
     setDownloading(true);
@@ -246,11 +250,15 @@ export function ReportsPage() {
       color: Object.values(PRIORITY_COLORS)[i % 4],
     }));
 
-  // Department load → by-day stand-in (no time-series endpoint; show dept open counts)
-  const byDay: Array<{ date: string; count: number }> =
-    (deptLoad as Array<{ department: string; open_count: number }>).map(d => ({
-      date: d.department ?? 'Unknown',
-      count: d.open_count,
+  // Real daily series. This used to plot department load with a date axis
+  // label — a bar per department under a "Tickets Over Time" heading.
+  const byDay: Array<{ date: string; created: number; resolved: number; count: number }> =
+    (trend as Array<{ date: string; created: number; resolved: number; count: number }>).map(d => ({
+      // Short axis label: "10 Aug" reads better than an ISO date at this width.
+      date: new Date(d.date).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }),
+      created: d.created,
+      resolved: d.resolved,
+      count: d.count,
     }));
 
   // SLA compliance by department (derived from breached_count / open_count)
@@ -385,14 +393,16 @@ export function ReportsPage() {
           </ResponsiveContainer>
         </ChartSection>
 
-        <ChartSection title="Tickets Over Time" chartRef={lineRef} rows={byDay} columns={['date', 'count']}>
+        <ChartSection title="Tickets Over Time" chartRef={lineRef} rows={byDay} columns={['date', 'created', 'resolved']}>
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={byDay} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--sh-dark)" />
               <XAxis dataKey="date" tick={{ fontSize: 10, fill: 'var(--tx-3)' }} />
               <YAxis tick={{ fontSize: 10, fill: 'var(--tx-3)' }} />
               <Tooltip contentStyle={{ background: 'var(--inset)', border: '1px solid var(--sh-dark)', borderRadius: 8, fontSize: 12 }} />
-              <Line type="monotone" dataKey="count" stroke="var(--brand)" strokeWidth={2} dot={false} />
+              <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
+              <Line type="monotone" dataKey="created" name="Created" stroke="var(--brand)" strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="resolved" name="Resolved" stroke="#10B981" strokeWidth={2} dot={false} />
             </LineChart>
           </ResponsiveContainer>
         </ChartSection>

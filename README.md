@@ -52,10 +52,34 @@ The stack seeds itself on first boot. Sign in with any of these:
 | `sunita.desai@successbank.local` | `Passw0rd@123` | branch_user |
 | `arjun.mehta@successbank.local` | `Passw0rd@123` | branch_user |
 
-The seed also loads 21 demo tickets spanning every status, priority, and SLA
-state (breached / at-risk / on-time), plus comments and escalation events — so
-Tickets, SLA Monitor, and Escalations all have real data to show. Re-running
-the seed is safe; it detects the demo set and skips it.
+The seed loads ~56 tickets spread over six weeks — every status and priority,
+a believable mix of breached / at-risk / on-time, comments, escalation events,
+and AI interaction history so the dashboard's AI panel reports real numbers.
+
+Re-running the seed is safe; it detects the demo set and skips it. To throw the
+data away and generate it afresh:
+
+```bash
+docker compose -f infra/docker-compose.yml exec backend \
+  python scripts/seed_dev.py --reset
+```
+
+`--reset` removes the demo tickets and **all** AI interaction history, then
+rebuilds. Users, roles, categories and SLA policies are configuration and are
+left alone. Clearing the AI history matters: real timed-out calls otherwise
+leave a 107-second average latency on the dashboard that no amount of
+re-seeding will shift.
+
+## Ticket intake
+
+A ticket raised through the API gets its SLA deadlines stamped and is
+auto-assigned to the agent with the lightest open queue. Agents are preferred
+over supervisors — ranking on workload alone sends everything to whoever is
+idlest, which is reliably a supervisor, and frontline work would skip the
+agents entirely. Auditors and branch users are never candidates.
+
+Pass `auto_assign: false` when creating a ticket to leave it unassigned for
+manual triage.
 
 ## Roles
 

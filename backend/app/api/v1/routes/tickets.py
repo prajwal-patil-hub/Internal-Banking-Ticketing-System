@@ -20,6 +20,8 @@ from app.models.ticket import Ticket, TicketStatus
 from app.models.user import User
 from app.schemas.envelope import ok, paginated
 from app.services.org_service import get_accessible_org_unit_ids
+from app.services.routing_service import RoutingService
+from app.services.sla_service import SLAService
 from app.services.ticket_service import VALID_TRANSITIONS
 
 log = get_logger(__name__)
@@ -356,18 +358,44 @@ async def create_ticket(
     db.add(ticket)
     await db.flush()
 
+    # Stamp the SLA deadlines and create the tracking row. This route builds
+    # the Ticket inline rather than going through TicketService, so it never
+    # inherited that step: a ticket raised in the UI had no due dates, never
+    # appeared in the SLA monitor, and could never breach.
+    await SLAService(db).apply_to_ticket(ticket)
+
+    # Auto-assign by current workload. The routing service existed but nothing
+    # called it, so every ticket arrived unassigned and waited for someone to
+    # notice. Callers can opt out with auto_assign=false to triage by hand.
+    routing_reason: str | None = None
+    if payload.get("auto_assign", True):
+        assignee, routing_reason = await RoutingService(db).auto_route_ticket(ticket)
+        if assignee is not None:
+            ticket.ai_routing_reason = routing_reason[:500]
+
     await _record_audit(
         db,
         action=AuditAction.CREATE,
         entity_id=str(ticket.id),
         user=current_user,
         request=request,
-        new_values={"ticket_number": ticket_number, "title": title, "priority": priority.value},
+        new_values={
+            "ticket_number": ticket_number,
+            "title": title,
+            "priority": priority.value,
+            **({"auto_assigned_to": str(ticket.assignee_id)} if ticket.assignee_id else {}),
+        },
     )
     await db.commit()
     await db.refresh(ticket)
 
-    log.info("ticket_created", ticket_id=str(ticket.id), ticket_number=ticket_number, user_id=str(current_user.id))
+    log.info(
+        "ticket_created",
+        ticket_id=str(ticket.id),
+        ticket_number=ticket_number,
+        user_id=str(current_user.id),
+        assignee_id=str(ticket.assignee_id) if ticket.assignee_id else None,
+    )
     return ok(_serialize_ticket(ticket))
 
 

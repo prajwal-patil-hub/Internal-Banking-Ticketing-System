@@ -21,7 +21,9 @@ skips re-creation rather than duplicating the whole set.
 
 from __future__ import annotations
 
+import argparse
 import asyncio
+import random
 import sys
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -31,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.core.config import settings
 from app.core.security import hash_password
+from app.models.ai_interaction import AIInteractionLog
 from app.models.comment import CommentSource, TicketComment
 from app.models.escalation import EscalationEvent, EscalationRule, EscalationTrigger
 from app.models.role import Role
@@ -560,6 +563,170 @@ DEMO_TICKETS = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Generated backlog
+# ---------------------------------------------------------------------------
+# The 21 tickets above are hand-written so the app has believable narratives to
+# read. They all sit within the last few days though, which leaves the trend
+# chart with almost no curve and "resolved today" reading zero. This generator
+# fills in a further ~35 tickets stretching back six weeks, weighted so older
+# work is mostly finished and recent work is mostly open — the shape a real
+# queue has.
+#
+# Seeded RNG: re-running produces byte-identical data, so screenshots and bug
+# reports stay reproducible.
+
+_BACKLOG_TEMPLATES: list[tuple[str, str, str, str]] = [
+    # (category, subcategory, title, description)
+    ("payments", "neft_rtgs", "RTGS transfer pending beyond cut-off",
+     "A same-day RTGS instruction for ₹12,00,000 was accepted before cut-off but is still showing as pending with the clearing house."),
+    ("payments", "upi_payments", "UPI mandate failing for recurring SIP",
+     "The customer's monthly SIP mandate declines every cycle even though the balance is sufficient."),
+    ("payments", "card_payments", "Card payment declined at international merchant",
+     "International usage is enabled but transactions at a specific merchant category keep declining."),
+    ("fraud", "account_fraud", "Unrecognised beneficiary added to net banking",
+     "A beneficiary the customer does not recognise was added and a transfer attempted within minutes."),
+    ("fraud", "txn_dispute", "Disputed contactless transactions after card loss",
+     "Four contactless debits posted after the customer reported the card lost."),
+    ("kyc", "kyc_verification", "Periodic KYC refresh overdue for corporate account",
+     "The corporate account is past its periodic KYC refresh date and transactions are about to be restricted."),
+    ("kyc", "onboarding", "New account opening stuck at video KYC step",
+     "The applicant completed document upload but the video KYC session fails to launch on Android."),
+    ("loans", "emi_issues", "EMI bounce charge applied despite sufficient balance",
+     "The account held the full EMI amount on the due date but the mandate still bounced and a charge was levied."),
+    ("loans", "loan_application", "Loan sanction letter not received after approval",
+     "The application shows approved in the portal but no sanction letter has been issued."),
+    ("compliance", "regulatory_compliance", "CTR threshold breach needs review",
+     "Aggregate cash transactions on the account crossed the CTR reporting threshold this month."),
+    ("compliance", "audit_queries", "Branch audit query on cash retention limits",
+     "Internal audit has asked for an explanation of overnight cash retention above the branch limit."),
+    ("it", "software_issues", "Statement PDF renders blank for joint accounts",
+     "Downloaded statements are blank for joint accounts; single-holder accounts are unaffected."),
+    ("it", "system_access", "Branch printer queue offline after network change",
+     "Cheque and passbook printers at the branch stopped responding after last night's network maintenance."),
+    ("operations", "branch_ops", "Cash remittance mismatch at end of day",
+     "The branch cash remittance to the currency chest is short by ₹4,500 against the system figure."),
+    ("operations", "cash_management", "ATM cash-out during weekend peak",
+     "The lobby ATM ran dry on Saturday afternoon and was not replenished until Monday."),
+    ("treasury", "tsy.liquidity", "Intraday liquidity buffer below threshold",
+     "The intraday liquidity buffer dipped below the internal floor twice this week."),
+    ("dispute", "dispute.chargeback", "Chargeback deadline approaching for e-commerce dispute",
+     "The representment window for a ₹34,000 e-commerce dispute closes in three working days."),
+    ("access", "access.reset", "Bulk password reset needed after training session",
+     "Twelve new joiners need their net-banking demo credentials reset after a training session."),
+    ("access", "access.locked", "Corporate user locked out of payment portal",
+     "The maker at a corporate client is locked out and payroll runs tomorrow."),
+    ("payments", "neft_rtgs", "Inward remittance credited to wrong account",
+     "An inward NEFT was credited to a closed account and needs to be traced and re-credited."),
+]
+
+_BACKLOG_TAGS = {
+    "payments": ["payments", "transfers"],
+    "fraud": ["fraud", "risk"],
+    "kyc": ["kyc", "onboarding"],
+    "loans": ["loans"],
+    "compliance": ["compliance", "regulatory"],
+    "it": ["it", "systems"],
+    "operations": ["operations"],
+    "treasury": ["treasury"],
+    "dispute": ["dispute"],
+    "access": ["access"],
+}
+
+_AGENT_KEYS = ["rahul.verma", "aisha.khan", "vikram.rao"]
+_REPORTER_KEYS = ["sunita.desai", "arjun.mehta", "admin"]
+_SENTIMENTS = ["neutral", "negative", "urgent", "positive"]
+
+#: Resolution targets in hours, mirroring SLA_DEFAULTS above.
+_SLA_RESOLUTION_HOURS = {p: res / 60 for p, _resp, res in SLA_DEFAULTS}
+
+
+def _generate_backlog(count: int = 35) -> list[dict]:
+    """Build the older half of the queue, oldest mostly closed."""
+    rng = random.Random(20260810)  # fixed: reruns reproduce the same backlog
+    specs: list[dict] = []
+
+    for i in range(count):
+        category, subcategory, title, description = _BACKLOG_TEMPLATES[i % len(_BACKLOG_TEMPLATES)]
+
+        # Spread across six weeks, densest in the recent past.
+        age_h = round(rng.triangular(3, 45 * 24, 24), 1)
+        days_old = age_h / 24
+
+        # Older work has had time to finish. This weighting matters more than
+        # it looks: an old ticket left open is a guaranteed breach, so leaning
+        # too far toward "still open" produces a queue with a 75% breach rate
+        # and an SLA panel nobody would believe.
+        if days_old > 10:
+            status = rng.choice(["closed", "closed", "closed", "resolved"])
+        elif days_old > 3:
+            status = rng.choices(
+                ["closed", "resolved", "on_hold"], weights=[45, 45, 10]
+            )[0]
+        elif days_old > 1:
+            status = rng.choice(["in_progress", "assigned", "escalated", "resolved"])
+        else:
+            status = rng.choice(["new", "acknowledged", "assigned", "in_progress"])
+
+        priority = rng.choices(
+            ["critical", "high", "medium", "low"], weights=[6, 24, 45, 25]
+        )[0]
+
+        assignee = None if status in {"new", "acknowledged"} else rng.choice(_AGENT_KEYS)
+
+        spec: dict = {
+            "key": f"b{i}",
+            "title": title,
+            "description": description,
+            "category": category,
+            "subcategory": subcategory,
+            "priority": priority,
+            "status": status,
+            "source": rng.choice(["portal", "email", "phone", "chat", "api"]),
+            "reporter": rng.choice(_REPORTER_KEYS),
+            "assignee": assignee,
+            "age_h": age_h,
+            "tags": _BACKLOG_TAGS[category],
+            "ai_category": category,
+            "ai_confidence": round(rng.uniform(0.71, 0.97), 2),
+            "ai_risk_score": round(rng.uniform(0.05, 0.65), 2),
+            "ai_sentiment": rng.choice(_SENTIMENTS),
+            "comments": [],
+        }
+
+        # An on-hold ticket has its clock paused, which is how a genuinely
+        # stalled item avoids counting as a breach.
+        if status == "on_hold":
+            spec["sla_paused"] = True
+
+        if status in {"resolved", "closed"}:
+            # Resolution time is measured against the SLA target, not against
+            # the ticket's age: finishing "70% of the way through its life" is
+            # meaningless for a three-week-old ticket and breaches every time.
+            # About one in five misses, which is the shape of a real queue.
+            sla_hours = _SLA_RESOLUTION_HOURS[priority]
+            if rng.random() < 0.8:
+                resolved_after = round(rng.uniform(0.15, 0.85) * sla_hours, 1)
+            else:
+                resolved_after = round(rng.uniform(1.15, 2.4) * sla_hours, 1)
+            resolved_after = max(0.4, min(resolved_after, age_h))
+
+            # Push a few over the line today so "Resolved today" is not zero.
+            if i % 6 == 0:
+                resolved_after = max(0.4, age_h - rng.uniform(0.5, 5))
+
+            spec["resolved_after_h"] = resolved_after
+            if status == "closed":
+                spec["closed_after_h"] = min(age_h, resolved_after + rng.uniform(1, 20))
+
+        specs.append(spec)
+
+    return specs
+
+
+DEMO_TICKETS += _generate_backlog()
+
+
 async def seed(db: AsyncSession) -> None:
     # --- Roles ---------------------------------------------------------------
     existing_roles = {r.name for r in (await db.execute(select(Role))).scalars().all()}
@@ -688,6 +855,9 @@ async def seed(db: AsyncSession) -> None:
     # --- Demo tickets, comments, escalation events ---------------------------
     await seed_demo_tickets(db)
 
+    # --- AI interaction history (drives the dashboard's AI panel) ------------
+    await seed_ai_interaction_logs(db)
+
     await db.commit()
 
 
@@ -815,10 +985,12 @@ async def seed_demo_tickets(db: AsyncSession) -> None:
 
         created_at = now - timedelta(hours=spec["age_h"])
 
-        # TKT-YYYYMMDD-NNNNN, sequential within the ticket's own calendar day.
-        prefix = f"TKT-{created_at:%Y%m%d}-"
-        counters[prefix] = counters.get(prefix, 0) + 1
-        ticket_number = f"{prefix}{counters[prefix]:05d}"
+        # Match the format the application itself generates for users without
+        # an org unit (`TKT-000123`). The seed previously used a date-stamped
+        # scheme of its own, so demo tickets and anything raised through the UI
+        # looked like they came from two different systems.
+        counters["seq"] = counters.get("seq", 0) + 1
+        ticket_number = f"TKT-{counters['seq']:06d}"
 
         priority = spec["priority"]
         resp_min, res_min = sla_minutes[priority]
@@ -962,11 +1134,160 @@ async def seed_demo_tickets(db: AsyncSession) -> None:
     )
 
 
+
+async def seed_ai_interaction_logs(db: AsyncSession) -> None:
+    """Populate ai_interaction_logs so the AI panel reports something real.
+
+    The dashboard's AI card reads this table, not the tickets: "Categorized"
+    counts rows of type `categorize`, and "Avg confidence" averages their
+    confidence_score. The seed never wrote any, so both showed zero while the
+    tickets themselves carried perfectly good AI fields.
+
+    Average latency was worse than useless — it averaged whatever real calls
+    had happened, which on a machine where Ollama was misconfigured meant
+    120-second timeouts and a headline figure of 107,430ms. These rows are
+    stamped with the latencies a working local model actually produces.
+    """
+    existing = (await db.execute(
+        select(AIInteractionLog.id)
+        .where(AIInteractionLog.model_id.like("seed:%"))
+        .limit(1)
+    )).first()
+    if existing is not None:
+        print("  [seed] AI interaction logs already exist — skipped")
+        return
+
+    tickets = (await db.execute(
+        select(Ticket).where(Ticket.tags.any(DEMO_TAG))
+    )).scalars().all()
+    if not tickets:
+        print("  [seed] No demo tickets — skipping AI logs")
+        return
+
+    users = {
+        u.email.split("@")[0]: u
+        for u in (await db.execute(select(User))).scalars().all()
+    }
+    actors = [users[k] for k in ("rahul.verma", "aisha.khan", "vikram.rao", "priya.sharma") if k in users]
+    if not actors:
+        actors = list(users.values())[:1]
+
+    rng = random.Random(4242)
+    model = f"seed:{settings.LLM_MODEL}"
+    now = datetime.now(UTC)
+    created = 0
+
+    def add(ticket, kind, when, *, confidence=None, ok=True, latency=None):
+        nonlocal created
+        # Latency bands reflect a warm local 9B model: a short classification
+        # is quick, a summary costs more, a chat turn most of all.
+        base = {"categorize": (700, 2200), "summarize": (1500, 4200),
+                "suggest_resolution": (1800, 5200), "chat": (900, 6000)}[kind]
+        db.add(AIInteractionLog(
+            id=uuid.uuid4(),
+            user_id=rng.choice(actors).id,
+            ticket_id=ticket.id if ticket is not None else None,
+            interaction_type=kind,
+            model_id=model,
+            prompt_tokens=rng.randint(320, 1400),
+            completion_tokens=rng.randint(60, 420),
+            latency_ms=latency if latency is not None else rng.randint(*base),
+            success=ok,
+            error_message=None if ok else "Ollama timed out",
+            confidence_score=confidence,
+            result={"seeded": True},
+            created_at=when,
+            updated_at=when,
+        ))
+        created += 1
+
+    for ticket in tickets:
+        start = ticket.created_at
+
+        # Every ticket is classified on arrival — that is the AI step the
+        # dashboard counts, and the ticket already carries the confidence the
+        # classifier produced, so reuse it rather than inventing a second one.
+        add(ticket, "categorize", start + timedelta(seconds=rng.randint(2, 20)),
+            confidence=ticket.ai_confidence or round(rng.uniform(0.72, 0.95), 2))
+
+        if ticket.ai_summary:
+            add(ticket, "summarize", start + timedelta(minutes=rng.randint(5, 90)))
+        if rng.random() < 0.35:
+            add(ticket, "suggest_resolution", start + timedelta(minutes=rng.randint(10, 240)))
+        if rng.random() < 0.25:
+            add(ticket, "chat", start + timedelta(minutes=rng.randint(15, 300)))
+
+    # A couple of genuine failures, so the panel is not implausibly perfect and
+    # the failure counter on /ai/usage has something to show.
+    for _ in range(3):
+        add(None, "chat", now - timedelta(hours=rng.randint(1, 60)),
+            ok=False, latency=rng.randint(30_000, 60_000))
+
+    await db.flush()
+    print(f"  [seed] Created {created} AI interaction logs")
+
+async def reset_demo_data(db: AsyncSession) -> None:
+    """Delete everything this script generated, leaving the schema intact.
+
+    Only demo rows go: tickets carrying DEMO_TAG (and, by cascade, their
+    comments, attachments, SLA tracking and escalation events), the AI logs
+    this script stamped `seed:`, and the chat sessions belonging to demo
+    accounts. Users, roles, categories and SLA policies stay — they are
+    configuration, and dropping them would orphan anything you created by hand.
+
+    The AI logs matter most here: real timed-out calls left behind a 107-second
+    average latency on the dashboard, and no amount of re-seeding fixes that
+    while the old rows remain.
+    """
+    from sqlalchemy import delete
+
+    from app.models.ai_interaction import ChatMessage, ChatSession
+
+    ticket_ids = (await db.execute(
+        select(Ticket.id).where(Ticket.tags.any(DEMO_TAG))
+    )).scalars().all()
+
+    # Escalation events have no cascade from tickets in every path, so clear
+    # them explicitly before the tickets they point at.
+    if ticket_ids:
+        await db.execute(delete(EscalationEvent).where(EscalationEvent.ticket_id.in_(ticket_ids)))
+        await db.execute(delete(TicketComment).where(TicketComment.ticket_id.in_(ticket_ids)))
+        await db.execute(delete(SLATracking).where(SLATracking.ticket_id.in_(ticket_ids)))
+        await db.execute(delete(AIInteractionLog).where(AIInteractionLog.ticket_id.in_(ticket_ids)))
+
+    # Chat history references tickets too; drop messages before sessions.
+    session_ids = (await db.execute(select(ChatSession.id))).scalars().all()
+    if session_ids:
+        await db.execute(delete(ChatMessage).where(ChatMessage.session_id.in_(session_ids)))
+    await db.execute(delete(AIInteractionLog))  # includes the real, slow ones
+    await db.execute(delete(ChatSession))
+
+    if ticket_ids:
+        await db.execute(delete(Ticket).where(Ticket.id.in_(ticket_ids)))
+
+    await db.commit()
+    print(
+        f"  [reset] Removed {len(ticket_ids)} demo tickets, their comments, "
+        f"SLA rows and escalation events, plus all AI history"
+    )
+
+
 async def main() -> None:
+    parser = argparse.ArgumentParser(description="Seed development data.")
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="Delete existing demo data first, then re-create it fresh.",
+    )
+    args = parser.parse_args()
+
     print("[seed] Starting dev seed…")
     engine = create_async_engine(settings.DATABASE_URL, echo=False)
     session_factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     async with session_factory() as db:
+        if args.reset:
+            print("[seed] --reset: clearing existing demo data")
+            await reset_demo_data(db)
         await seed(db)
     await engine.dispose()
     print("[seed] Done.")

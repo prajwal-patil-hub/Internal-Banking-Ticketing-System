@@ -6,9 +6,11 @@ CategoryItem, DeptLoad, and AIMetrics TypeScript interfaces.
 
 from __future__ import annotations
 
+from typing import Annotated
+
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -293,6 +295,64 @@ async def get_department_load(
     ]
 
     return ok(department_load)
+
+
+# ---------------------------------------------------------------------------
+# Ticket Trend
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/ticket-trend",
+    summary="Tickets created and resolved per day",
+    dependencies=[Depends(require_roles("agent", "supervisor", "admin", "auditor"))],
+)
+async def get_ticket_trend(
+    request: Request,
+    days: Annotated[int, Query(ge=1, le=180)] = 30,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Daily created/resolved counts for the trend chart.
+
+    The Reports page previously plotted department load under a "Tickets Over
+    Time" heading because no time series existed — a bar per department with a
+    date axis label, which is simply the wrong chart.
+
+    Days with no activity are returned as zeros rather than omitted, so the
+    line has an even x-axis instead of silently compressing quiet periods.
+    """
+    now = datetime.now(UTC)
+    start = (now - timedelta(days=days - 1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    scope = await _org_filter(current_user, db)
+
+    def _daily(column):
+        clauses = [column >= start]
+        if scope is not None:
+            clauses.append(scope)
+        return (
+            select(func.date(column).label("day"), func.count(Ticket.id).label("n"))
+            .where(*clauses)
+            .group_by(func.date(column))
+        )
+
+    created = {r.day: r.n for r in (await db.execute(_daily(Ticket.created_at))).fetchall()}
+    resolved = {r.day: r.n for r in (await db.execute(_daily(Ticket.resolved_at))).fetchall()}
+
+    series = []
+    for offset in range(days):
+        day = (start + timedelta(days=offset)).date()
+        series.append({
+            "date": day.isoformat(),
+            "created": created.get(day, 0),
+            "resolved": resolved.get(day, 0),
+            # Kept as `count` too: the chart's existing dataKey, so the series
+            # renders without the client having to know which field to pick.
+            "count": created.get(day, 0),
+        })
+
+    return ok(series)
 
 
 # ---------------------------------------------------------------------------
