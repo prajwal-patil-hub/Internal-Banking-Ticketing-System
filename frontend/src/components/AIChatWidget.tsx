@@ -1,8 +1,9 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import { cn } from '@/lib/cn';
 import { extractError } from '@/lib/api';
 import { sendChatMessage, streamChatMessage, getAIHealth } from '@/features/ai/api';
+import { describePage, ticketIdFromPath } from '@/features/ai/pageContext';
 
 interface DisplayMessage {
   id: string;
@@ -31,15 +32,24 @@ export function AIChatWidget() {
   // Never leave a stream running behind a closed widget.
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  // Derive ticket context from URL
-  const ticketMatch = location.pathname.match(/^\/tickets\/([^/]+)$/);
-  const ticketId = ticketMatch ? ticketMatch[1] : undefined;
+  // What the user is looking at. The server re-reads any referenced data
+  // under their own permissions, so this only names the screen — it never
+  // carries page contents.
+  const { pathname, search } = location;
+  const ticketId = ticketIdFromPath(pathname);
+  const page = useMemo(() => describePage(pathname, search), [pathname, search]);
+  /** What the assistant was actually grounded on, reported by the server. */
+  const [grounding, setGrounding] = useState<string[]>([]);
 
   useEffect(() => {
     if (open) {
       setTimeout(() => textareaRef.current?.focus(), 50);
     }
   }, [open]);
+
+  // The grounding label describes the last answer; once the user moves to
+  // another screen it is no longer true, so clear it.
+  useEffect(() => { setGrounding([]); }, [pathname]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -68,6 +78,7 @@ export function AIChatWidget() {
     const payload = {
       message: text,
       session_id: sessionId,
+      page,
       ...(ticketId ? { context_type: 'ticket' as const, context_id: ticketId } : {}),
     };
 
@@ -83,7 +94,13 @@ export function AIChatWidget() {
       await streamChatMessage(
         payload,
         {
-          onMeta: ({ session_id }) => setSessionId(session_id),
+          onMeta: ({ session_id, context_sources, context_denied }) => {
+            setSessionId(session_id);
+            setGrounding(context_sources ?? []);
+            if (context_denied) {
+              setError('You do not have access to the ticket on this page, so the assistant cannot see it.');
+            }
+          },
           onDelta: (chunk) => {
             streamed = true;
             setMessages((prev) =>
@@ -152,7 +169,7 @@ export function AIChatWidget() {
       abortRef.current = null;
       setSending(false);
     }
-  }, [input, sending, sessionId, ticketId]);
+  }, [input, sending, sessionId, ticketId, page]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -230,14 +247,15 @@ export function AIChatWidget() {
             </div>
           </div>
 
-          {/* Context chip */}
-          {ticketId && (
-            <div className="px-4 py-2 bg-brand-50 dark:bg-brand-900/20 border-b border-slate-100 dark:border-slate-800">
-              <span className="text-xs text-brand-700 dark:text-brand-300 font-medium">
-                Context: Ticket #{ticketId.slice(0, 8)}...
-              </span>
-            </div>
-          )}
+          {/* What the assistant can see. Names the real sources the server
+              reported rather than implying access from the URL alone. */}
+          <div className="px-4 py-2 bg-brand-50 dark:bg-brand-900/20 border-b border-slate-100 dark:border-slate-800">
+            <span className="text-xs text-brand-700 dark:text-brand-300 font-medium">
+              {grounding.length
+                ? `Can see: ${grounding.join(' · ')}`
+                : `On: ${page.label.split(' — ')[0]}`}
+            </span>
+          </div>
 
           {/* Messages */}
           <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-3">

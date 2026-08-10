@@ -1,4 +1,5 @@
 import { api, AI_TIMEOUT_MS, API_BASE_URL, refreshAccessToken } from '@/lib/api';
+import type { PageContext } from './pageContext';
 
 /** Every AI-backed request needs the long timeout — see AI_TIMEOUT_MS. */
 const aiCfg = { timeout: AI_TIMEOUT_MS };
@@ -43,6 +44,8 @@ export interface SendMessagePayload {
   session_id?: string;
   context_type?: string;
   context_id?: string;
+  /** The screen the user is on — lets the assistant answer about any page. */
+  page?: PageContext;
 }
 
 export interface SendMessageResponse {
@@ -79,7 +82,14 @@ export async function sendChatMessage(payload: SendMessagePayload): Promise<Send
 
 export interface StreamHandlers {
   /** Fires once, as soon as the session is known — before any token. */
-  onMeta?: (meta: { session_id: string }) => void;
+  onMeta?: (meta: {
+    session_id: string;
+    /** Human labels for the data the assistant was grounded on. */
+    context_sources?: string[];
+    context_ticket?: string | null;
+    /** True when the user pointed at a ticket their role cannot read. */
+    context_denied?: boolean;
+  }) => void;
   /** Fires per token. Append to whatever you're rendering. */
   onDelta: (text: string) => void;
   /** Fires once at the end, even when the reply was degraded. */

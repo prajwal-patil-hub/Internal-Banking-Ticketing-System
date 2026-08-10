@@ -89,6 +89,27 @@ stolen access token must not be enough to strip the second factor.
 There are no printed backup codes yet, so a lost device is recovered by an
 admin clearing the enrolment (`POST /api/v1/users/{id}/mfa/reset`).
 
+## How the AI assistant works
+
+The assistant is **grounded**: before each reply the server assembles a CONTEXT
+block from the database — the ticket you have open with its comments and SLA
+state, the screen you are on, and a digest of your own queue — and gives that to
+the model. So it can answer "what is this ticket about?" or "what should I pick
+up first?" from the actual record rather than from memory.
+
+Three properties matter in production, and all three are enforced server-side:
+
+- **It cannot see more than you can.** Context is fetched through the same
+  visibility rules as the REST API. Point it at a ticket your role cannot read
+  and it is told the ticket is unavailable — no title, no number, nothing.
+- **It says when it does not know.** The prompt requires a one-sentence "I
+  can't see that" instead of generic advice. An assistant that invents ticket
+  facts in a bank is worse than one that declines.
+- **It is bounded.** Replies, context and replayed history each have a budget
+  (`AI_CHAT_MAX_TOKENS`, `AI_CONTEXT_CHAR_BUDGET`, `AI_HISTORY_CHAR_BUDGET`),
+  and each user has a per-minute call limit. `GET /api/v1/ai/usage` reports
+  token spend and latency by interaction type so the cost is visible.
+
 ## Local AI (Ollama)
 
 The AI assistant runs against a local model, so nothing leaves your machine and

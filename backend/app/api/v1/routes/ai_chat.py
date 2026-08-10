@@ -13,22 +13,24 @@ import json
 import time
 import uuid
 from collections.abc import AsyncGenerator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, NamedTuple
 
 from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import Integer, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.deps import get_current_user, get_session
+from app.api.v1.deps import get_current_user, get_session, require_roles
 from app.core.config import settings
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.logging import get_logger
+from app.core.ratelimit import check_rate_limit
 from app.db.session import SessionLocal
 from app.models.ai_interaction import AIInteractionLog, ChatMessage, ChatRole, ChatSession
 from app.models.user import User
 from app.schemas.envelope import ok, paginated
+from app.services.chat_context import build_chat_context
 
 log = get_logger(__name__)
 
@@ -106,14 +108,59 @@ async def _log_ai_interaction(
     db.add(entry)
 
 
-def _build_system_prompt() -> str:
-    return (
-        "You are an AI assistant for SUCCESS Bank's internal support team. "
-        "You help bank agents resolve customer tickets efficiently. "
-        "Always be professional, precise, and security-conscious. "
-        "Do not reveal confidential information. "
-        "For regulatory and compliance questions, recommend consulting the compliance team."
-    )
+def _build_system_prompt(context: str | None = None) -> str:
+    """Instructions plus the grounding block for this turn.
+
+    The rules are written as hard constraints rather than suggestions because a
+    9B local model follows explicit prohibitions far more reliably than it
+    follows tone guidance. The two that matter most:
+
+    - Answer only from CONTEXT. Previously the model had no data at all and
+      filled the gap with generic advice; an assistant that invents ticket
+      facts in a bank is worse than one that declines.
+    - Stop early. Verbosity is the dominant cost and latency driver here — the
+      user waits for every token, and the reply is re-read on the next turn.
+    """
+    rules = [
+        "You are the assistant inside SUCCESS Bank's internal ticketing system.",
+        "You are talking to bank staff, not customers.",
+        "",
+        "HOW TO ANSWER",
+        "- Answer only from the CONTEXT below and the conversation so far.",
+        "- If the answer is not in CONTEXT, reply in one short sentence saying you "
+        "cannot see that, and name what would help (for example: open the ticket, "
+        "or ask about a ticket number). Then stop.",
+        "- Never invent ticket numbers, names, amounts, dates or statuses. "
+        "Quote them exactly as they appear in CONTEXT.",
+        "- Never explain how to do something manually as a substitute for data "
+        "you do not have. A short 'I can't see that' is the correct answer.",
+        "",
+        "STYLE",
+        "- Be brief: at most 120 words unless the user explicitly asks for detail.",
+        "- Lead with the answer. No preamble, no restating the question, no "
+        "summary of what you are about to say.",
+        "- Use a short bullet list only when listing several tickets or steps. "
+        "Never number a list that has one item.",
+        "- Do not add generic advice, disclaimers, or offers to help further.",
+        "",
+        "BANKING RULES",
+        "- Never output full account numbers or customer PII; keep the masking "
+        "used in CONTEXT.",
+        "- For fraud, AML, regulatory or compliance matters, state the fact and "
+        "recommend the compliance team; do not give a regulatory opinion.",
+        "- You may summarise and suggest next steps. You cannot change any "
+        "ticket — tell the user which button to use instead.",
+    ]
+
+    prompt = "\n".join(rules)
+    if context:
+        prompt += "\n\n" + context
+    else:
+        prompt += (
+            "\n\n# CONTEXT\n(No data was available for this turn. Say you cannot "
+            "see any ticket data and stop.)"
+        )
+    return prompt
 
 
 class AIResult(NamedTuple):
@@ -159,7 +206,13 @@ def _ollama_hint(exc: Exception) -> str:
     return f"Local AI (Ollama) error: {exc}"
 
 
-async def _generate_ai_response(user_message: str, history: list[dict]) -> AIResult:
+async def _generate_ai_response(
+    user_message: str,
+    history: list[dict],
+    *,
+    system_prompt: str | None = None,
+    max_tokens: int | None = None,
+) -> AIResult:
     """Generate an AI response using the configured LLM provider.
 
     Supports:
@@ -182,7 +235,7 @@ async def _generate_ai_response(user_message: str, history: list[dict]) -> AIRes
         try:
             import httpx
 
-            messages = [{"role": "system", "content": _build_system_prompt()}]
+            messages = [{"role": "system", "content": system_prompt or _build_system_prompt()}]
             for turn in history:
                 messages.append({"role": turn["role"], "content": turn["content"]})
             messages.append({"role": "user", "content": user_message})
@@ -193,7 +246,8 @@ async def _generate_ai_response(user_message: str, history: list[dict]) -> AIRes
                     json={
                         "model": settings.LLM_MODEL,
                         "messages": messages,
-                        "max_tokens": settings.AI_MAX_TOKENS,
+                        "max_tokens": max_tokens or settings.AI_MAX_TOKENS,
+                        "temperature": settings.AI_TEMPERATURE,
                         "stream": False,
                         # Ollama-specific: keeps weights resident so the next
                         # request skips the multi-second model load.
@@ -234,8 +288,8 @@ async def _generate_ai_response(user_message: str, history: list[dict]) -> AIRes
 
             response = client_a.messages.create(
                 model=settings.LLM_MODEL or "claude-haiku-4-5-20251001",
-                max_tokens=settings.AI_MAX_TOKENS,
-                system=_build_system_prompt(),
+                max_tokens=max_tokens or settings.AI_MAX_TOKENS,
+                system=system_prompt or _build_system_prompt(),
                 messages=messages_a,
             )
             response_text = response.content[0].text if response.content else ""
@@ -263,7 +317,11 @@ async def _generate_ai_response(user_message: str, history: list[dict]) -> AIRes
 
 
 async def _stream_ollama(
-    user_message: str, history: list[dict]
+    user_message: str,
+    history: list[dict],
+    *,
+    system_prompt: str | None = None,
+    max_tokens: int | None = None,
 ) -> AsyncGenerator[tuple[str, object], None]:
     """Stream an Ollama completion.
 
@@ -273,7 +331,7 @@ async def _stream_ollama(
     """
     import httpx
 
-    messages = [{"role": "system", "content": _build_system_prompt()}]
+    messages = [{"role": "system", "content": system_prompt or _build_system_prompt()}]
     for turn in history:
         messages.append({"role": turn["role"], "content": turn["content"]})
     messages.append({"role": "user", "content": user_message})
@@ -281,7 +339,8 @@ async def _stream_ollama(
     body = {
         "model": settings.LLM_MODEL,
         "messages": messages,
-        "max_tokens": settings.AI_MAX_TOKENS,
+        "max_tokens": max_tokens or settings.AI_MAX_TOKENS,
+        "temperature": settings.AI_TEMPERATURE,
         "stream": True,
         # Ask for a final usage chunk; Ollama omits it on older builds, in
         # which case token counts stay at 0 rather than failing the stream.
@@ -459,6 +518,25 @@ async def _resolve_chat_session(
     return session, True
 
 
+def _trim_history(turns: list[dict], budget: int) -> list[dict]:
+    """Keep the most recent turns that fit inside a character budget.
+
+    Counting turns is the wrong unit: twenty one-line exchanges and twenty
+    pasted stack traces cost wildly different amounts, and on a local model the
+    whole history is re-encoded every message. Walking backwards keeps the
+    turns that matter most to the current question.
+    """
+    kept: list[dict] = []
+    used = 0
+    for turn in reversed(turns):
+        cost = len(turn.get("content", "")) + 16  # rough per-message overhead
+        if used + cost > budget and kept:
+            break
+        kept.append(turn)
+        used += cost
+    return list(reversed(kept))
+
+
 async def _load_history(db: AsyncSession, session_id: uuid.UUID) -> list[dict]:
     """Last 20 user/assistant turns, oldest first.
 
@@ -476,7 +554,94 @@ async def _load_history(db: AsyncSession, session_id: uuid.UUID) -> list[dict]:
         .order_by(ChatMessage.created_at.desc())
         .limit(20)
     )).scalars().all()
-    return [{"role": m.role.value, "content": m.content} for m in reversed(past)]
+    turns = [{"role": m.role.value, "content": m.content} for m in reversed(past)]
+    return _trim_history(turns, settings.AI_HISTORY_CHAR_BUDGET)
+
+
+@router.get("/usage", summary="AI token spend and latency")
+async def ai_usage(
+    request: Request,
+    days: Annotated[int, Query(ge=1, le=90)] = 7,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_roles("admin", "supervisor")),
+) -> dict:
+    """Where the AI budget is going, broken down by interaction type.
+
+    Token spend is otherwise invisible: every call is already logged, but
+    nothing reads those rows back. Running a local model makes the marginal
+    cost look like zero, which it is not — it is latency and a saturated GPU,
+    and both show up here as tokens and milliseconds.
+    """
+    from sqlalchemy import func
+
+    since = datetime.now(UTC) - timedelta(days=days)
+
+    rows = (await db.execute(
+        select(
+            AIInteractionLog.interaction_type,
+            func.count().label("calls"),
+            func.sum(AIInteractionLog.prompt_tokens).label("in_tokens"),
+            func.sum(AIInteractionLog.completion_tokens).label("out_tokens"),
+            func.avg(AIInteractionLog.latency_ms).label("avg_latency"),
+            func.max(AIInteractionLog.latency_ms).label("max_latency"),
+            func.sum(func.cast(~AIInteractionLog.success, Integer)).label("failures"),
+        )
+        .where(AIInteractionLog.created_at >= since)
+        .group_by(AIInteractionLog.interaction_type)
+        .order_by(func.count().desc())
+    )).all()
+
+    by_type = [
+        {
+            "interaction_type": r.interaction_type,
+            "calls": r.calls,
+            "input_tokens": int(r.in_tokens or 0),
+            "output_tokens": int(r.out_tokens or 0),
+            "avg_latency_ms": round(float(r.avg_latency), 1) if r.avg_latency else None,
+            "max_latency_ms": r.max_latency,
+            "failures": int(r.failures or 0),
+        }
+        for r in rows
+    ]
+
+    top_users = (await db.execute(
+        select(
+            User.email,
+            func.count().label("calls"),
+            func.sum(
+                AIInteractionLog.prompt_tokens + AIInteractionLog.completion_tokens
+            ).label("tokens"),
+        )
+        .join(User, User.id == AIInteractionLog.user_id)
+        .where(AIInteractionLog.created_at >= since)
+        .group_by(User.email)
+        .order_by(func.sum(
+            AIInteractionLog.prompt_tokens + AIInteractionLog.completion_tokens
+        ).desc())
+        .limit(10)
+    )).all()
+
+    return ok({
+        "window_days": days,
+        "model": f"{settings.LLM_PROVIDER}:{settings.LLM_MODEL}",
+        "totals": {
+            "calls": sum(t["calls"] for t in by_type),
+            "input_tokens": sum(t["input_tokens"] for t in by_type),
+            "output_tokens": sum(t["output_tokens"] for t in by_type),
+            "failures": sum(t["failures"] for t in by_type),
+        },
+        "by_type": by_type,
+        "top_users": [
+            {"email": u.email, "calls": u.calls, "tokens": int(u.tokens or 0)}
+            for u in top_users
+        ],
+        "limits": {
+            "chat_max_tokens": settings.AI_CHAT_MAX_TOKENS,
+            "context_char_budget": settings.AI_CONTEXT_CHAR_BUDGET,
+            "history_char_budget": settings.AI_HISTORY_CHAR_BUDGET,
+            "rate_limit_per_minute": settings.AI_RATE_LIMIT_PER_MINUTE,
+        },
+    })
 
 
 @router.post("/chat", status_code=status.HTTP_200_OK, summary="Chat with AI assistant")
@@ -486,6 +651,8 @@ async def chat(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> dict:
+    # Every path below occupies the single local model for tens of seconds.
+    check_rate_limit(str(current_user.id), limit=settings.AI_RATE_LIMIT_PER_MINUTE)
     user_message = payload.get("message", "").strip()
     if not user_message:
         raise ValidationError("message is required.")
@@ -496,10 +663,25 @@ async def chat(
     # A new session has no history, so only resumed sessions need the lookup.
     history = [] if is_new_session else await _load_history(db, session.id)
 
+    # Ground the model in real, permission-checked data. Without this the
+    # assistant knows nothing about the ticket on screen and answers from
+    # nowhere.
+    context = await build_chat_context(
+        db,
+        current_user,
+        ticket_id=str(session.ticket_id) if session.ticket_id else None,
+        page=payload.get("page") if isinstance(payload.get("page"), dict) else None,
+    )
+
     # Call AI
     asked_at = datetime.now(UTC)
     start = time.monotonic()
-    result = await _generate_ai_response(user_message, history)
+    result = await _generate_ai_response(
+        user_message,
+        history,
+        system_prompt=_build_system_prompt(context.text),
+        max_tokens=settings.AI_CHAT_MAX_TOKENS,
+    )
     latency_ms = int((time.monotonic() - start) * 1000)
 
     # Timestamps are set explicitly, not left to the column default: Postgres
@@ -584,6 +766,8 @@ async def chat_stream(
     and token counts), `error` (human-readable cause). Errors arrive as an
     event rather than an HTTP status because the response has already begun.
     """
+    # Every path below occupies the single local model for tens of seconds.
+    check_rate_limit(str(current_user.id), limit=settings.AI_RATE_LIMIT_PER_MINUTE)
     user_message = payload.get("message", "").strip()
     if not user_message:
         raise ValidationError("message is required.")
@@ -595,13 +779,31 @@ async def chat_stream(
         db, current_user, payload, user_message
     )
     history = [] if is_new_session else await _load_history(db, session.id)
+
+    # Grounding is assembled here, not in the generator: it needs the request's
+    # DB session, which closes the moment the response starts.
+    context = await build_chat_context(
+        db,
+        current_user,
+        ticket_id=str(session.ticket_id) if session.ticket_id else None,
+        page=payload.get("page") if isinstance(payload.get("page"), dict) else None,
+    )
+    system_prompt = _build_system_prompt(context.text)
+
     session_id = session.id
     ticket_id = session.ticket_id
     user_id = current_user.id
     await db.commit()
 
     async def event_stream() -> AsyncGenerator[str, None]:
-        yield _sse("meta", {"session_id": str(session_id)})
+        # Tell the client what the assistant can actually see, so the context
+        # chip reflects reality instead of implying access it may not have.
+        yield _sse("meta", {
+            "session_id": str(session_id),
+            "context_sources": context.sources,
+            "context_ticket": context.ticket_number,
+            "context_denied": context.access_denied,
+        })
 
         asked_at = datetime.now(UTC)
         start = time.monotonic()
@@ -613,14 +815,24 @@ async def chat_stream(
         if not settings.AI_ENABLED or settings.LLM_PROVIDER != "ollama":
             # Non-streaming providers (and the disabled case) still get a
             # coherent stream: one delta carrying the whole reply.
-            result = await _generate_ai_response(user_message, history)
+            result = await _generate_ai_response(
+                user_message,
+                history,
+                system_prompt=system_prompt,
+                max_tokens=settings.AI_CHAT_MAX_TOKENS,
+            )
             chunks.append(result.text)
             input_tokens, output_tokens = result.input_tokens, result.output_tokens
             ok_flag, error_msg = result.ok, result.error
             yield _sse("delta", {"text": result.text})
         else:
             try:
-                async for kind, value in _stream_ollama(user_message, history):
+                async for kind, value in _stream_ollama(
+                    user_message,
+                    history,
+                    system_prompt=system_prompt,
+                    max_tokens=settings.AI_CHAT_MAX_TOKENS,
+                ):
                     if kind == "delta":
                         chunks.append(str(value))
                         yield _sse("delta", {"text": value})
@@ -793,6 +1005,8 @@ async def categorize_text(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> dict:
+    # Every path below occupies the single local model for tens of seconds.
+    check_rate_limit(str(current_user.id), limit=settings.AI_RATE_LIMIT_PER_MINUTE)
     if not settings.AI_ENABLED:
         raise ValidationError("AI features are not enabled.")
 
@@ -876,6 +1090,8 @@ async def extract_email(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> dict:
+    # Every path below occupies the single local model for tens of seconds.
+    check_rate_limit(str(current_user.id), limit=settings.AI_RATE_LIMIT_PER_MINUTE)
     if not settings.AI_ENABLED:
         raise ValidationError("AI features are not enabled.")
 
