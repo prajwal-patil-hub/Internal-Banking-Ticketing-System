@@ -225,17 +225,18 @@ async def update_user(
     return ok(_serialize_user(user))
 
 
-@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
+@router.delete("/{user_id}")
 async def deactivate_user(
     user_id: uuid.UUID,
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(require_roles("admin")),
-) -> None:
+) -> Response:
     if str(user_id) == str(current_user.id):
         raise AuthorizationError("Cannot deactivate your own account.")
     user = await _get_user_or_404(user_id, db)
     user.is_active = False
     await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # ---------------------------------------------------------------------------

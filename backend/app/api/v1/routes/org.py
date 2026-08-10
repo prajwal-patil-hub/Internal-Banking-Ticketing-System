@@ -73,19 +73,19 @@ async def update_level(
     return ok(_serialize_level(lvl))
 
 
-@router.delete("/levels/{level_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
+@router.delete("/levels/{level_id}")
 async def delete_level(
     level_id: uuid.UUID,
     db: AsyncSession = Depends(get_session),
     _: User = Depends(require_roles("admin")),
-) -> None:
+) -> Response:
     lvl = await _get_level_or_404(level_id, db)
-    # Check if any org units use this level
     result = await db.execute(select(OrgUnit.id).where(OrgUnit.hierarchy_level_id == level_id).limit(1))
     if result.scalar_one_or_none():
         raise ConflictError("Cannot delete level with associated org units.")
     await db.delete(lvl)
     await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # ---------------------------------------------------------------------------
@@ -182,16 +182,16 @@ async def update_unit(
     return ok(_serialize_unit(unit))
 
 
-@router.delete("/units/{unit_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
+@router.delete("/units/{unit_id}")
 async def delete_unit(
     unit_id: uuid.UUID,
     db: AsyncSession = Depends(get_session),
     _: User = Depends(require_roles("admin")),
-) -> None:
+) -> Response:
     unit = await _get_unit_or_404(unit_id, db)
-    # Soft-delete: deactivate instead of removing
     unit.is_active = False
     await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/units/{unit_id}/subtree", summary="Get all unit IDs in subtree")
@@ -265,18 +265,19 @@ async def update_org_role(
     return ok(_serialize_org_role(role))
 
 
-@router.delete("/roles/{role_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
+@router.delete("/roles/{role_id}")
 async def delete_org_role(
     role_id: uuid.UUID,
     db: AsyncSession = Depends(get_session),
     _: User = Depends(require_roles("admin")),
-) -> None:
+) -> Response:
     result = await db.execute(select(OrgRole).where(OrgRole.id == role_id))
     role = result.scalar_one_or_none()
     if not role:
         raise NotFoundError(f"OrgRole {role_id} not found.")
     role.is_active = False
     await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # ---------------------------------------------------------------------------
