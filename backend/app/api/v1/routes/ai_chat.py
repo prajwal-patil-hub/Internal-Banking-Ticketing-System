@@ -213,7 +213,8 @@ async def chat(
         raise ValidationError("message is required.")
 
     session_id_val = payload.get("session_id")
-    ticket_id_val = payload.get("ticket_id")
+    # Accept both ticket_id (direct) and context_id (frontend widget convention)
+    ticket_id_val = payload.get("ticket_id") or payload.get("context_id")
 
     session: ChatSession | None = None
 
