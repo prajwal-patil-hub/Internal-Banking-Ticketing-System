@@ -28,8 +28,22 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+/** Base URL for callers that can't go through axios (e.g. fetch-based SSE). */
+export const API_BASE_URL = baseURL;
+
 // --- Single-flight refresh on 401 -----------------------------------------
 let refreshing: Promise<string | null> | null = null;
+
+/**
+ * Refresh the access token, coalescing concurrent callers into one request.
+ *
+ * Exported so the streaming client can reuse the exact same 401 handling as
+ * the axios interceptor instead of reimplementing it and drifting.
+ */
+export function refreshAccessToken(): Promise<string | null> {
+  refreshing ??= attemptRefresh().finally(() => { refreshing = null; });
+  return refreshing;
+}
 
 async function attemptRefresh(): Promise<string | null> {
   const raw = localStorage.getItem('success-auth');
@@ -64,8 +78,7 @@ api.interceptors.response.use(
 
     if (status === 401 && original && !original._retried && !isAuthRoute) {
       original._retried = true;
-      refreshing ??= attemptRefresh().finally(() => { refreshing = null; });
-      const newAccess = await refreshing;
+      const newAccess = await refreshAccessToken();
       if (newAccess) {
         original.headers = { ...(original.headers ?? {}), Authorization: `Bearer ${newAccess}` };
         return api.request(original);

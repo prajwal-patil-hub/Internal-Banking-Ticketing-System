@@ -2,14 +2,19 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { cn } from '@/lib/cn';
 import { extractError } from '@/lib/api';
-import { sendChatMessage, getAIHealth } from '@/features/ai/api';
+import { sendChatMessage, streamChatMessage, getAIHealth } from '@/features/ai/api';
 
 interface DisplayMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  /** Awaiting the first token — show dots. */
   isTyping?: boolean;
+  /** Tokens are arriving — show the caret. */
+  isStreaming?: boolean;
 }
+
+const STREAMING_ID = 'streaming';
 
 export function AIChatWidget() {
   const [open, setOpen] = useState(false);
@@ -20,7 +25,11 @@ export function AIChatWidget() {
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const location = useLocation();
+
+  // Never leave a stream running behind a closed widget.
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   // Derive ticket context from URL
   const ticketMatch = location.pathname.match(/^\/tickets\/([^/]+)$/);
@@ -49,34 +58,87 @@ export function AIChatWidget() {
       content: text,
     };
 
-    const typingMsg: DisplayMessage = {
-      id: 'typing',
-      role: 'assistant',
-      content: '',
-      isTyping: true,
-    };
-
-    setMessages((prev) => [...prev, userMsg, typingMsg]);
+    setMessages((prev) => [
+      ...prev,
+      userMsg,
+      { id: STREAMING_ID, role: 'assistant', content: '', isTyping: true },
+    ]);
     setSending(true);
 
+    const payload = {
+      message: text,
+      session_id: sessionId,
+      ...(ticketId ? { context_type: 'ticket' as const, context_id: ticketId } : {}),
+    };
+
+    const abort = new AbortController();
+    abortRef.current = abort;
+
+    // Tracks whether any token arrived: a stream that dies before the first
+    // token can be retried with the blocking endpoint, but one that dies
+    // halfway must not be, or the user would see the reply start over.
+    let streamed = false;
+
     try {
-      const resp = await sendChatMessage({
-        message: text,
-        session_id: sessionId,
-        ...(ticketId ? { context_type: 'ticket', context_id: ticketId } : {}),
-      });
-
-      setSessionId(resp.session_id);
-
-      const assistantMsg: DisplayMessage = {
-        id: resp.assistant_message.id,
-        role: 'assistant',
-        content: resp.assistant_message.content,
-      };
-
-      setMessages((prev) => [...prev.filter((m) => m.id !== 'typing'), assistantMsg]);
+      await streamChatMessage(
+        payload,
+        {
+          onMeta: ({ session_id }) => setSessionId(session_id),
+          onDelta: (chunk) => {
+            streamed = true;
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === STREAMING_ID
+                  ? { ...m, content: m.content + chunk, isTyping: false, isStreaming: true }
+                  : m,
+              ),
+            );
+          },
+          onDone: ({ message_id }) => {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === STREAMING_ID
+                  ? { ...m, id: message_id ?? `a-${Date.now()}`, isStreaming: false }
+                  : m,
+              ),
+            );
+          },
+          onError: (message) => setError(message),
+        },
+        abort.signal,
+      );
     } catch (err) {
-      setMessages((prev) => prev.filter((m) => m.id !== 'typing'));
+      if (abort.signal.aborted) {
+        setMessages((prev) => prev.filter((m) => m.id !== STREAMING_ID));
+        setSending(false);
+        return;
+      }
+
+      // Streaming can fail for reasons the model is innocent of — a proxy that
+      // buffers SSE, for one. Fall back to the blocking endpoint so the user
+      // still gets an answer, but only if nothing was rendered yet.
+      if (!streamed) {
+        try {
+          const resp = await sendChatMessage(payload);
+          setSessionId(resp.session_id);
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === STREAMING_ID
+                ? {
+                    id: resp.assistant_message.id,
+                    role: 'assistant' as const,
+                    content: resp.assistant_message.content,
+                  }
+                : m,
+            ),
+          );
+          return;
+        } catch (fallbackErr) {
+          err = fallbackErr;
+        }
+      }
+
+      setMessages((prev) => prev.filter((m) => m.id !== STREAMING_ID));
       // A failed call is usually a local-Ollama setup problem, not a bug in the
       // app — ask the backend what is actually wrong so the user sees the fix.
       const base = extractError(err).message;
@@ -87,6 +149,7 @@ export function AIChatWidget() {
         setError(base);
       }
     } finally {
+      abortRef.current = null;
       setSending(false);
     }
   }, [input, sending, sessionId, ticketId]);
@@ -103,6 +166,7 @@ export function AIChatWidget() {
   };
 
   const handleNewSession = () => {
+    abortRef.current?.abort();
     setSessionId(undefined);
     setMessages([]);
     setError(null);
@@ -232,7 +296,15 @@ export function AIChatWidget() {
                   {msg.isTyping ? (
                     <TypingIndicator />
                   ) : (
-                    <span className="whitespace-pre-wrap">{msg.content}</span>
+                    <span className="whitespace-pre-wrap">
+                      {msg.content}
+                      {msg.isStreaming && (
+                        <span
+                          className="inline-block w-[2px] h-[1em] -mb-[2px] ml-0.5 bg-current animate-pulse"
+                          aria-hidden="true"
+                        />
+                      )}
+                    </span>
                   )}
                 </div>
               </div>
@@ -280,7 +352,7 @@ export function AIChatWidget() {
             </div>
             <p className="text-[10px] text-slate-400 mt-1.5 text-center">
               {sending
-                ? 'Generating… the first reply after an idle period can take up to a minute.'
+                ? 'Generating… the first token after an idle period can take a while.'
                 : 'Shift+Enter for newline · Powered by a local LLM'}
             </p>
           </div>

@@ -9,11 +9,15 @@ and cost tracking.
 
 from __future__ import annotations
 
+import json
+import time
 import uuid
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from typing import Annotated, NamedTuple
 
 from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +25,7 @@ from app.api.v1.deps import get_current_user, get_session
 from app.core.config import settings
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.logging import get_logger
+from app.db.session import SessionLocal
 from app.models.ai_interaction import AIInteractionLog, ChatMessage, ChatRole, ChatSession
 from app.models.user import User
 from app.schemas.envelope import ok, paginated
@@ -257,6 +262,68 @@ async def _generate_ai_response(user_message: str, history: list[dict]) -> AIRes
     )
 
 
+async def _stream_ollama(
+    user_message: str, history: list[dict]
+) -> AsyncGenerator[tuple[str, object], None]:
+    """Stream an Ollama completion.
+
+    Yields ("delta", text) for each token and finally ("usage", (in, out)).
+    Transport and HTTP errors propagate to the caller, which turns them into
+    an SSE error event.
+    """
+    import httpx
+
+    messages = [{"role": "system", "content": _build_system_prompt()}]
+    for turn in history:
+        messages.append({"role": turn["role"], "content": turn["content"]})
+    messages.append({"role": "user", "content": user_message})
+
+    body = {
+        "model": settings.LLM_MODEL,
+        "messages": messages,
+        "max_tokens": settings.AI_MAX_TOKENS,
+        "stream": True,
+        # Ask for a final usage chunk; Ollama omits it on older builds, in
+        # which case token counts stay at 0 rather than failing the stream.
+        "stream_options": {"include_usage": True},
+        "keep_alive": settings.AI_KEEP_ALIVE,
+    }
+
+    input_tokens = output_tokens = 0
+
+    async with httpx.AsyncClient(timeout=settings.AI_TIMEOUT_SECONDS) as client:
+        async with client.stream(
+            "POST", f"{settings.LLM_BASE_URL}/v1/chat/completions", json=body
+        ) as resp:
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                if not line or not line.startswith("data:"):
+                    continue
+                data = line[len("data:"):].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+
+                if usage := chunk.get("usage"):
+                    input_tokens = usage.get("prompt_tokens", input_tokens)
+                    output_tokens = usage.get("completion_tokens", output_tokens)
+
+                for choice in chunk.get("choices") or []:
+                    text = (choice.get("delta") or {}).get("content")
+                    if text:
+                        yield "delta", text
+
+    yield "usage", (input_tokens, output_tokens)
+
+
+def _sse(event: str, payload: dict) -> str:
+    """Format one Server-Sent Event frame."""
+    return f"event: {event}\ndata: {json.dumps(payload)}\n\n"
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -343,25 +410,18 @@ async def ai_health(
     return ok(info)
 
 
-@router.post("/chat", status_code=status.HTTP_200_OK, summary="Chat with AI assistant")
-async def chat(
-    payload: dict,
-    request: Request,
-    db: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_user),
-) -> dict:
-    user_message = payload.get("message", "").strip()
-    if not user_message:
-        raise ValidationError("message is required.")
+async def _resolve_chat_session(
+    db: AsyncSession, current_user: User, payload: dict, user_message: str
+) -> tuple[ChatSession, bool]:
+    """Resume the session named in the payload, or start a new one.
 
+    Returns (session, is_new_session). Shared by the blocking and streaming
+    chat routes so they cannot drift apart on validation or ownership checks.
+    """
     session_id_val = payload.get("session_id")
     # Accept both ticket_id (direct) and context_id (frontend widget convention)
     ticket_id_val = payload.get("ticket_id") or payload.get("context_id")
 
-    session: ChatSession | None = None
-    is_new_session = False
-
-    # Resume existing session if provided
     if session_id_val:
         try:
             session_id = uuid.UUID(str(session_id_val))
@@ -379,68 +439,88 @@ async def chat(
             raise NotFoundError("Chat session not found or does not belong to you.")
         if not session.is_active:
             raise ValidationError("This chat session has ended. Start a new session.")
+        return session, False
 
-    # Create new session
-    if session is None:
-        ticket_id: uuid.UUID | None = None
-        if ticket_id_val:
-            try:
-                ticket_id = uuid.UUID(str(ticket_id_val))
-            except ValueError:
-                raise ValidationError("Invalid ticket_id format.")
+    ticket_id: uuid.UUID | None = None
+    if ticket_id_val:
+        try:
+            ticket_id = uuid.UUID(str(ticket_id_val))
+        except ValueError:
+            raise ValidationError("Invalid ticket_id format.")
 
-        session = ChatSession(
-            user_id=current_user.id,
-            ticket_id=ticket_id,
-            title=user_message[:100],
-            is_active=True,
+    session = ChatSession(
+        user_id=current_user.id,
+        ticket_id=ticket_id,
+        title=user_message[:100],
+        is_active=True,
+    )
+    db.add(session)
+    await db.flush()
+    return session, True
+
+
+async def _load_history(db: AsyncSession, session_id: uuid.UUID) -> list[dict]:
+    """Last 20 user/assistant turns, oldest first.
+
+    An explicit query rather than `session.messages`: the relationship's
+    selectin loader only fires for query-loaded objects, so touching it on a
+    freshly flushed session emits IO outside the async greenlet context and
+    raises MissingGreenlet.
+    """
+    past = (await db.execute(
+        select(ChatMessage)
+        .where(
+            ChatMessage.session_id == session_id,
+            ChatMessage.role.in_([ChatRole.USER, ChatRole.ASSISTANT]),
         )
-        db.add(session)
-        await db.flush()
-        is_new_session = True
+        .order_by(ChatMessage.created_at.desc())
+        .limit(20)
+    )).scalars().all()
+    return [{"role": m.role.value, "content": m.content} for m in reversed(past)]
 
-    # Build conversation history for AI context.
-    # This has to be an explicit query rather than `session.messages`: the
-    # relationship's selectin loader only fires for objects loaded by a query,
-    # so touching it on a freshly flushed session emits IO outside the async
-    # greenlet context and raises MissingGreenlet. A new session has no history
-    # anyway, so only resumed sessions need the lookup.
-    history: list[dict] = []
-    if not is_new_session:
-        past = (await db.execute(
-            select(ChatMessage)
-            .where(
-                ChatMessage.session_id == session.id,
-                ChatMessage.role.in_([ChatRole.USER, ChatRole.ASSISTANT]),
-            )
-            .order_by(ChatMessage.created_at.desc())
-            .limit(20)  # last 20 turns — keeps the prompt bounded
-        )).scalars().all()
-        history = [
-            {"role": m.role.value, "content": m.content} for m in reversed(past)
-        ]
+
+@router.post("/chat", status_code=status.HTTP_200_OK, summary="Chat with AI assistant")
+async def chat(
+    payload: dict,
+    request: Request,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    user_message = payload.get("message", "").strip()
+    if not user_message:
+        raise ValidationError("message is required.")
+
+    session, is_new_session = await _resolve_chat_session(
+        db, current_user, payload, user_message
+    )
+    # A new session has no history, so only resumed sessions need the lookup.
+    history = [] if is_new_session else await _load_history(db, session.id)
 
     # Call AI
-    import time
+    asked_at = datetime.now(UTC)
     start = time.monotonic()
     result = await _generate_ai_response(user_message, history)
     latency_ms = int((time.monotonic() - start) * 1000)
 
-    # Persist user message
+    # Timestamps are set explicitly, not left to the column default: Postgres
+    # now() is the *transaction* start time, so both rows would land on the
+    # identical instant and _load_history's ORDER BY created_at could feed the
+    # model its own reply ahead of the question it answered.
     user_msg = ChatMessage(
         session_id=session.id,
         role=ChatRole.USER,
         content=user_message,
+        created_at=asked_at,
     )
     db.add(user_msg)
 
-    # Persist assistant message
     assistant_msg = ChatMessage(
         session_id=session.id,
         role=ChatRole.ASSISTANT,
         content=result.text,
         input_tokens=result.input_tokens,
         output_tokens=result.output_tokens,
+        created_at=datetime.now(UTC),
     )
     db.add(assistant_msg)
 
@@ -485,6 +565,148 @@ async def chat(
             "created_at": assistant_msg.created_at.isoformat(),
         },
     })
+
+
+@router.post("/chat/stream", summary="Chat with AI assistant (streamed over SSE)")
+async def chat_stream(
+    payload: dict,
+    request: Request,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> StreamingResponse:
+    """Token-by-token variant of POST /ai/chat.
+
+    A local model needs tens of seconds to finish a reply but produces its
+    first token quickly, so streaming turns a long dead wait into immediate
+    feedback.
+
+    Events: `meta` (session id), `delta` (text fragment), `done` (message id
+    and token counts), `error` (human-readable cause). Errors arrive as an
+    event rather than an HTTP status because the response has already begun.
+    """
+    user_message = payload.get("message", "").strip()
+    if not user_message:
+        raise ValidationError("message is required.")
+
+    # Everything touching `db` must happen here, before the response starts —
+    # the injected session is closed as soon as this function returns, so the
+    # generator below opens its own.
+    session, is_new_session = await _resolve_chat_session(
+        db, current_user, payload, user_message
+    )
+    history = [] if is_new_session else await _load_history(db, session.id)
+    session_id = session.id
+    ticket_id = session.ticket_id
+    user_id = current_user.id
+    await db.commit()
+
+    async def event_stream() -> AsyncGenerator[str, None]:
+        yield _sse("meta", {"session_id": str(session_id)})
+
+        asked_at = datetime.now(UTC)
+        start = time.monotonic()
+        chunks: list[str] = []
+        input_tokens = output_tokens = 0
+        ok_flag = True
+        error_msg: str | None = None
+
+        if not settings.AI_ENABLED or settings.LLM_PROVIDER != "ollama":
+            # Non-streaming providers (and the disabled case) still get a
+            # coherent stream: one delta carrying the whole reply.
+            result = await _generate_ai_response(user_message, history)
+            chunks.append(result.text)
+            input_tokens, output_tokens = result.input_tokens, result.output_tokens
+            ok_flag, error_msg = result.ok, result.error
+            yield _sse("delta", {"text": result.text})
+        else:
+            try:
+                async for kind, value in _stream_ollama(user_message, history):
+                    if kind == "delta":
+                        chunks.append(str(value))
+                        yield _sse("delta", {"text": value})
+                    elif kind == "usage":
+                        input_tokens, output_tokens = value  # type: ignore[misc]
+            except Exception as exc:
+                log.warning(
+                    "ollama_stream_error",
+                    error=str(exc),
+                    model=settings.LLM_MODEL,
+                    url=settings.LLM_BASE_URL,
+                )
+                ok_flag = False
+                error_msg = str(exc)
+                hint = _ollama_hint(exc)
+                # Persist the hint as the reply so the failure is visible in
+                # history rather than leaving a user turn with no answer.
+                if not chunks:
+                    chunks.append(hint)
+                    yield _sse("delta", {"text": hint})
+                yield _sse("error", {"message": hint})
+
+        full_text = "".join(chunks)
+        latency_ms = int((time.monotonic() - start) * 1000)
+
+        # Fresh session: the request-scoped one is long gone by now.
+        assistant_id: uuid.UUID | None = None
+        try:
+            async with SessionLocal() as write_db:
+                # Explicit timestamps — see the note in `chat`: the column
+                # default would give both rows the transaction start time and
+                # make the turn order ambiguous.
+                write_db.add(ChatMessage(
+                    session_id=session_id,
+                    role=ChatRole.USER,
+                    content=user_message,
+                    created_at=asked_at,
+                ))
+                assistant_msg = ChatMessage(
+                    session_id=session_id,
+                    role=ChatRole.ASSISTANT,
+                    content=full_text,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    created_at=datetime.now(UTC),
+                )
+                write_db.add(assistant_msg)
+                write_db.add(AIInteractionLog(
+                    user_id=user_id,
+                    ticket_id=ticket_id,
+                    session_id=session_id,
+                    interaction_type="chat_stream",
+                    model_id=f"{settings.LLM_PROVIDER}:{settings.LLM_MODEL}",
+                    prompt_tokens=input_tokens,
+                    completion_tokens=output_tokens,
+                    latency_ms=latency_ms,
+                    success=ok_flag,
+                    error_message=error_msg,
+                    result={"response_preview": full_text[:200]},
+                ))
+                await write_db.commit()
+                assistant_id = assistant_msg.id
+        except Exception as exc:
+            # The user already has the reply on screen; losing the transcript
+            # write is worth a log, not a failed response.
+            log.exception("chat_stream_persist_failed", error=str(exc))
+
+        yield _sse("done", {
+            "session_id": str(session_id),
+            "message_id": str(assistant_id) if assistant_id else None,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "latency_ms": latency_ms,
+            "degraded": not ok_flag,
+        })
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            # Stops nginx from buffering the whole reply and defeating the point.
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/sessions", summary="List user's chat sessions")
