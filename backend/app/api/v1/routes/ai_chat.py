@@ -314,10 +314,27 @@ async def ai_health(
             n == wanted or n.split(":")[0] == wanted.split(":")[0] for n in names
         )
         if not info["model_available"]:
-            info["hint"] = (
-                f"Ollama is running but `{wanted}` is not pulled. "
-                f"Run `ollama pull {wanted}`. Available: {', '.join(names) or 'none'}"
-            )
+            available = ", ".join(names) or "none"
+            if "=" in wanted:
+                # A value containing '=' is almost never a real model name; it
+                # means the .env line repeated the key (LLM_MODEL=LLM_MODEL=x).
+                # Telling the user to `ollama pull` that string sends them
+                # chasing a model problem they don't have.
+                corrected = wanted.split("=", 1)[1]
+                info["hint"] = (
+                    f"LLM_MODEL is set to '{wanted}', which contains an '=' and "
+                    "is therefore not a valid model name. The line in "
+                    f"backend/.env has most likely repeated the key — it should "
+                    f"read `LLM_MODEL={corrected}`. Fix it, then recreate the "
+                    "backend container so it re-reads the file: "
+                    "`docker compose -f infra/docker-compose.yml up -d "
+                    f"--force-recreate backend`. Available models: {available}"
+                )
+            else:
+                info["hint"] = (
+                    f"Ollama is running but `{wanted}` is not pulled. "
+                    f"Run `ollama pull {wanted}`. Available: {available}"
+                )
     except Exception as exc:
         info["error"] = str(exc)
         info["hint"] = _ollama_hint(exc)
