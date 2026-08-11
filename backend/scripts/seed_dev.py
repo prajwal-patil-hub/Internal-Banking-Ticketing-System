@@ -1464,6 +1464,37 @@ async def seed_ai_interaction_logs(db: AsyncSession) -> None:
     await db.flush()
     print(f"  [seed] Created {created} AI interaction logs")
 
+async def _delete_demo_objects(db: AsyncSession, ticket_ids: list) -> int:
+    """Remove the stored bytes for the attachments about to be deleted.
+
+    Reads the keys from the rows first, because once the rows are gone nothing
+    records which objects belonged to demo tickets and they can never be found
+    again. Storage being unavailable is not fatal — the reset should still
+    clear the database — but it is reported, since the objects are then
+    genuinely orphaned.
+    """
+    if not ticket_ids:
+        return 0
+
+    from app.models.attachment import Attachment
+    from app.services.storage_service import storage
+
+    keys = (await db.execute(
+        select(Attachment.s3_key).where(Attachment.ticket_id.in_(ticket_ids))
+    )).scalars().all()
+    if not keys:
+        return 0
+
+    removed = 0
+    for key in keys:
+        try:
+            await storage.delete(key)
+            removed += 1
+        except Exception as exc:  # storage is optional for a demo reset
+            print(f"  [reset] could not delete object {key}: {exc}")
+    return removed
+
+
 async def reset_demo_data(db: AsyncSession) -> None:
     """Delete everything this script generated, leaving the schema intact.
 
@@ -1484,6 +1515,12 @@ async def reset_demo_data(db: AsyncSession) -> None:
     ticket_ids = (await db.execute(
         select(Ticket.id).where(Ticket.tags.any(DEMO_TAG))
     )).scalars().all()
+
+    # Delete the stored files before the rows that point at them. The rows
+    # cascade away with their tickets, but the objects do not — nothing else
+    # knows they exist once the row is gone, so every --reset would leave the
+    # previous run's attachments in the bucket for good.
+    removed_objects = await _delete_demo_objects(db, ticket_ids)
 
     # Escalation events have no cascade from tickets in every path, so clear
     # them explicitly before the tickets they point at.
@@ -1508,6 +1545,7 @@ async def reset_demo_data(db: AsyncSession) -> None:
         f"  [reset] Removed {len(ticket_ids)} demo tickets, their comments, "
         f"SLA rows and escalation events, plus all AI history"
     )
+    print(f"  [reset] Removed {removed_objects} stored attachment file(s)")
 
 
 async def main() -> None:
