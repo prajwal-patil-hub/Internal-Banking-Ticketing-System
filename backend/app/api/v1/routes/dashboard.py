@@ -19,6 +19,7 @@ from app.core.logging import get_logger
 from app.models.ai_interaction import AIInteractionLog
 from app.models.sla import SLATracking
 from app.models.ticket import (
+    AI_RISK_HIGH_THRESHOLD,
     OPEN_STATUSES as _OPEN_STATUSES,
     Ticket, TicketCategory, TicketPriority, TicketSource, TicketStatus,
 )
@@ -428,7 +429,7 @@ async def get_ai_metrics(
     high_risk_tickets = (await db.execute(
         select(func.count(Ticket.id)).where(
             Ticket.status.in_(_OPEN_STATUSES),
-            Ticket.ai_risk_score >= 0.7,
+            Ticket.ai_risk_score >= AI_RISK_HIGH_THRESHOLD,
         )
     )).scalar_one()
 
@@ -440,10 +441,25 @@ async def get_ai_metrics(
         )
     )).scalar_one()
 
+    # Tickets the AI triaged that went on to be resolved or closed in the
+    # window. This tile read a hardcoded zero before, which made the whole AI
+    # panel look broken. It counts assisted resolutions, not unattended ones —
+    # nothing here closes a ticket without a human.
+    ai_assisted_resolved = (await db.execute(
+        select(func.count(Ticket.id)).where(
+            Ticket.status.in_((TicketStatus.RESOLVED, TicketStatus.CLOSED)),
+            Ticket.resolved_at.is_not(None),
+            Ticket.resolved_at >= since,
+            Ticket.ai_category.is_not(None),
+        )
+    )).scalar_one()
+
     return ok({
         "total_categorized": total_categorized,
         "avg_confidence":    round(float(avg_confidence_raw or 0), 3),
         "high_risk_tickets": high_risk_tickets,
-        "auto_resolved":     0,
+        "ai_assisted_resolved": ai_assisted_resolved,
+        # Retained under the old key so an unrefreshed client keeps working.
+        "auto_resolved":     ai_assisted_resolved,
         "avg_latency_ms":    round(float(avg_latency_raw or 0), 0),
     })

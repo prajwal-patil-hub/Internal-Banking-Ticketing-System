@@ -264,7 +264,49 @@ function DeptTable({ rows }: { rows: DeptLoad[] }) {
 
 // ── AI Metrics ────────────────────────────────────────────────────────────────
 
-function AIMetricsPanel({ metrics }: { metrics: AIMetrics }) {
+function AIMetricsPanel({ metrics, sinceDate }: { metrics: AIMetrics; sinceDate: string }) {
+  const navigate = useNavigate();
+
+  // Every tile that stands for a set of tickets opens that set, matching the
+  // KPI strip above. Latency and confidence describe the model rather than a
+  // list of tickets, so they stay inert instead of navigating somewhere
+  // arbitrary.
+  const tiles: Array<{
+    label: string;
+    value: string | number;
+    className?: string;
+    to?: string;
+    hint?: string;
+  }> = [
+    {
+      label: 'Categorized',
+      value: metrics.total_categorized,
+      to: `/tickets?ai_categorized=1&created_from=${sinceDate}`,
+      hint: 'Show tickets the AI categorised',
+    },
+    {
+      label: 'Avg Confidence',
+      value: `${(metrics.avg_confidence * 100).toFixed(0)}%`,
+    },
+    {
+      label: 'High Risk',
+      value: metrics.high_risk_tickets,
+      className: metrics.high_risk_tickets > 0 ? 'text-[var(--err)]' : '',
+      to: '/tickets?status_group=open&ai_risk=high',
+      hint: 'Show open tickets the AI scored high risk',
+    },
+    {
+      label: 'AI-Assisted Resolved',
+      value: metrics.ai_assisted_resolved ?? metrics.auto_resolved,
+      // `status_group=closed` is exactly {resolved, closed} — the set the
+      // metric counts. Linking to status=resolved alone would drop every
+      // ticket that has since been closed and undercount the card.
+      to: `/tickets?status_group=closed&ai_categorized=1&resolved_from=${sinceDate}`,
+      hint: 'Show AI-triaged tickets that were resolved',
+    },
+    { label: 'Avg Latency', value: `${metrics.avg_latency_ms.toFixed(0)}ms` },
+  ];
+
   return (
     <div className="card-sm">
       <div className="flex items-center gap-2 mb-3">
@@ -276,17 +318,30 @@ function AIMetricsPanel({ metrics }: { metrics: AIMetrics }) {
         <span className="text-sm font-semibold text-[var(--tx)]">AI Metrics</span>
       </div>
       <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-        {[
-          { label: 'Categorized',    value: metrics.total_categorized, className: '' },
-          { label: 'Avg Confidence', value: `${(metrics.avg_confidence * 100).toFixed(0)}%`, className: '' },
-          { label: 'High Risk',      value: metrics.high_risk_tickets, className: metrics.high_risk_tickets > 0 ? 'text-[var(--err)]' : '' },
-          { label: 'Avg Latency',    value: `${metrics.avg_latency_ms.toFixed(0)}ms`, className: '' },
-        ].map(({ label, value, className }) => (
-          <div key={label} className="flex flex-col gap-0.5">
-            <span className="text-[10px] text-[var(--tx-3)] uppercase tracking-wide font-medium">{label}</span>
-            <span className={cn('text-xl font-bold tabular-nums text-[var(--tx)]', className)}>{value}</span>
-          </div>
-        ))}
+        {tiles.map(({ label, value, className, to, hint }) => {
+          const body = (
+            <>
+              <span className="text-[10px] text-[var(--tx-3)] uppercase tracking-wide font-medium">{label}</span>
+              <span className={cn('text-xl font-bold tabular-nums text-[var(--tx)]', className)}>{value}</span>
+            </>
+          );
+
+          return to ? (
+            <button
+              key={label}
+              type="button"
+              onClick={() => navigate(to)}
+              title={hint}
+              className="flex flex-col gap-0.5 text-left rounded-lg -mx-1 px-1 py-0.5
+                         hover:bg-[var(--inset)] focus-visible:outline-none
+                         focus-visible:ring-2 focus-visible:ring-[var(--brand)] transition-colors"
+            >
+              {body}
+            </button>
+          ) : (
+            <div key={label} className="flex flex-col gap-0.5">{body}</div>
+          );
+        })}
       </div>
     </div>
   );
@@ -423,7 +478,7 @@ export function DashboardPage() {
           ) : aiQuery.isError ? (
             <div className="card-sm text-xs text-[var(--tx-3)] text-center py-8">AI metrics unavailable</div>
           ) : aiQuery.data ? (
-            <AIMetricsPanel metrics={aiQuery.data} />
+            <AIMetricsPanel metrics={aiQuery.data} sinceDate={sevenDaysAgo} />
           ) : null}
         </div>
       </div>

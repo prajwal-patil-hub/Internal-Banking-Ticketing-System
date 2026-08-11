@@ -77,6 +77,14 @@ OPEN_STATUSES = (
 #: value rather than the enum member.
 OPEN_STATUS_VALUES: frozenset[str] = frozenset(s.value for s in OPEN_STATUSES)
 
+#: Boundaries for the AI risk bands, shared by the dashboard's "High Risk"
+#: tile and the `?ai_risk=` list filter. Defined once for the same reason
+#: OPEN_STATUSES is: when a tile's threshold and its drill-down's threshold
+#: are written out separately, they drift, and the card opens a list that
+#: contradicts the number on it.
+AI_RISK_HIGH_THRESHOLD: float = 0.7
+AI_RISK_MEDIUM_THRESHOLD: float = 0.4
+
 
 class TicketCategory(UUIDPKMixin, TimestampMixin, Base):
     __tablename__ = "ticket_categories"

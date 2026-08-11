@@ -20,7 +20,13 @@ from app.models.audit import AuditAction, AuditLog
 from app.models.comment import CommentSource, TicketComment
 from app.models.escalation import EscalationEvent, EscalationTrigger
 from app.models.ticket import OPEN_STATUSES as _OPEN_STATUSES
-from app.models.ticket import Ticket, TicketSource, TicketStatus
+from app.models.ticket import (
+    AI_RISK_HIGH_THRESHOLD,
+    AI_RISK_MEDIUM_THRESHOLD,
+    Ticket,
+    TicketSource,
+    TicketStatus,
+)
 from app.models.user import User
 from app.schemas.envelope import ok, paginated
 from app.services.org_service import get_accessible_org_unit_ids
@@ -251,6 +257,7 @@ async def list_tickets(
     source: Annotated[str | None, Query()] = None,
     status_group: Annotated[str | None, Query(pattern="^(open|closed)$")] = None,
     ai_categorized: Annotated[bool | None, Query()] = None,
+    ai_risk: Annotated[str | None, Query(pattern="^(high|medium|low)$")] = None,
     created_from: Annotated[str | None, Query()] = None,
     resolved_from: Annotated[str | None, Query()] = None,
     db: AsyncSession = Depends(get_session),
@@ -294,6 +301,21 @@ async def list_tickets(
         stmt = stmt.where(
             Ticket.ai_category.is_not(None) if ai_categorized
             else Ticket.ai_category.is_(None)
+        )
+
+    # Thresholds come from the model so this filter and the dashboard's
+    # "High Risk" tile cannot drift apart.
+    if ai_risk == "high":
+        stmt = stmt.where(Ticket.ai_risk_score >= AI_RISK_HIGH_THRESHOLD)
+    elif ai_risk == "medium":
+        stmt = stmt.where(
+            Ticket.ai_risk_score >= AI_RISK_MEDIUM_THRESHOLD,
+            Ticket.ai_risk_score < AI_RISK_HIGH_THRESHOLD,
+        )
+    elif ai_risk == "low":
+        stmt = stmt.where(
+            Ticket.ai_risk_score.is_not(None),
+            Ticket.ai_risk_score < AI_RISK_MEDIUM_THRESHOLD,
         )
 
     # Date bounds back the "today" cards (resolved today, arrived by email

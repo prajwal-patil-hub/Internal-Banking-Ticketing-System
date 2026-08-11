@@ -45,6 +45,9 @@ export interface AIMetrics {
   total_categorized: number;
   avg_confidence: number;
   high_risk_tickets: number;
+  /** AI-triaged tickets that went on to be resolved in the window. */
+  ai_assisted_resolved?: number;
+  /** Previous name for the field above; kept so an older API still renders. */
   auto_resolved: number;
   avg_latency_ms: number;
 }
