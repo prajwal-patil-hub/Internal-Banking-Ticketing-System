@@ -26,7 +26,17 @@ FROM base AS builder
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential \
     && rm -rf /var/lib/apt/lists/*
+# `app` as well as the manifest: `pyproject.toml` names it under
+# `[tool.setuptools] packages`, so `pip install .` fails with "package
+# directory 'app' does not exist" without it. Before that setting was added
+# the install quietly succeeded here by finding no packages at all and
+# building an empty distribution — the dependencies came from the later
+# `COPY . .` shadowing it.
+#
+# The cost is that a source change invalidates the dependency install. That is
+# the right trade against an image whose contents depend on which layer won.
 COPY pyproject.toml ./
+COPY app ./app
 # Into a virtualenv so the whole dependency tree can be copied as one
 # self-contained directory, leaving the compiler behind.
 RUN python -m venv /opt/venv \
@@ -39,7 +49,10 @@ FROM base AS dev
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential \
     && rm -rf /var/lib/apt/lists/*
+# Same reason as the builder stage: an editable install still resolves the
+# package directory named in pyproject.toml, so `app` has to be here first.
 COPY pyproject.toml ./
+COPY app ./app
 RUN pip install --upgrade pip && pip install -e ".[dev]"
 COPY . .
 EXPOSE 8000
