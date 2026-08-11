@@ -150,3 +150,77 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  # Builds both production images without pushing anything.
+  #
+  # Without this, a Dockerfile mistake is first discovered by CD — after the
+  # merge, at the moment somebody is trying to deploy. Building here means a
+  # broken image fails the pull request that introduced it. The runtime images
+  # are also where a missing system package shows up, which no amount of
+  # pytest will catch.
+  images:
+    name: Build ${{ matrix.component }} image
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: backend
+            context: ./backend
+          - component: frontend
+            context: ./frontend
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          target: prod
+          push: false
+          load: true
+          tags: ${{ matrix.component }}:ci
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
+
+      # A built image proves it compiles; running it proves it starts. These
+      # check what a Dockerfile edit is most likely to break — a dependency the
+      # entrypoint needs that never made it into the runtime layer.
+      - name: Smoke-test the backend image
+        if: matrix.component == 'backend'
+        run: |
+          # Settings are validated at import, so the app cannot be imported
+          # without them. These are throwaway values for the check only.
+          run() { docker run --rm \
+            -e DATABASE_URL=postgresql+asyncpg://u:p@localhost:5432/db \
+            -e JWT_SECRET=ci_smoke_secret_at_least_32_characters_long \
+            -e PASSWORD_PEPPER= \
+            backend:ci "$@"; }
+
+          run python -c "import app.main; print('app imports')"
+          # The compiler moved to a discarded stage; these must have survived
+          # with it. pg_dump/pg_restore are what backup.py shells out to, and
+          # curl is what the image's own HEALTHCHECK runs.
+          run pg_dump --version
+          run pg_restore --version
+          run sh -c 'command -v curl >/dev/null && echo "curl present (healthcheck)"'
+          # The image must not run as root.
+          test "$(run whoami)" = "appuser" && echo "runs as appuser"
+
+      - name: Smoke-test the frontend image
+        if: matrix.component == 'frontend'
+        run: |
+          # nginx resolves upstream hostnames when it reads the config, so
+          # `nginx -t` fails with "host not found in upstream" unless `backend`
+          # resolves — the same reason the container will not start without the
+          # backend on its network. Pointing it at localhost lets the config
+          # itself be validated.
+          docker run --rm --add-host backend:127.0.0.1 frontend:ci nginx -t
+          docker run --rm frontend:ci sh -c \
+            'test -f /usr/share/nginx/html/index.html && echo "bundle present"'
+          # The proxy block is the one that would silently 404 every API call
+          # if it were dropped.
+          docker run --rm frontend:ci grep -q "proxy_pass http://backend" \
+            /etc/nginx/conf.d/default.conf && echo "api proxy configured"
