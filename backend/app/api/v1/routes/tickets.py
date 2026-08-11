@@ -220,6 +220,13 @@ def _serialize_comment(comment: TicketComment) -> dict:
         "is_internal": comment.is_internal,
         "source": comment.source.value,
         "ai_generated": comment.ai_generated,
+        # Files sent with this reply, so the raiser sees an agent's fix next to
+        # the answer that explains it. Callers only ever reach a comment they
+        # are allowed to read, so no separate filter is needed here.
+        "attachments": [
+            _serialize_attachment(a)
+            for a in sorted(comment.attachments, key=lambda a: a.created_at)
+        ],
         "created_at": comment.created_at.isoformat(),
         "updated_at": comment.updated_at.isoformat(),
     }
@@ -1228,10 +1235,31 @@ async def get_ticket_timeline(
 # Attachments
 # ---------------------------------------------------------------------------
 
+def _attachment_is_internal(a: Attachment) -> bool:
+    """True when this file hangs off an internal note.
+
+    An internal comment is invisible to the person who raised the ticket, so
+    anything attached to it has to be invisible too. Filtering the note but
+    serving its attachment would leak exactly the content the flag exists to
+    withhold — and the file is usually the sensitive part.
+    """
+    return a.comment is not None and a.comment.is_internal
+
+
+def _visible_attachments(rows: list[Attachment], user: User) -> list[Attachment]:
+    """Drop what this user must not see. Applied server-side, never in the UI."""
+    if _is_branch_user(user):
+        return [a for a in rows if not _attachment_is_internal(a)]
+    return rows
+
+
 def _serialize_attachment(a: Attachment) -> dict:
     return {
         "id": str(a.id),
         "ticket_id": str(a.ticket_id),
+        # None means the file came in with the ticket; a value ties it to the
+        # reply it was sent with.
+        "comment_id": str(a.comment_id) if a.comment_id else None,
         "filename": a.original_filename,
         "content_type": a.content_type,
         "size_bytes": a.size_bytes,
@@ -1251,15 +1279,21 @@ async def list_attachments(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> dict:
+    """Every file on the ticket, including those sent with a reply.
+
+    Returned as one list so an agent hunting for "the statement they sent"
+    does not have to scroll the conversation to find it. Each row carries its
+    `comment_id`, so the UI can still say which reply a file arrived with.
+    """
     # Access is decided by the ticket, not the file: anyone who can read the
-    # ticket can read what is attached to it.
+    # ticket can read what is attached to it — with one exception, below.
     await _get_ticket_or_404(ticket_id, db, current_user)
-    rows = (await db.execute(
+    rows = list((await db.execute(
         select(Attachment)
         .where(Attachment.ticket_id == ticket_id)
         .order_by(Attachment.created_at.desc())
-    )).scalars().all()
-    return ok([_serialize_attachment(a) for a in rows])
+    )).scalars().all())
+    return ok([_serialize_attachment(a) for a in _visible_attachments(rows, current_user)])
 
 
 @router.post(
@@ -1271,10 +1305,19 @@ async def upload_attachment(
     ticket_id: uuid.UUID,
     request: Request,
     file: UploadFile = File(...),
+    comment_id: Annotated[uuid.UUID | None, Query(
+        description="Attach to this reply instead of the ticket itself.",
+    )] = None,
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> dict:
-    """Store a file against a ticket.
+    """Store a file against a ticket, or against one of its replies.
+
+    Both flows post the file after their anchor exists — the ticket is created
+    first and its evidence follows, a reply is posted and its solution file
+    follows. That ordering means a failed upload leaves a ticket or a reply
+    without its file, which the user can see and retry, rather than an orphaned
+    object in the bucket that nothing points at.
 
     The whole body is read into memory before validation because the size limit
     is small and streaming to storage before knowing the file is acceptable
@@ -1285,6 +1328,19 @@ async def upload_attachment(
 
     if not _can_modify_ticket(ticket, current_user):
         raise AuthorizationError("You do not have permission to modify this ticket.")
+
+    comment: TicketComment | None = None
+    if comment_id is not None:
+        comment = await db.get(TicketComment, comment_id)
+        # Checking the parent rather than trusting the id stops a file being
+        # hung off someone else's ticket by passing a foreign comment id.
+        if comment is None or comment.ticket_id != ticket_id:
+            raise NotFoundError(f"Comment {comment_id} not found on this ticket.")
+        # Only the author may add to their own reply. Without this an agent
+        # could append a file to the customer's message and it would read as
+        # something the customer had sent.
+        if comment.author_id != current_user.id:
+            raise AuthorizationError("You can only attach files to your own reply.")
 
     data = await file.read()
     extension = validate_upload(file.filename or "file", file.content_type or "", len(data))
@@ -1297,6 +1353,7 @@ async def upload_attachment(
     attachment = Attachment(
         id=uuid.uuid4(),
         ticket_id=ticket_id,
+        comment_id=comment_id,
         uploader_id=current_user.id,
         original_filename=safe_name,
         content_type=file.content_type or "application/octet-stream",
@@ -1349,6 +1406,12 @@ async def download_attachment(
 
     attachment = await db.get(Attachment, attachment_id)
     if attachment is None or attachment.ticket_id != ticket_id:
+        raise NotFoundError("Attachment not found on this ticket.")
+
+    # A file on an internal note is as invisible as the note. Reported as "not
+    # found" rather than "forbidden" so the response does not confirm that a
+    # hidden note exists — the id would otherwise be a probe.
+    if _is_branch_user(current_user) and _attachment_is_internal(attachment):
         raise NotFoundError("Attachment not found on this ticket.")
 
     try:

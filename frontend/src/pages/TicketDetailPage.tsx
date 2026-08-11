@@ -5,16 +5,21 @@ import { Button } from '@/components/Button';
 import { Badge } from '@/components/Badge';
 import { EscalationTimeline } from '@/components/EscalationTimeline';
 import { TicketAttachments } from '@/components/TicketAttachments';
+import { FileStager } from '@/components/FileStager';
 import { StatusBadge } from '@/components/StatusBadge';
 import { PriorityBadge } from '@/components/PriorityBadge';
 import { SLABadge } from '@/components/SLABadge';
 import { AIBadge } from '@/components/AIBadge';
 import { useAuth } from '@/store/auth';
 import { cn } from '@/lib/cn';
+import { extractError } from '@/lib/api';
+import { formatSize, fileGlyph } from '@/lib/files';
 import {
   getTicket,
   getComments,
   addComment,
+  uploadAttachments,
+  downloadAttachment,
   updateTicketStatus,
   aiSummarize,
   aiSuggest,
@@ -84,7 +89,9 @@ function DetailSkeleton() {
 
 // ── Comment ───────────────────────────────────────────────────────────────────
 
-function CommentItem({ comment }: { comment: Comment }) {
+function CommentItem({ comment, ticketId }: { comment: Comment; ticketId: string }) {
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const attachments = comment.attachments ?? [];
   const date = new Date(comment.created_at);
   const timeStr = date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) +
     ' ' + date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
@@ -114,6 +121,47 @@ function CommentItem({ comment }: { comment: Comment }) {
       <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap leading-relaxed pl-8">
         {comment.body}
       </p>
+
+      {/* Files sent with this reply. Rendered here rather than only in the
+          Attachments panel so the person who raised the ticket sees the fix
+          beside the answer that explains it. */}
+      {attachments.length > 0 && (
+        <div className="pl-8 flex flex-wrap gap-1.5 pt-0.5">
+          {attachments.map((a) => {
+            const glyph = fileGlyph(a.content_type);
+            return (
+              <button
+                key={a.id}
+                type="button"
+                onClick={() =>
+                  downloadAttachment(ticketId, a).catch((e) =>
+                    setDownloadError(extractError(e).message),
+                  )
+                }
+                title={`Download ${a.filename} (${formatSize(a.size_bytes)})`}
+                className="flex items-center gap-1.5 max-w-[15rem] px-2 py-1 rounded-md
+                           bg-[var(--inset)] hover:bg-[var(--line)] transition-colors
+                           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]"
+              >
+                <svg className={cn('h-3.5 w-3.5 shrink-0', glyph.tone)} viewBox="0 0 24 24"
+                     fill="none" stroke="currentColor" strokeWidth="2"
+                     strokeLinecap="round" strokeLinejoin="round">
+                  <path d={glyph.path} />
+                </svg>
+                <span className="text-[11px] font-medium text-[var(--tx-2)] truncate">
+                  {a.filename}
+                </span>
+                <span className="text-[10px] text-[var(--tx-3)] shrink-0">
+                  {formatSize(a.size_bytes)}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {downloadError && (
+        <p className="pl-8 text-[10px] text-[var(--err)]">{downloadError}</p>
+      )}
     </div>
   );
 }
@@ -205,6 +253,9 @@ export function TicketDetailPage() {
 
   const [commentText, setCommentText] = useState('');
   const [isInternal, setIsInternal] = useState(false);
+  const [replyFiles, setReplyFiles] = useState<File[]>([]);
+  const [replyNote,  setReplyNote]  = useState<string | null>(null);
+  const [replyError, setReplyError] = useState<string | null>(null);
   const [aiSummaryResult, setAISummaryResult] = useState<{ summary: string; sentiment: string; risk_score: number } | null>(null);
   const [aiSuggestResult, setAISuggestResult] = useState<{ suggestions: string[]; next_actions: string[] } | null>(null);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -222,7 +273,39 @@ export function TicketDetailPage() {
   const auditQuery    = useQuery({ queryKey: ['audit', 'ticket', id],           queryFn: () => getAuditLog({ entity_type: 'ticket', page: 1, page_size: 15 }), enabled: !!id && isAgent, staleTime: STALE });
 
   const statusMutation  = useMutation({ mutationFn: ({ status, comment }: { status: TicketStatus; comment?: string }) => updateTicketStatus(id!, status, comment), onSuccess: (updated) => queryClient.setQueryData(['tickets', id], updated) });
-  const commentMutation = useMutation({ mutationFn: () => addComment(id!, commentText, isInternal), onSuccess: () => { setCommentText(''); queryClient.invalidateQueries({ queryKey: ['tickets', id, 'comments'] }); } });
+  // Post the reply, then attach its files. The comment is the anchor the
+  // files hang off, so it has to exist first; a failed upload therefore
+  // leaves a posted reply missing a file, which the composer reports and the
+  // user can retry, rather than an orphaned object in the bucket.
+  const commentMutation = useMutation({
+    mutationFn: async () => {
+      const comment = await addComment(id!, commentText, isInternal);
+      if (replyFiles.length === 0) return { failed: [] as string[] };
+
+      setReplyNote(`Uploading ${replyFiles.length} file${replyFiles.length > 1 ? 's' : ''}…`);
+      const outcomes = await uploadAttachments(id!, replyFiles, {
+        commentId: comment.id,
+        onProgress: (done, total) => setReplyNote(`Uploading file ${done} of ${total}…`),
+      });
+      return { failed: outcomes.filter((o) => !o.ok).map((o) => o.file.name) };
+    },
+    onSuccess: ({ failed }) => {
+      setReplyNote(null);
+      setCommentText('');
+      setReplyFiles([]);
+      setReplyError(
+        failed.length
+          ? `Comment posted, but these files did not upload: ${failed.join(', ')}`
+          : null,
+      );
+      queryClient.invalidateQueries({ queryKey: ['tickets', id, 'comments'] });
+      queryClient.invalidateQueries({ queryKey: ['attachments', id] });
+    },
+    onError: () => {
+      setReplyNote(null);
+      setReplyError('Failed to post comment.');
+    },
+  });
   const summarizeMutation = useMutation({ mutationFn: () => aiSummarize(id!), onSuccess: (r) => { setAISummaryResult(r); setAiExpanded(true); } });
   const suggestMutation   = useMutation({ mutationFn: () => aiSuggest(id!),   onSuccess: (r) => { setAISuggestResult(r); setShowSuggestions(true); setAiExpanded(true); } });
   const pauseSLAMutation  = useMutation({ mutationFn: () => pauseSLA(id!),    onSuccess: (u) => queryClient.setQueryData(['tickets', id], u) });
@@ -245,6 +328,12 @@ export function TicketDetailPage() {
 
   const ticket: Ticket = ticketQuery.data;
   const comments: Comment[] = commentsQuery.data ?? [];
+
+  // The person who raised the ticket can answer on it — send the account
+  // number an agent asked for, or the screenshot they were asked to retake.
+  // The API has always allowed this; the box was hidden, which left the
+  // conversation one-way and pushed the reply out to email.
+  const canReply = canWrite || ticket.reporter_id === user?.id;
   const availableTransitions = STATUS_TRANSITIONS[ticket.status] ?? [];
   const hasAI = !!(ticket.ai_summary || aiSummaryResult || aiSuggestResult);
 
@@ -446,22 +535,32 @@ export function TicketDetailPage() {
               ) : (
                 comments
                   .filter((c) => isAgent || !c.is_internal)
-                  .map((c) => <CommentItem key={c.id} comment={c} />)
+                  .map((c) => <CommentItem key={c.id} comment={c} ticketId={id!} />)
               )}
             </div>
 
             {/* Add comment. Hidden for read-only roles rather than shown and
                 rejected — offering a control the server refuses is worse than
                 not offering it. */}
-            {canWrite && (
+            {canReply && (
             <div className="border-t border-slate-100 dark:border-slate-800 pt-3 flex flex-col gap-2">
               <textarea
                 className="input resize-none text-sm"
                 rows={3}
-                placeholder="Write a comment…"
+                placeholder={canWrite ? 'Write a reply…' : 'Add more detail for the agent…'}
                 value={commentText}
                 onChange={(e) => setCommentText(e.target.value)}
               />
+
+              {/* Files travel with this reply, so an agent's fix lands beside
+                  the answer explaining it instead of in a shared pile. */}
+              <FileStager
+                files={replyFiles}
+                onChange={setReplyFiles}
+                disabled={commentMutation.isPending}
+                compact
+              />
+
               <div className="flex items-center justify-between">
                 {canWrite && (
                   <label className="flex items-center gap-2 cursor-pointer select-none text-xs text-slate-500 dark:text-slate-400">
@@ -472,9 +571,17 @@ export function TicketDetailPage() {
                       onChange={(e) => setIsInternal(e.target.checked)}
                     />
                     Internal note
+                    {replyFiles.length > 0 && isInternal && (
+                      <span className="text-[10px] text-amber-600 dark:text-amber-400">
+                        · files stay hidden from the requester too
+                      </span>
+                    )}
                   </label>
                 )}
-                <div className="ml-auto">
+                <div className="ml-auto flex items-center gap-3">
+                  {replyNote && (
+                    <span className="text-xs text-[var(--tx-3)]">{replyNote}</span>
+                  )}
                   <Button
                     disabled={!commentText.trim() || commentMutation.isPending}
                     onClick={() => commentMutation.mutate()}
@@ -483,8 +590,8 @@ export function TicketDetailPage() {
                   </Button>
                 </div>
               </div>
-              {commentMutation.isError && (
-                <p className="text-xs text-red-600">Failed to post comment.</p>
+              {replyError && (
+                <p className="text-xs text-red-600">{replyError}</p>
               )}
             </div>
             )}

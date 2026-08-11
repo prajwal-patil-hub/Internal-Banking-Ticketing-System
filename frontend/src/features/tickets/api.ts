@@ -1,4 +1,4 @@
-import { api, AI_TIMEOUT_MS } from '@/lib/api';
+import { api, AI_TIMEOUT_MS, extractError } from '@/lib/api';
 
 export type TicketStatus =
   | 'new'
@@ -83,6 +83,8 @@ export interface Comment {
   is_internal: boolean;
   source: string;
   ai_generated: boolean;
+  /** Files sent with this reply. Absent on responses from an older server. */
+  attachments?: Attachment[];
   created_at: string;
 }
 
@@ -290,6 +292,8 @@ export async function escalateTicket(
 export interface Attachment {
   id: string;
   ticket_id: string;
+  /** null when the file came in with the ticket; set when sent with a reply. */
+  comment_id: string | null;
   filename: string;
   content_type: string;
   size_bytes: number;
@@ -306,15 +310,60 @@ export async function listAttachments(ticketId: string): Promise<Attachment[]> {
   return data.data;
 }
 
-export async function uploadAttachment(ticketId: string, file: File): Promise<Attachment> {
+/**
+ * Upload one file. Pass `commentId` to hang it off a reply rather than the
+ * ticket — that is what puts an agent's fix next to the answer explaining it.
+ */
+export async function uploadAttachment(
+  ticketId: string,
+  file: File,
+  commentId?: string,
+): Promise<Attachment> {
   const form = new FormData();
   form.append('file', file);
   const { data } = await api.post(`/tickets/${ticketId}/attachments`, form, {
+    params: commentId ? { comment_id: commentId } : undefined,
     // Uploads are slower than JSON calls and the default 15s is too tight for
     // a 15MB file on a slow link.
     timeout: 120_000,
   });
   return data.data;
+}
+
+/** What the server accepts. Kept here so the picker and the hint agree. */
+export const ATTACHMENT_ACCEPT =
+  'image/*,.pdf,.txt,.csv,.xlsx,.xls,.doc,.docx';
+
+export interface UploadOutcome {
+  file: File;
+  ok: boolean;
+  error?: string;
+}
+
+/**
+ * Upload several files, reporting each one's fate rather than failing the set.
+ *
+ * Uploads run one at a time on purpose: a ticket raised with five screenshots
+ * would otherwise open five concurrent multipart requests, and the failure
+ * that matters (the store being down) is the one where firing them in parallel
+ * helps least.
+ */
+export async function uploadAttachments(
+  ticketId: string,
+  files: File[],
+  opts: { commentId?: string; onProgress?: (done: number, total: number) => void } = {},
+): Promise<UploadOutcome[]> {
+  const results: UploadOutcome[] = [];
+  for (const [index, file] of files.entries()) {
+    try {
+      await uploadAttachment(ticketId, file, opts.commentId);
+      results.push({ file, ok: true });
+    } catch (err) {
+      results.push({ file, ok: false, error: extractError(err).message });
+    }
+    opts.onProgress?.(index + 1, files.length);
+  }
+  return results;
 }
 
 /**

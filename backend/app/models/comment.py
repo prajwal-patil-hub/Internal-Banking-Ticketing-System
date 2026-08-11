@@ -53,3 +53,10 @@ class TicketComment(UUIDPKMixin, TimestampMixin, Base):
     author: Mapped[User | None] = relationship(  # type: ignore[name-defined]  # noqa: F821
         foreign_keys=[author_id], lazy="selectin"
     )
+    #: Files sent with this reply. Eager-loaded because the ticket page renders
+    #: them under every comment — lazy loading here would be a query per reply.
+    attachments: Mapped[list[Attachment]] = relationship(  # type: ignore[name-defined]  # noqa: F821
+        back_populates="comment",
+        lazy="selectin",
+        cascade="all, delete-orphan",
+    )

@@ -2,6 +2,7 @@ import { useRef, useState, type DragEvent } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { cn } from '@/lib/cn';
 import { extractError } from '@/lib/api';
+import { formatSize, fileGlyph } from '@/lib/files';
 import { useAuth } from '@/store/auth';
 import {
   listAttachments,
@@ -11,27 +12,6 @@ import {
   MAX_ATTACHMENT_BYTES,
   type Attachment,
 } from '@/features/tickets/api';
-
-/** 1.4 MB rather than 1468006 bytes. */
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
-
-/** A glyph per family, so the list is scannable without reading extensions. */
-function fileGlyph(contentType: string): { path: string; tone: string } {
-  if (contentType.startsWith('image/')) {
-    return { path: 'M4 5h16v14H4zM8.5 11a1.5 1.5 0 100-3 1.5 1.5 0 000 3zM4 16l4.5-4.5L14 17', tone: 'text-[var(--brand)]' };
-  }
-  if (contentType === 'application/pdf') {
-    return { path: 'M6 2h8l4 4v16H6zM14 2v4h4M9 13h6M9 17h4', tone: 'text-[var(--err)]' };
-  }
-  if (contentType.includes('sheet') || contentType.includes('excel') || contentType === 'text/csv') {
-    return { path: 'M6 2h8l4 4v16H6zM14 2v4h4M9 12h6M9 16h6M12 12v4', tone: 'text-[var(--ok)]' };
-  }
-  return { path: 'M6 2h8l4 4v16H6zM14 2v4h4M9 13h6M9 17h4', tone: 'text-[var(--tx-3)]' };
-}
 
 export function TicketAttachments({
   ticketId, canModify,
@@ -129,6 +109,10 @@ export function TicketAttachments({
                   <p className="text-[10px] text-[var(--tx-3)]">
                     {formatSize(a.size_bytes)}
                     {a.uploader && ` · ${a.uploader.full_name}`}
+                    {/* This panel is the file index for the whole ticket, so
+                        it lists reply files too. Marking them keeps it clear
+                        which arrived with the ticket and which with an answer. */}
+                    {a.comment_id && ' · from a reply'}
                   </p>
                 </div>
                 <button

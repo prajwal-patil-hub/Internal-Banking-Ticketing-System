@@ -5,8 +5,9 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { Button } from '@/components/Button';
+import { FileStager } from '@/components/FileStager';
 import { cn } from '@/lib/cn';
-import { createTicket, getCategories } from '@/features/tickets/api';
+import { createTicket, getCategories, uploadAttachments } from '@/features/tickets/api';
 import { categorizeText } from '@/features/ai/api';
 import type { TicketPriority, Category } from '@/features/tickets/api';
 import type { CategorizeResponse } from '@/features/ai/api';
@@ -172,6 +173,8 @@ export function CreateTicketPage() {
   const navigate = useNavigate();
   const [aiSuggestion, setAISuggestion] = useState<CategorizeResponse | null>(null);
   const [submitError,  setSubmitError]  = useState<string | null>(null);
+  const [files,        setFiles]        = useState<File[]>([]);
+  const [uploadNote,   setUploadNote]   = useState<string | null>(null);
 
   const categoriesQuery = useQuery({ queryKey: ['categories'], queryFn: getCategories, staleTime: 5 * 60_000 });
   const categories: Category[] = categoriesQuery.data ?? [];
@@ -186,10 +189,34 @@ export function CreateTicketPage() {
     onSuccess: (r) => setAISuggestion(r),
   });
 
+  // Files can only be uploaded once the ticket has an id, so this is two
+  // phases rather than one multipart request. The ticket is what matters: if
+  // an upload fails the ticket still exists, the user lands on it, and the
+  // page says which files to re-attach — rather than losing a written-out
+  // problem report because a screenshot did not go through.
   const createMutation = useMutation({
-    mutationFn: createTicket,
-    onSuccess: (ticket) => navigate(`/tickets/${ticket.id}`),
-    onError: () => setSubmitError('Failed to create ticket. Please try again.'),
+    mutationFn: async (input: Parameters<typeof createTicket>[0]) => {
+      const ticket = await createTicket(input);
+      if (files.length === 0) return { ticket, failed: [] as string[] };
+
+      setUploadNote(`Uploading ${files.length} file${files.length > 1 ? 's' : ''}…`);
+      const outcomes = await uploadAttachments(ticket.id, files, {
+        onProgress: (done, total) => setUploadNote(`Uploading file ${done} of ${total}…`),
+      });
+      return { ticket, failed: outcomes.filter((o) => !o.ok).map((o) => o.file.name) };
+    },
+    onSuccess: ({ ticket, failed }) => {
+      setUploadNote(null);
+      navigate(`/tickets/${ticket.id}`, {
+        state: failed.length
+          ? { attachmentWarning: `These files did not upload: ${failed.join(', ')}. You can attach them from this page.` }
+          : undefined,
+      });
+    },
+    onError: () => {
+      setUploadNote(null);
+      setSubmitError('Failed to create ticket. Please try again.');
+    },
   });
 
   const acceptSuggestion = (priority: TicketPriority, categoryId?: string) => {
@@ -325,6 +352,22 @@ export function CreateTicketPage() {
           </div>
         </div>
 
+        {/* Attachments card */}
+        <div className="card-sm !p-5">
+          <h2 className="text-sm font-semibold text-[var(--tx-2)] mb-1">Attachments</h2>
+          <p className="text-xs text-[var(--tx-3)] mb-4">
+            A screenshot of the error, the statement in question, or a spreadsheet of
+            the affected transactions — anything that shows the problem is usually
+            faster than describing it.
+          </p>
+          <FileStager
+            files={files}
+            onChange={setFiles}
+            disabled={createMutation.isPending}
+            compact
+          />
+        </div>
+
         {/* Submit error */}
         {submitError && (
           <div className="card-sm flex items-center gap-2 text-sm text-[var(--err)]" style={{ borderLeft: '3px solid var(--err)' }}>
@@ -337,6 +380,9 @@ export function CreateTicketPage() {
 
         {/* Actions */}
         <div className="flex items-center gap-3 justify-end">
+          {uploadNote && (
+            <span className="text-xs text-[var(--tx-3)] mr-auto">{uploadNote}</span>
+          )}
           <Button type="button" variant="ghost" onClick={() => navigate('/tickets')}>Cancel</Button>
           <Button type="submit" disabled={isSubmitting || createMutation.isPending}>
             {createMutation.isPending ? 'Creating…' : 'Create Ticket'}
