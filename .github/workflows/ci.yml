@@ -5,6 +5,9 @@ on:
     branches: [main, "claude/**"]
   pull_request:
     branches: [main]
+  # Lets CD reuse these exact checks instead of trusting that some earlier run
+  # was green — see .github/workflows/cd.yml.
+  workflow_call:
 
 # A second push to the same branch makes the first run's answer irrelevant.
 concurrency:

@@ -1,0 +1,28 @@
+# The important line is `.env`.
+#
+# The Dockerfile ends with `COPY . .`, and the README tells every developer to
+# run `cp .env.example .env`. Without this file that .env — JWT secret,
+# password pepper, database and S3 credentials — is copied into the production
+# image, where `docker history` will show it to anyone who can pull the image.
+.env
+.env.*
+!.env.example
+
+# Local state that has no meaning inside a container, and would invalidate the
+# layer cache on every build.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.venv/
+venv/
+
+# Backups can be gigabytes and contain a full copy of the database.
+backups/
+
+.git/
+.gitignore

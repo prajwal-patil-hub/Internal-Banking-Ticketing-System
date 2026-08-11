@@ -8,7 +8,7 @@
 #   backend   : FastAPI app (hot reload in dev)
 #   frontend  : Vite dev server (hot reload)
 #
-# Production deploys do NOT use this file — see infra/nginx + per-service Dockerfiles.
+# Production deploys do NOT use this file — see infra/docker-compose.prod.yml.
 
 name: success-bank
 

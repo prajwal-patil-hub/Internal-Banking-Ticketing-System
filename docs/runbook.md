@@ -86,11 +86,29 @@ corrupt" — it is "nobody noticed the bucket credentials changed six weeks ago"
 
 ## Deploying
 
+Images are built and published by CI, not on the deployment host — what runs
+in production is the artefact that passed the gates. Pushing to `main` or a
+`v*` tag runs `.github/workflows/cd.yml`, which reruns the full CI suite and
+then publishes `backend` and `frontend` to GHCR.
+
+First time on a host:
+
 ```bash
-docker compose -f infra/docker-compose.yml build
-docker compose -f infra/docker-compose.yml up -d
-docker compose -f infra/docker-compose.yml exec backend alembic upgrade head
+cp infra/.env.prod.example infra/.env.prod   # fill in every REQUIRED value
 ```
+
+Every deploy:
+
+```bash
+export IMAGE_TAG=sha-<commit>      # the CD run's summary prints this
+cd infra
+docker compose -f docker-compose.prod.yml --env-file .env.prod pull
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+docker compose -f docker-compose.prod.yml --env-file .env.prod exec backend alembic upgrade head
+```
+
+Prefer the `sha-` tag over `latest`. During an incident the first question is
+"which build is running?", and `latest` cannot answer it.
 
 Migrations run as a separate step, not on container start: two backend
 replicas booting together would otherwise race on the same migration.
@@ -98,12 +116,23 @@ replicas booting together would otherwise race on the same migration.
 **Back up before migrating.** Some migrations drop columns; `0006` drops four.
 There is no undo beyond a restore.
 
+### What the production stack does differently
+
+- Only the frontend publishes a port. Postgres, Redis and MinIO are reachable
+  on the internal network and nowhere else.
+- No source is mounted. The image is the artefact.
+- Every secret is a required variable — `${VAR:?}` — so a missing one stops
+  the deploy instead of quietly falling back to a development default.
+- Nothing terminates TLS. Put a reverse proxy or load balancer in front before
+  this is reachable from anywhere untrusted.
+
 ### Rolling back
 
 Application only — code back, schema forward:
 
 ```bash
-docker compose -f infra/docker-compose.yml up -d --no-deps backend=<previous-tag>
+IMAGE_TAG=sha-<previous-commit> \
+  docker compose -f infra/docker-compose.prod.yml --env-file infra/.env.prod up -d
 ```
 
 Safe when the migration was additive. If the release dropped or narrowed a
