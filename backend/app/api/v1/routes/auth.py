@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.deps import get_current_user, get_session
 from app.core.exceptions import AuthenticationError, ValidationError
 from app.core.logging import get_logger
-from app.models.mfa import MFABackupCode
 from app.core.security import (
     decode_token,
     generate_backup_codes,
@@ -22,6 +21,7 @@ from app.core.security import (
     verify_password,
     verify_totp,
 )
+from app.models.mfa import MFABackupCode
 from app.models.user import User
 from app.repositories.user_repo import (
     LoginAttemptRepository,

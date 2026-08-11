@@ -23,7 +23,10 @@ class Settings(BaseSettings):
     APP_ENV: Literal["development", "staging", "production"] = "development"
     APP_NAME: str = "SUCCESS Bank API"
     APP_DEBUG: bool = False
-    APP_HOST: str = "0.0.0.0"
+    # Binds all interfaces because the process runs inside a container and is
+    # reached from outside it; 127.0.0.1 would be unreachable. Exposure is
+    # decided by the compose/ingress port mapping, not here.
+    APP_HOST: str = "0.0.0.0"  # noqa: S104
     APP_PORT: int = 8000
     LOG_LEVEL: str = "INFO"
 

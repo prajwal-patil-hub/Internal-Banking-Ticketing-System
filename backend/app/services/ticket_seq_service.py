@@ -11,7 +11,7 @@ Example: branch code "12345", year 2026, first ticket → "123452600001"
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,7 +21,7 @@ from app.models.org import OrgUnit, TicketSequence
 
 async def generate_ticket_number(db: AsyncSession, org_unit_id: uuid.UUID) -> str:
     """Generate the next ticket number for the given org unit atomically."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     year_2d = now.year % 100
 
     # Fetch org unit for its code
@@ -60,6 +60,7 @@ async def generate_ticket_number(db: AsyncSession, org_unit_id: uuid.UUID) -> st
 async def generate_ticket_number_legacy(db: AsyncSession) -> str:
     """Fallback ticket number for users without an org_unit (legacy format)."""
     from sqlalchemy import func
+
     from app.models.ticket import Ticket
 
     result = await db.execute(select(func.count(Ticket.id)))

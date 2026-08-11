@@ -37,7 +37,12 @@ class EscalationRule(UUIDPKMixin, TimestampMixin, Base):
         index=True,
     )
     trigger: Mapped[EscalationTrigger] = mapped_column(
-        Enum(EscalationTrigger, name="escalationtrigger", values_callable=lambda x: [e.value for e in x]), nullable=False
+        Enum(
+            EscalationTrigger,
+            name="escalationtrigger",
+            values_callable=lambda x: [e.value for e in x],
+        ),
+        nullable=False,
     )
     trigger_after_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     escalate_to_role: Mapped[str] = mapped_column(String(50), nullable=False)

@@ -13,7 +13,6 @@ import pytest
 from app.core.exceptions import ValidationError
 from app.services.report_service import _chart_grid
 
-
 # ---------------------------------------------------------------------------
 # Rows keyed by column — what the frontend sends
 # ---------------------------------------------------------------------------
@@ -40,7 +39,7 @@ def test_declared_columns_win_over_inference() -> None:
 
 
 def test_a_missing_key_becomes_blank_not_an_error() -> None:
-    columns, rows = _chart_grid({
+    _columns, rows = _chart_grid({
         "columns": ["status", "count"],
         "rows": [{"status": "New"}],
     })

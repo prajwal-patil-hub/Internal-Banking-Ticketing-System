@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import get_current_user, get_session, require_roles
 from app.models.escalation import EscalationEvent, EscalationRule
-from app.models.ticket import Ticket
 from app.models.user import User
 from app.schemas.envelope import ok, paginated
 

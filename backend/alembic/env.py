@@ -9,13 +9,9 @@ from __future__ import annotations
 import asyncio
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
-
-from app.core.config import settings
-from app.db.base import Base
 
 # Importing the model package registers every table on Base.metadata. Without
 # it that metadata is empty, autogenerate proposes dropping the entire schema,
@@ -23,6 +19,9 @@ from app.db.base import Base
 # from the database — which is how `inbound_emails` ended up missing eleven
 # columns the model had been declaring for some time.
 import app.models  # noqa: F401
+from alembic import context
+from app.core.config import settings
+from app.db.base import Base
 
 config = context.config
 if config.config_file_name is not None:

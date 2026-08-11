@@ -19,7 +19,6 @@ from app.models.attachment import Attachment
 from app.models.audit import AuditAction, AuditLog
 from app.models.comment import CommentSource, TicketComment
 from app.models.escalation import EscalationEvent, EscalationTrigger
-from app.models.ticket import OPEN_STATUSES as _OPEN_STATUSES
 from app.models.ticket import (
     AI_RISK_HIGH_THRESHOLD,
     AI_RISK_MEDIUM_THRESHOLD,
@@ -27,6 +26,7 @@ from app.models.ticket import (
     TicketSource,
     TicketStatus,
 )
+from app.models.ticket import OPEN_STATUSES as _OPEN_STATUSES
 from app.models.user import User
 from app.schemas.envelope import ok, paginated
 from app.services.org_service import get_accessible_org_unit_ids
@@ -98,9 +98,7 @@ def _can_modify_ticket(ticket: Ticket, user: User) -> bool:
     if ticket.assignee_id and str(ticket.assignee_id) == str(user.id):
         return True
     # Legacy agent/admin/supervisor roles
-    if user.role.name in _AGENT_ROLES:
-        return True
-    return False
+    return user.role.name in _AGENT_ROLES
 
 
 async def _get_ticket_or_404(
@@ -157,6 +155,24 @@ async def _record_audit(
     db.add(log_entry)
 
 
+def _person_ref(user: User | None) -> dict | None:
+    """The shape every person field on a ticket uses.
+
+    Written out five times before this, once per field, which is how
+    `full_name` ended up present on some and absent on others.
+    """
+    if user is None:
+        return None
+    return {"id": str(user.id), "email": user.email, "full_name": user.full_name}
+
+
+def _lookup_ref(row) -> dict | None:
+    """Same idea for the code/name lookups — category, subcategory."""
+    if row is None:
+        return None
+    return {"id": str(row.id), "code": row.code, "name": row.name}
+
+
 def _serialize_ticket(ticket: Ticket) -> dict:
     return {
         "id": str(ticket.id),
@@ -168,12 +184,12 @@ def _serialize_ticket(ticket: Ticket) -> dict:
         "source": ticket.source.value,
         "category_id": str(ticket.category_id) if ticket.category_id else None,
         "subcategory_id": str(ticket.subcategory_id) if ticket.subcategory_id else None,
-        "category": {"id": str(ticket.category.id), "code": ticket.category.code, "name": ticket.category.name} if ticket.category else None,
-        "subcategory": {"id": str(ticket.subcategory.id), "code": ticket.subcategory.code, "name": ticket.subcategory.name} if ticket.subcategory else None,
+        "category": _lookup_ref(ticket.category),
+        "subcategory": _lookup_ref(ticket.subcategory),
         "reporter_id": str(ticket.reporter_id),
-        "reporter": {"id": str(ticket.reporter.id), "email": ticket.reporter.email, "full_name": ticket.reporter.full_name} if ticket.reporter else None,
+        "reporter": _person_ref(ticket.reporter),
         "assignee_id": str(ticket.assignee_id) if ticket.assignee_id else None,
-        "assignee": {"id": str(ticket.assignee.id), "email": ticket.assignee.email, "full_name": ticket.assignee.full_name} if ticket.assignee else None,
+        "assignee": _person_ref(ticket.assignee),
         "branch_id": str(ticket.branch_id) if ticket.branch_id else None,
         "org_unit_id": str(ticket.org_unit_id) if ticket.org_unit_id else None,
         "org_unit": {
@@ -215,7 +231,7 @@ def _serialize_comment(comment: TicketComment) -> dict:
         "id": str(comment.id),
         "ticket_id": str(comment.ticket_id),
         "author_id": str(comment.author_id) if comment.author_id else None,
-        "author": {"id": str(comment.author.id), "email": comment.author.email, "full_name": comment.author.full_name} if comment.author else None,
+        "author": _person_ref(comment.author),
         "body": comment.body,
         "is_internal": comment.is_internal,
         "source": comment.source.value,
@@ -768,7 +784,11 @@ async def mark_duplicate(
         user=current_user,
         request=request,
         old_values={"is_duplicate": False},
-        new_values={"is_duplicate": True, "duplicate_of_id": str(original_id), "original_ticket_number": original.ticket_number},
+        new_values={
+            "is_duplicate": True,
+            "duplicate_of_id": str(original_id),
+            "original_ticket_number": original.ticket_number,
+        },
     )
     await db.commit()
     await db.refresh(ticket)
@@ -987,7 +1007,10 @@ async def ai_summarize(
         raise ValidationError("AI features are not enabled.")
 
     result = {
-        "summary": ticket.ai_summary or "AI summary not yet generated. The ticket will be categorized on the next processing cycle.",
+        "summary": ticket.ai_summary or (
+            "AI summary not yet generated. The ticket will be categorized "
+            "on the next processing cycle."
+        ),
         "sentiment": ticket.ai_sentiment or "neutral",
         "risk_score": ticket.ai_risk_score or 0.0,
     }
@@ -1032,7 +1055,11 @@ async def ai_suggest(
         "Escalate to the relevant department head if unresolved within SLA.",
     ]
     if ticket.ai_category:
-        suggestions.insert(0, f"Based on AI categorization ({ticket.ai_category}): verify all related systems are checked.")
+        suggestions.insert(
+            0,
+            f"Based on AI categorization ({ticket.ai_category}): "
+            "verify all related systems are checked.",
+        )
 
     result = {
         "suggestions": suggestions,

@@ -3,18 +3,18 @@
 from __future__ import annotations
 
 import uuid
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Annotated
 
 from app.api.v1.deps import get_current_user, get_session, require_roles
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.models.org import HierarchyLevel, OrgRole, OrgUnit
 from app.models.user import User
 from app.schemas.envelope import ok, paginated
-from app.services.org_service import get_subtree_ids, get_hierarchy_chain
+from app.services.org_service import get_hierarchy_chain, get_subtree_ids
 
 router = APIRouter(prefix="/org", tags=["org"])
 

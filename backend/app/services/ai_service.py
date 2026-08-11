@@ -152,7 +152,8 @@ class AIService:
         source_email: str | None = None,
     ) -> AICategorizationResult:
         """Use GLM-4 to categorize a banking support ticket."""
-        prompt = f"""You are an expert banking operations analyst at SUCCESS Bank. Analyze this support ticket and provide structured categorization.
+        prompt = f"""You are an expert banking operations analyst at SUCCESS Bank.
+Analyze this support ticket and provide structured categorization.
 
 Banking domains: payments, fraud, kyc, loans, compliance, it, operations, treasury, dispute, reconciliation, access
 

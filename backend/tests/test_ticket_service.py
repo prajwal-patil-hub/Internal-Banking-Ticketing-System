@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -38,8 +37,8 @@ def _make_ticket(**kwargs):
     )
     for k, v in kwargs.items():
         setattr(t, k, v)
-    t.created_at = datetime.now(timezone.utc)
-    t.updated_at = datetime.now(timezone.utc)
+    t.created_at = datetime.now(UTC)
+    t.updated_at = datetime.now(UTC)
     return t
 
 
@@ -49,58 +48,58 @@ def _make_ticket(**kwargs):
 
 def test_valid_transitions_mapping() -> None:
     """All 9 statuses have entries in the FSM table."""
-    from app.services.ticket_service import VALID_TRANSITIONS
     from app.models.ticket import TicketStatus
+    from app.services.ticket_service import VALID_TRANSITIONS
 
     for status in TicketStatus:
         assert status in VALID_TRANSITIONS, f"Missing FSM entry for {status}"
 
 
 def test_new_ticket_can_transition_to_acknowledged() -> None:
-    from app.services.ticket_service import VALID_TRANSITIONS
     from app.models.ticket import TicketStatus
+    from app.services.ticket_service import VALID_TRANSITIONS
 
     assert TicketStatus.ACKNOWLEDGED in VALID_TRANSITIONS[TicketStatus.NEW]
 
 
 def test_new_ticket_cannot_transition_to_resolved() -> None:
-    from app.services.ticket_service import VALID_TRANSITIONS
     from app.models.ticket import TicketStatus
+    from app.services.ticket_service import VALID_TRANSITIONS
 
     assert TicketStatus.RESOLVED not in VALID_TRANSITIONS[TicketStatus.NEW]
 
 
 def test_resolved_ticket_can_reopen() -> None:
-    from app.services.ticket_service import VALID_TRANSITIONS
     from app.models.ticket import TicketStatus
+    from app.services.ticket_service import VALID_TRANSITIONS
 
     assert TicketStatus.REOPENED in VALID_TRANSITIONS[TicketStatus.RESOLVED]
 
 
 def test_closed_ticket_can_reopen() -> None:
-    from app.services.ticket_service import VALID_TRANSITIONS
     from app.models.ticket import TicketStatus
+    from app.services.ticket_service import VALID_TRANSITIONS
 
     assert TicketStatus.REOPENED in VALID_TRANSITIONS[TicketStatus.CLOSED]
 
 
 def test_in_progress_can_escalate() -> None:
-    from app.services.ticket_service import VALID_TRANSITIONS
     from app.models.ticket import TicketStatus
+    from app.services.ticket_service import VALID_TRANSITIONS
 
     assert TicketStatus.ESCALATED in VALID_TRANSITIONS[TicketStatus.IN_PROGRESS]
 
 
 def test_in_progress_can_go_on_hold() -> None:
-    from app.services.ticket_service import VALID_TRANSITIONS
     from app.models.ticket import TicketStatus
+    from app.services.ticket_service import VALID_TRANSITIONS
 
     assert TicketStatus.ON_HOLD in VALID_TRANSITIONS[TicketStatus.IN_PROGRESS]
 
 
 def test_on_hold_cannot_go_to_new() -> None:
-    from app.services.ticket_service import VALID_TRANSITIONS
     from app.models.ticket import TicketStatus
+    from app.services.ticket_service import VALID_TRANSITIONS
 
     assert TicketStatus.NEW not in VALID_TRANSITIONS[TicketStatus.ON_HOLD]
 

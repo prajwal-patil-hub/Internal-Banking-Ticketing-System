@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -88,7 +88,7 @@ async def test_audit_log_ai_decision() -> None:
 
 @pytest.mark.asyncio
 async def test_get_audit_trail_pagination() -> None:
-    from app.models.audit import AuditLog, AuditAction
+    from app.models.audit import AuditAction, AuditLog
     from app.services.audit_service import AuditService
 
     db = _mock_db()
@@ -101,7 +101,7 @@ async def test_get_audit_trail_pagination() -> None:
             entity_id=str(uuid.uuid4()),
             action=AuditAction.CREATE,
         )
-        entry.created_at = datetime.now(timezone.utc)
+        entry.created_at = datetime.now(UTC)
         logs.append(entry)
 
     call_count = 0

@@ -19,7 +19,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.sla import SLAPolicy, SLATracking
 from app.models.ticket import OPEN_STATUS_VALUES as _OPEN_STATUSES
-from app.models.ticket import Ticket, TicketPriority, TicketStatus
+from app.models.ticket import Ticket, TicketPriority
 
 log = get_logger(__name__)
 

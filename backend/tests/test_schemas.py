@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
 
-_NOW = datetime.now(timezone.utc).isoformat()
+_NOW = datetime.now(UTC).isoformat()
 
 
 # ---------------------------------------------------------------------------

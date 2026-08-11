@@ -18,7 +18,7 @@ from app.core.logging import get_logger
 log = get_logger(__name__)
 
 
-class AppException(Exception):
+class AppException(Exception):  # noqa: N818 - base class, not itself raised
     """Base for all application-defined errors."""
 
     status_code: int = 500

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
 import csv
 import io
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ValidationError
@@ -62,8 +63,8 @@ async def _build_report_rows(
     current_user: User,
 ) -> list[dict[str, Any]]:
     """Fetch tickets with all audit fields and return as list of dicts."""
-    from app.models.escalation import EscalationEvent
     from app.models.ai_interaction import AIInteractionLog
+    from app.models.escalation import EscalationEvent
     from app.services.org_service import get_accessible_org_unit_ids
 
     stmt = select(Ticket)
@@ -89,18 +90,14 @@ async def _build_report_rows(
     if filters.get("to_date"):
         stmt = stmt.where(Ticket.created_at <= filters["to_date"])
     if filters.get("status"):
-        try:
+        with contextlib.suppress(ValueError):
             stmt = stmt.where(Ticket.status == TicketStatus(filters["status"]))
-        except ValueError:
-            pass
     if filters.get("org_unit_id"):
         stmt = stmt.where(Ticket.org_unit_id == uuid.UUID(str(filters["org_unit_id"])))
     if filters.get("priority"):
         from app.models.ticket import TicketPriority
-        try:
+        with contextlib.suppress(ValueError):
             stmt = stmt.where(Ticket.priority == TicketPriority(filters["priority"]))
-        except ValueError:
-            pass
 
     stmt = stmt.order_by(Ticket.created_at.desc())
     result = await db.execute(stmt)
@@ -200,7 +197,7 @@ async def generate_csv(db: AsyncSession, filters: dict, current_user: User) -> b
 
 async def generate_excel(db: AsyncSession, filters: dict, current_user: User) -> bytes:
     from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
 
     rows = await _build_report_rows(db, filters, current_user)
@@ -237,11 +234,11 @@ async def generate_excel(db: AsyncSession, filters: dict, current_user: User) ->
 
 
 async def generate_pdf(db: AsyncSession, filters: dict, current_user: User) -> bytes:
-    from reportlab.lib.pagesizes import landscape, A3
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A3, landscape
     from reportlab.lib.styles import getSampleStyleSheet
     from reportlab.lib.units import cm
-    from reportlab.lib import colors
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
     rows = await _build_report_rows(db, filters, current_user)
 
@@ -259,7 +256,7 @@ async def generate_pdf(db: AsyncSession, filters: dict, current_user: User) -> b
     story = [
         Paragraph("Ticket Audit Report", styles["Title"]),
         Paragraph(
-            f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} | "
+            f"Generated: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')} | "
             f"Total records: {len(rows)}",
             styles["Normal"],
         ),
@@ -325,7 +322,7 @@ def _decode_chart_png(image_data_url: str | None) -> bytes | None:
         # empty bytes would sail past this guard and fail deeper in the PDF
         # builder, where the cause is much harder to see.
         decoded = base64.b64decode(encoded, validate=True)
-    except Exception:  # noqa: BLE001 - a bad image must not fail the export
+    except Exception:
         log.warning("chart_export.bad_image_payload")
         return None
     return decoded or None
@@ -523,14 +520,14 @@ def generate_analytics_pdf(payload: dict) -> bytes:
                     height, width = max_height, max_height * src_w / src_h
                 story.append(Image(io.BytesIO(image_bytes), width=width, height=height))
                 story.append(Spacer(1, 0.4 * cm))
-            except Exception:  # noqa: BLE001 - fall back to the table alone
+            except Exception:
                 log.warning("chart_export.image_render_failed", chart=chart.get("title"))
 
         columns, rows = _chart_grid(chart)
         if rows and columns:
             header = [str(c).replace("_", " ").title() for c in columns]
             body = [[str(v) for v in row] for row in rows]
-            table = Table([header] + body, colWidths=[usable_width / len(columns)] * len(columns))
+            table = Table([header, *body], colWidths=[usable_width / len(columns)] * len(columns))
             table.setStyle(TableStyle([
                 ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1A5276")),
                 ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -19,12 +19,12 @@ def _mock_db():
 
 
 def _make_user(role_name: str = "agent"):
-    from app.models.user import User
     from app.models.role import Role
+    from app.models.user import User
 
     role = Role(id=uuid.uuid4(), name=role_name, description="")
-    role.created_at = datetime.now(timezone.utc)
-    role.updated_at = datetime.now(timezone.utc)
+    role.created_at = datetime.now(UTC)
+    role.updated_at = datetime.now(UTC)
 
     user = User(
         id=uuid.uuid4(),
@@ -37,8 +37,8 @@ def _make_user(role_name: str = "agent"):
         failed_login_count=0,
     )
     user.role = role
-    user.created_at = datetime.now(timezone.utc)
-    user.updated_at = datetime.now(timezone.utc)
+    user.created_at = datetime.now(UTC)
+    user.updated_at = datetime.now(UTC)
     return user
 
 
@@ -57,8 +57,8 @@ def _make_ticket(**kwargs):
     )
     for k, v in kwargs.items():
         setattr(t, k, v)
-    t.created_at = datetime.now(timezone.utc)
-    t.updated_at = datetime.now(timezone.utc)
+    t.created_at = datetime.now(UTC)
+    t.updated_at = datetime.now(UTC)
     return t
 
 
@@ -250,7 +250,7 @@ async def test_auto_route_does_not_regress_resolved_ticket() -> None:
     db.execute = AsyncMock(return_value=mock_result)
 
     svc = RoutingService(db)
-    assignee, reason = await svc.auto_route_ticket(ticket)
+    _assignee, _reason = await svc.auto_route_ticket(ticket)
 
     # Resolved is not in (NEW, ACKNOWLEDGED) so status should not change
     assert ticket.status == TicketStatus.RESOLVED.value

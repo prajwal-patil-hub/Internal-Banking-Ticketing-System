@@ -96,9 +96,8 @@ class EscalationService:
             if rule.category_id is not None and rule.category_id != ticket.category_id:
                 continue
             threshold = rule.priority_threshold
-            if threshold:
-                if ticket_rank < _PRIORITY_RANK.get(threshold, 0):
-                    continue
+            if threshold and ticket_rank < _PRIORITY_RANK.get(threshold, 0):
+                continue
             # (category-specific, threshold strictness) — higher sorts first.
             candidates.append((
                 1 if rule.category_id is not None else 0,
@@ -295,7 +294,7 @@ async def notify_escalation_outcome(
 
         if managers := settings.manager_email_list:
             await notifier.notify_sla_breach(ticket=ticket, manager_emails=managers)
-    except Exception as exc:  # noqa: BLE001 - see docstring
+    except Exception as exc:
         log.warning(
             "escalation.notify_failed",
             ticket_id=str(ticket.id),

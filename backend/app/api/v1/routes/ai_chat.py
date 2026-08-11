@@ -350,30 +350,29 @@ async def _stream_ollama(
 
     input_tokens = output_tokens = 0
 
-    async with httpx.AsyncClient(timeout=settings.AI_TIMEOUT_SECONDS) as client:
-        async with client.stream(
-            "POST", f"{settings.LLM_BASE_URL}/v1/chat/completions", json=body
-        ) as resp:
-            resp.raise_for_status()
-            async for line in resp.aiter_lines():
-                if not line or not line.startswith("data:"):
-                    continue
-                data = line[len("data:"):].strip()
-                if data == "[DONE]":
-                    break
-                try:
-                    chunk = json.loads(data)
-                except json.JSONDecodeError:
-                    continue
+    async with httpx.AsyncClient(timeout=settings.AI_TIMEOUT_SECONDS) as client, client.stream(
+        "POST", f"{settings.LLM_BASE_URL}/v1/chat/completions", json=body
+    ) as resp:
+        resp.raise_for_status()
+        async for line in resp.aiter_lines():
+            if not line or not line.startswith("data:"):
+                continue
+            data = line[len("data:"):].strip()
+            if data == "[DONE]":
+                break
+            try:
+                chunk = json.loads(data)
+            except json.JSONDecodeError:
+                continue
 
-                if usage := chunk.get("usage"):
-                    input_tokens = usage.get("prompt_tokens", input_tokens)
-                    output_tokens = usage.get("completion_tokens", output_tokens)
+            if usage := chunk.get("usage"):
+                input_tokens = usage.get("prompt_tokens", input_tokens)
+                output_tokens = usage.get("completion_tokens", output_tokens)
 
-                for choice in chunk.get("choices") or []:
-                    text = (choice.get("delta") or {}).get("content")
-                    if text:
-                        yield "delta", text
+            for choice in chunk.get("choices") or []:
+                text = (choice.get("delta") or {}).get("content")
+                if text:
+                    yield "delta", text
 
     yield "usage", (input_tokens, output_tokens)
 

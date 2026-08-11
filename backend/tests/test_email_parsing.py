@@ -103,16 +103,16 @@ def test_spf_pass_and_fail_are_read_from_the_mta_header() -> None:
 
 def test_multipart_body_prefers_the_plain_text_part() -> None:
     raw = (
-        "From: p@example.com\nTo: s@bank.example\nSubject: Multi\n"
-        "Message-ID: <f@x>\n"
-        'Content-Type: multipart/alternative; boundary="BOUND"\n'
-        "\n"
-        "--BOUND\nContent-Type: text/plain; charset=utf-8\n\n"
-        "The plain version.\n"
-        "--BOUND\nContent-Type: text/html; charset=utf-8\n\n"
-        "<p>The HTML version.</p>\n"
-        "--BOUND--\n"
-    ).encode()
+        b"From: p@example.com\nTo: s@bank.example\nSubject: Multi\n"
+        b"Message-ID: <f@x>\n"
+        b'Content-Type: multipart/alternative; boundary="BOUND"\n'
+        b"\n"
+        b"--BOUND\nContent-Type: text/plain; charset=utf-8\n\n"
+        b"The plain version.\n"
+        b"--BOUND\nContent-Type: text/html; charset=utf-8\n\n"
+        b"<p>The HTML version.</p>\n"
+        b"--BOUND--\n"
+    )
 
     parsed = _parse_raw_email(raw)
 
@@ -122,16 +122,16 @@ def test_multipart_body_prefers_the_plain_text_part() -> None:
 
 def test_attachments_are_counted() -> None:
     raw = (
-        "From: p@example.com\nTo: s@bank.example\nSubject: With file\n"
-        "Message-ID: <g@x>\n"
-        'Content-Type: multipart/mixed; boundary="B"\n'
-        "\n"
-        "--B\nContent-Type: text/plain\n\nSee attached.\n"
-        "--B\nContent-Type: application/pdf\n"
-        'Content-Disposition: attachment; filename="statement.pdf"\n\n'
-        "%PDF-1.4\n"
-        "--B--\n"
-    ).encode()
+        b"From: p@example.com\nTo: s@bank.example\nSubject: With file\n"
+        b"Message-ID: <g@x>\n"
+        b'Content-Type: multipart/mixed; boundary="B"\n'
+        b"\n"
+        b"--B\nContent-Type: text/plain\n\nSee attached.\n"
+        b"--B\nContent-Type: application/pdf\n"
+        b'Content-Disposition: attachment; filename="statement.pdf"\n\n'
+        b"%PDF-1.4\n"
+        b"--B--\n"
+    )
 
     assert _parse_raw_email(raw)["attachments_count"] == 1
 

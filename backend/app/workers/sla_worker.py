@@ -33,8 +33,7 @@ async def check_sla_breaches_job() -> None:
                 from sqlalchemy import and_, select
 
                 from app.models.sla import SLATracking
-                from app.models.ticket import OPEN_STATUSES as open_statuses
-                from app.models.ticket import Ticket
+                from app.models.ticket import OPEN_STATUSES, Ticket
 
                 now = datetime.now(UTC)
 
@@ -46,7 +45,7 @@ async def check_sla_breaches_job() -> None:
                     .join(Ticket, SLATracking.ticket_id == Ticket.id)
                     .where(
                         and_(
-                            Ticket.status.in_(open_statuses),
+                            Ticket.status.in_(OPEN_STATUSES),
                             SLATracking.is_resolution_breached == False,  # noqa: E712
                             SLATracking.resolution_due_at <= now,
                             SLATracking.paused_at.is_(None),  # don't breach paused timers

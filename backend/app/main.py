@@ -18,7 +18,20 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1.routes import ai_chat, audit, auth, branches, categories, dashboard, escalations, health, org, reports, tickets, users
+from app.api.v1.routes import (
+    ai_chat,
+    audit,
+    auth,
+    branches,
+    categories,
+    dashboard,
+    escalations,
+    health,
+    org,
+    reports,
+    tickets,
+    users,
+)
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging, get_logger

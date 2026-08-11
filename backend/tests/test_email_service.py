@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -27,7 +27,7 @@ def _sample_email_data(**kwargs) -> dict:
         "body_text": "My UPI payment of Rs 5000 is stuck since morning. Please help.",
         "body_html": None,
         "cc_addresses": [],
-        "received_at": datetime.now(timezone.utc),
+        "received_at": datetime.now(UTC),
         "in_reply_to": None,
         "thread_id": None,
         "attachments": [],
@@ -123,8 +123,8 @@ async def test_find_existing_ticket_by_ticket_number_in_subject() -> None:
         source=TicketSource.EMAIL,
         reporter_id=uuid.uuid4(),
     )
-    existing.created_at = datetime.now(timezone.utc)
-    existing.updated_at = datetime.now(timezone.utc)
+    existing.created_at = datetime.now(UTC)
+    existing.updated_at = datetime.now(UTC)
 
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = existing
@@ -165,7 +165,7 @@ async def test_find_existing_ticket_returns_none_for_new_email() -> None:
 @pytest.mark.asyncio
 async def test_duplicate_email_not_processed_twice() -> None:
     """Same Message-ID should not create a second InboundEmail record."""
-    from app.models.email_intake import InboundEmail, EmailStatus
+    from app.models.email_intake import EmailStatus, InboundEmail
     from app.services.email_service import EmailService
 
     db = _mock_db()
@@ -178,10 +178,10 @@ async def test_duplicate_email_not_processed_twice() -> None:
         to_address="support@successbank.local",
         subject="Test",
         status=EmailStatus.PROCESSED,
-        received_at=datetime.now(timezone.utc),
+        received_at=datetime.now(UTC),
     )
-    existing_email.created_at = datetime.now(timezone.utc)
-    existing_email.updated_at = datetime.now(timezone.utc)
+    existing_email.created_at = datetime.now(UTC)
+    existing_email.updated_at = datetime.now(UTC)
 
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = existing_email
@@ -203,8 +203,8 @@ async def test_duplicate_email_not_processed_twice() -> None:
 @pytest.mark.asyncio
 async def test_new_email_creates_ticket() -> None:
     """A new inbound email should trigger AI extraction and ticket creation."""
-    from app.services.email_service import EmailService
     from app.schemas.ai import AIEmailExtraction
+    from app.services.email_service import EmailService
 
     db = _mock_db()
 
@@ -256,8 +256,8 @@ async def test_new_email_creates_ticket() -> None:
             source=TicketSource.EMAIL,
             reporter_id=uuid.uuid4(),
         )
-        new_ticket.created_at = datetime.now(timezone.utc)
-        new_ticket.updated_at = datetime.now(timezone.utc)
+        new_ticket.created_at = datetime.now(UTC)
+        new_ticket.updated_at = datetime.now(UTC)
 
         mock_ticket_svc = MockTicket.return_value
         mock_ticket_svc.create_ticket = AsyncMock(return_value=new_ticket)

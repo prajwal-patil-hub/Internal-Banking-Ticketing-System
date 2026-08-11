@@ -85,7 +85,6 @@ async def list_users(
         term = f"%{search}%"
         stmt = stmt.where(or_(User.full_name.ilike(term), User.email.ilike(term)))
     if role:
-        from sqlalchemy import join
         stmt = stmt.join(Role, User.role_id == Role.id).where(Role.name == role)
 
     # Non-super-admins with org_unit scope see only users in their accessible subtree

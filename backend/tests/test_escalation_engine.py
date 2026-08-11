@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.models.escalation import EscalationTrigger
+from app.models.ticket import TicketPriority, TicketStatus
 from app.services.escalation_service import (
     _PRIORITY_RANK,
     EscalationOutcome,
@@ -21,7 +22,6 @@ from app.services.escalation_service import (
     _priority_value,
     _status_value,
 )
-from app.models.ticket import TicketPriority, TicketStatus
 
 
 def rule(**kw):

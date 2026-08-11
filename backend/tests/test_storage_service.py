@@ -19,7 +19,6 @@ from app.services.storage_service import (
     validate_upload,
 )
 
-
 # ---------------------------------------------------------------------------
 # Filename sanitising
 # ---------------------------------------------------------------------------
@@ -152,8 +151,14 @@ async def test_upload_download_delete_round_trip(monkeypatch) -> None:
         assert await service.download(key) == payload
 
         await service.delete(key)
-        with pytest.raises(Exception):
+        # NoSuchKey specifically — a bare `Exception` here would also pass if
+        # the call failed for an unrelated reason, which is the opposite of
+        # what this asserts.
+        from botocore.exceptions import ClientError
+
+        with pytest.raises(ClientError) as excinfo:
             await service.download(key)
+        assert excinfo.value.response["Error"]["Code"] in {"NoSuchKey", "404"}
 
 
 @pytest.mark.asyncio

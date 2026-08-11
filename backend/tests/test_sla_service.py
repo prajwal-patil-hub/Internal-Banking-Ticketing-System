@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -30,8 +30,8 @@ def _make_policy(priority: str, response_min: int, resolution_min: int):
         business_hours_only=False,
         is_default=True,
     )
-    p.created_at = datetime.now(timezone.utc)
-    p.updated_at = datetime.now(timezone.utc)
+    p.created_at = datetime.now(UTC)
+    p.updated_at = datetime.now(UTC)
     return p
 
 
@@ -50,8 +50,8 @@ def _make_ticket_in_progress():
         sla_breached=False,
         sla_paused_at=None,
     )
-    t.created_at = datetime.now(timezone.utc)
-    t.updated_at = datetime.now(timezone.utc)
+    t.created_at = datetime.now(UTC)
+    t.updated_at = datetime.now(UTC)
     return t
 
 
@@ -67,8 +67,8 @@ def _make_tracking(ticket_id, response_due: datetime, resolution_due: datetime):
         is_resolution_breached=False,
         total_paused_minutes=0,
     )
-    t.created_at = datetime.now(timezone.utc)
-    t.updated_at = datetime.now(timezone.utc)
+    t.created_at = datetime.now(UTC)
+    t.updated_at = datetime.now(UTC)
     return t
 
 
@@ -87,7 +87,7 @@ async def test_get_default_policy_returns_settings_fallback() -> None:
 
     svc = SLAService(db)
     # Should not raise even when no DB policy exists
-    policy = await svc.get_or_create_policy(category_id=None, priority="critical")
+    await svc.get_or_create_policy(category_id=None, priority="critical")
     assert True  # service completed without exception
 
 
@@ -122,7 +122,7 @@ async def test_check_breaches_marks_overdue_tickets() -> None:
     db = _mock_db()
 
     ticket = _make_ticket_in_progress()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     ticket.resolution_due_at = now - timedelta(hours=1)  # already overdue
 
     call_count = 0
@@ -224,7 +224,7 @@ async def test_pause_sla_noop_if_already_paused() -> None:
 
     db = _mock_db()
     ticket = _make_ticket_in_progress()
-    original_paused_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+    original_paused_at = datetime.now(UTC) - timedelta(minutes=5)
     ticket.sla_paused_at = original_paused_at
 
     db.get = AsyncMock(return_value=ticket)
@@ -244,8 +244,8 @@ async def test_resume_sla_clears_paused_at_and_extends_deadline() -> None:
     db = _mock_db()
     ticket = _make_ticket_in_progress()
 
-    paused_at = datetime.now(timezone.utc) - timedelta(minutes=30)
-    original_resolution = datetime.now(timezone.utc) + timedelta(hours=2)
+    paused_at = datetime.now(UTC) - timedelta(minutes=30)
+    original_resolution = datetime.now(UTC) + timedelta(hours=2)
 
     ticket.sla_paused_at = paused_at
     ticket.response_due_at = original_resolution

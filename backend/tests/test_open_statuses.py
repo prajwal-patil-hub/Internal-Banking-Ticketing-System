@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.models.ticket import OPEN_STATUSES, OPEN_STATUS_VALUES, TicketStatus
+from app.models.ticket import OPEN_STATUS_VALUES, OPEN_STATUSES, TicketStatus
 
 
 def test_on_hold_counts_as_open() -> None:
@@ -49,7 +49,7 @@ def test_every_status_is_classified() -> None:
 
 def test_string_form_matches_the_enum_form() -> None:
     """Some queries compare the column value, others the enum member."""
-    assert OPEN_STATUS_VALUES == {s.value for s in OPEN_STATUSES}
+    assert {s.value for s in OPEN_STATUSES} == OPEN_STATUS_VALUES
 
 
 def test_no_module_redefines_the_set() -> None:

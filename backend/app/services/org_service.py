@@ -7,7 +7,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.org import HierarchyLevel, OrgRole, OrgUnit
+from app.models.org import OrgUnit
 from app.models.user import User
 
 

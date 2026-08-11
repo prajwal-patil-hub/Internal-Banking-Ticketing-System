@@ -52,7 +52,7 @@ class TicketStatus(str, enum.Enum):
 #: digest included it, so "Open: 15" on the dashboard and the list it linked to
 #: showed different totals. A ticket on hold is unresolved work — it is paused,
 #: not finished — so it counts as open everywhere.
-OPEN_STATUSES: tuple["TicketStatus", ...] = ()  # populated below
+OPEN_STATUSES: tuple[TicketStatus, ...] = ()  # populated below
 
 
 class TicketSource(str, enum.Enum):

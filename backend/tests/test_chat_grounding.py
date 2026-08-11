@@ -13,8 +13,7 @@ import pytest
 from app.api.v1.routes.ai_chat import _build_system_prompt, _trim_history
 from app.core import ratelimit
 from app.core.exceptions import RateLimitError
-from app.services.chat_context import _render_screen, _rel_hours, _trim
-
+from app.services.chat_context import _rel_hours, _render_screen, _trim
 
 # ---------------------------------------------------------------------------
 # System prompt

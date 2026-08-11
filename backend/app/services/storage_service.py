@@ -172,7 +172,7 @@ class StorageService:
             try:
                 await self._run(client.create_bucket, Bucket=settings.S3_BUCKET)
                 log.info("storage.bucket_created", bucket=settings.S3_BUCKET)
-            except Exception as exc:  # noqa: BLE001 - racing callers both create
+            except Exception as exc:
                 log.debug("storage.bucket_create_skipped", error=str(exc))
 
     async def upload(self, key: str, data: bytes, content_type: str) -> StoredObject:
@@ -223,7 +223,7 @@ class StorageService:
                 self._s3().delete_object, Bucket=settings.S3_BUCKET, Key=key
             )
             log.info("storage.deleted", key=key)
-        except Exception as exc:  # noqa: BLE001 - see docstring
+        except Exception as exc:
             log.warning("storage.delete_failed", key=key, error=str(exc))
 
 

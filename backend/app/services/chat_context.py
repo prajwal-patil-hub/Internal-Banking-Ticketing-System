@@ -32,7 +32,7 @@ from app.core import authz
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.comment import TicketComment
-from app.models.ticket import OPEN_STATUSES, Ticket, TicketStatus
+from app.models.ticket import OPEN_STATUSES, Ticket
 from app.models.user import User
 from app.services.org_service import get_accessible_org_unit_ids
 

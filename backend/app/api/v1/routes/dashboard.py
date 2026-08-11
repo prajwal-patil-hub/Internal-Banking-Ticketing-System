@@ -6,9 +6,8 @@ CategoryItem, DeptLoad, and AIMetrics TypeScript interfaces.
 
 from __future__ import annotations
 
-from typing import Annotated
-
 from datetime import UTC, datetime, timedelta
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import case, func, select
@@ -20,8 +19,14 @@ from app.models.ai_interaction import AIInteractionLog
 from app.models.sla import SLATracking
 from app.models.ticket import (
     AI_RISK_HIGH_THRESHOLD,
+    Ticket,
+    TicketCategory,
+    TicketPriority,
+    TicketSource,
+    TicketStatus,
+)
+from app.models.ticket import (
     OPEN_STATUSES as _OPEN_STATUSES,
-    Ticket, TicketCategory, TicketPriority, TicketSource, TicketStatus,
 )
 from app.models.user import User
 from app.schemas.envelope import ok
