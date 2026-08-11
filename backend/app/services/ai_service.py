@@ -284,14 +284,20 @@ Only output valid JSON. No markdown, no explanation."""
             result_data = self._parse_json_response(self._extract_text(response))
         except Exception as exc:
             latency_ms = int((time.monotonic() - start) * 1000)
-            log.exception("ai.extract_email.failed", error=str(exc))
+            # A degraded path, not a crash: the model being unreachable must not
+            # cost us the email. Logged without a traceback because the stack is
+            # always the same and the message is the part worth reading.
+            log.warning("ai.extract_email.failed", error=str(exc))
             await self._log_interaction(
                 "extract_email", self.MODEL, 0, 0, latency_ms, None,
                 "email", None, success=False, error=str(exc),
             )
             return AIEmailExtraction(
                 title=subject[:120] if subject else "Inbound email",
-                summary="Could not extract summary from email.",
+                # Empty, so the caller falls through to the raw body. A
+                # placeholder here would read as the ticket description and
+                # bury what the customer actually wrote.
+                summary="",
                 category="operations",
                 priority="medium",
                 confidence=0.0,

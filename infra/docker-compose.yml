@@ -65,6 +65,22 @@ services:
       timeout: 5s
       retries: 5
 
+  mailpit:
+    # SMTP_PORT defaults to 1025 — the MailHog/Mailpit convention — but nothing
+    # was listening, so every SLA breach and escalation email failed silently
+    # in development. Mailpit catches them all and shows them at :8025.
+    image: axllent/mailpit:latest
+    container_name: success-mailpit
+    restart: unless-stopped
+    ports:
+      - "1025:1025"   # SMTP
+      - "8025:8025"   # Web UI
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   backend:
     build:
       context: ../backend
@@ -78,6 +94,9 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-success}:${POSTGRES_PASSWORD:-success_dev_pw}@postgres:5432/${POSTGRES_DB:-success_bank}
       REDIS_URL: redis://redis:6379/0
       S3_ENDPOINT_URL: http://minio:9000
+      # Inside the network the mail host is the service name, not localhost.
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
     # Docker Desktop (Mac/Windows) provides host.docker.internal automatically;
     # on Linux it must be mapped explicitly. Needed to reach Ollama on the host.
     extra_hosts:

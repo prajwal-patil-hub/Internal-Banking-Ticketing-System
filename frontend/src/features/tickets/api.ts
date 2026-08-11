@@ -284,3 +284,60 @@ export async function escalateTicket(
   const { data } = await api.post(`/tickets/${ticketId}/escalate`, { reason, trigger });
   return data.data;
 }
+
+// ── Attachments ──────────────────────────────────────────────────────────────
+
+export interface Attachment {
+  id: string;
+  ticket_id: string;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  checksum_sha256: string | null;
+  uploader: { id: string; full_name: string } | null;
+  created_at: string;
+}
+
+/** Mirrors the server's limit — checked here only to fail fast, not to trust. */
+export const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024;
+
+export async function listAttachments(ticketId: string): Promise<Attachment[]> {
+  const { data } = await api.get(`/tickets/${ticketId}/attachments`);
+  return data.data;
+}
+
+export async function uploadAttachment(ticketId: string, file: File): Promise<Attachment> {
+  const form = new FormData();
+  form.append('file', file);
+  const { data } = await api.post(`/tickets/${ticketId}/attachments`, form, {
+    // Uploads are slower than JSON calls and the default 15s is too tight for
+    // a 15MB file on a slow link.
+    timeout: 120_000,
+  });
+  return data.data;
+}
+
+/**
+ * Fetch through the API and save via a blob URL.
+ *
+ * A plain <a href> cannot carry the bearer token, and the server deliberately
+ * does not issue presigned URLs — every read goes through the permission check.
+ */
+export async function downloadAttachment(ticketId: string, att: Attachment): Promise<void> {
+  const res = await api.get(`/tickets/${ticketId}/attachments/${att.id}/download`, {
+    responseType: 'blob',
+    timeout: 120_000,
+  });
+  const url = URL.createObjectURL(new Blob([res.data], { type: att.content_type }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = att.filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+export async function deleteAttachment(ticketId: string, attachmentId: string): Promise<void> {
+  await api.delete(`/tickets/${ticketId}/attachments/${attachmentId}`);
+}

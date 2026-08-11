@@ -1,13 +1,21 @@
 import { useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/Button';
 import { CodeInput } from '@/components/CodeInput';
+import { BackupCodes } from '@/components/BackupCodes';
 import { cn } from '@/lib/cn';
 import { extractError } from '@/lib/api';
 import { useAuth } from '@/store/auth';
-import { startMFASetup, enableMFA, disableMFA, type MFASetup } from '@/features/auth/mfa';
+import {
+  startMFASetup,
+  enableMFA,
+  disableMFA,
+  getBackupCodeStatus,
+  regenerateBackupCodes,
+  type MFASetup,
+} from '@/features/auth/mfa';
 
-type Stage = 'idle' | 'enrolling' | 'disabling';
+type Stage = 'idle' | 'enrolling' | 'showing-codes' | 'disabling';
 
 
 /**
@@ -78,6 +86,8 @@ export function SecurityPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [secretShown, setSecretShown] = useState(false);
+  /** Held only until the user confirms they have saved them. */
+  const [freshCodes, setFreshCodes] = useState<string[]>([]);
 
   const mfaEnabled = user?.mfa_enabled ?? false;
 
@@ -110,10 +120,31 @@ export function SecurityPage() {
 
   const enableMutation = useMutation({
     mutationFn: () => enableMFA(code),
-    onSuccess: () => {
+    onSuccess: (result) => {
       syncUser(true);
-      reset();
-      setNotice('Two-factor authentication is on. You will be asked for a code at each sign-in.');
+      // Straight to the codes rather than back to idle: this is the only
+      // moment they exist in plaintext.
+      setFreshCodes(result.backup_codes);
+      setStage('showing-codes');
+      setCode('');
+      setError(null);
+    },
+    onError: (e) => setError(extractError(e).message),
+  });
+
+  const { data: codeStatus } = useQuery({
+    queryKey: ['mfa-backup-codes', mfaEnabled],
+    queryFn: getBackupCodeStatus,
+    enabled: mfaEnabled,
+  });
+
+  const regenerate = useMutation({
+    mutationFn: () => regenerateBackupCodes(password),
+    onSuccess: (codes) => {
+      setFreshCodes(codes);
+      setStage('showing-codes');
+      setPassword('');
+      setError(null);
     },
     onError: (e) => setError(extractError(e).message),
   });
@@ -264,6 +295,72 @@ export function SecurityPage() {
               Keep the setup key somewhere safe. There are no printed backup codes yet —
               if you lose the device, an administrator has to clear the enrolment for you.
             </p>
+          </div>
+        )}
+
+        {/* ── Recovery codes, shown once ───────────────────────────────── */}
+        {stage === 'showing-codes' && (
+          <div className="mt-6 flex flex-col items-center gap-4">
+            <BackupCodes
+              codes={freshCodes}
+              onDone={() => {
+                setFreshCodes([]);
+                reset();
+                setNotice('Two-factor authentication is on. You will be asked for a code at each sign-in.');
+              }}
+            />
+          </div>
+        )}
+
+        {/* ── Recovery code status, once enrolled ──────────────────────── */}
+        {stage === 'idle' && mfaEnabled && codeStatus && (
+          <div className="mt-4 pt-4 border-t border-[var(--line)] flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <p className="text-sm text-[var(--tx)]">
+                Recovery codes:{' '}
+                <span className={cn(
+                  'font-semibold',
+                  codeStatus.remaining <= 2 ? 'text-[var(--warn)]' : 'text-[var(--tx)]',
+                )}>
+                  {codeStatus.remaining} of {codeStatus.total} left
+                </span>
+              </p>
+              <p className="text-xs text-[var(--tx-3)] mt-0.5">
+                {codeStatus.remaining <= 2
+                  ? 'Running low — generate a new set while you still can.'
+                  : 'Each signs you in once if you lose your phone.'}
+              </p>
+            </div>
+            <Button variant="ghost" onClick={() => setStage('regenerating' as Stage)}>
+              Generate new codes
+            </Button>
+          </div>
+        )}
+
+        {/* ── Regenerating ─────────────────────────────────────────────── */}
+        {(stage as string) === 'regenerating' && (
+          <div className="mt-5 space-y-3">
+            <label htmlFor="regen-pw" className="text-sm text-[var(--tx-2)] block">
+              Confirm your password. This invalidates every existing code.
+            </label>
+            <div className="flex items-center gap-2 flex-wrap">
+              <input
+                id="regen-pw"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+                placeholder="Your password"
+                className="w-64 rounded-lg border border-[var(--line)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--tx)] outline-none focus:border-[var(--brand)]"
+              />
+              <Button
+                onClick={() => regenerate.mutate()}
+                disabled={!password || regenerate.isPending}
+              >
+                {regenerate.isPending ? 'Generating…' : 'Generate'}
+              </Button>
+              <Button variant="ghost" onClick={reset}>Cancel</Button>
+            </div>
           </div>
         )}
 

@@ -15,12 +15,14 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from app.core.exceptions import AuthenticationError, MFARequiredError
+from app.core.logging import get_logger
 from app.core.security import (
     create_access_token,
     create_mfa_challenge_token,
     generate_refresh_token,
     hash_password,
     hash_refresh_token,
+    hash_backup_code,
     needs_rehash,
     verify_password,
     verify_totp,
@@ -32,6 +34,8 @@ from app.repositories.user_repo import (
     RefreshTokenRepository,
     UserRepository,
 )
+
+log = get_logger(__name__)
 
 LOCK_THRESHOLD = 5
 LOCK_DURATION = timedelta(minutes=15)
@@ -119,16 +123,49 @@ class AuthService:
         refresh_raw, refresh_exp = await self._issue_refresh(user.id, ip, user_agent)
         return user, access, access_exp, refresh_raw, refresh_exp
 
+    async def _consume_backup_code(self, user: User, code: str) -> bool:
+        """Spend a single-use recovery code, if it matches an unused one.
+
+        Marked used rather than deleted, so "a recovery code was consumed at
+        09:14" stays answerable after an incident. Returns False for a code
+        that is wrong or already spent — replaying one must not work.
+        """
+        from sqlalchemy import select
+
+        from app.models.mfa import MFABackupCode
+
+        digest = hash_backup_code(code)
+        row = (await self.users.db.execute(
+            select(MFABackupCode).where(
+                MFABackupCode.user_id == user.id,
+                MFABackupCode.code_hash == digest,
+                MFABackupCode.used_at.is_(None),
+            ).limit(1)
+        )).scalar_one_or_none()
+
+        if row is None:
+            return False
+
+        row.used_at = datetime.now(UTC)
+        return True
+
     async def login_verified(
         self, *, user: User, code: str, ip: str, user_agent: str
     ) -> tuple[User, str, datetime, str, datetime]:
-        """Finish a login whose password step already passed, given a TOTP code.
+        """Finish a login whose password step already passed.
 
-        Used by the /auth/mfa/verify step. Applies the same lockout counters as
-        a password failure, so brute-forcing the six-digit code is bounded by
-        the same threshold rather than being unlimited.
+        Accepts either a TOTP code or one single-use recovery code — the whole
+        point of a recovery code is that it works when the authenticator does
+        not, so it has to be usable at exactly this step.
+
+        Applies the same lockout counters as a password failure, so guessing is
+        bounded by the same threshold rather than being unlimited.
         """
+        used_backup = False
         if not verify_totp(user.mfa_secret or "", code):
+            used_backup = await self._consume_backup_code(user, code)
+
+        if not verify_totp(user.mfa_secret or "", code) and not used_backup:
             user.failed_login_count += 1
             if user.failed_login_count >= LOCK_THRESHOLD:
                 user.locked_until = datetime.now(UTC) + LOCK_DURATION
@@ -143,7 +180,17 @@ class AuthService:
         user.locked_until = None
         user.last_login_at = datetime.now(UTC)
         await self.users.update(user)
-        await self._record_attempt(user.email, ip, user_agent, success=True, reason="ok_mfa")
+        await self._record_attempt(
+            user.email, ip, user_agent, success=True,
+            reason="ok_backup_code" if used_backup else "ok_mfa",
+        )
+        if used_backup:
+            log.warning(
+                "mfa.backup_code_used",
+                user_id=str(user.id),
+                email=user.email,
+                ip=ip,
+            )
 
         access, access_exp = create_access_token(subject=str(user.id), role=user.role.name)
         refresh_raw, refresh_exp = await self._issue_refresh(user.id, ip, user_agent)

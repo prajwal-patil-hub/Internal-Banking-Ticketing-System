@@ -92,6 +92,20 @@ class RateLimitError(AppException):
     message = "Too many requests."
 
 
+class StorageUnavailableError(AppException):
+    """Object storage could not be reached.
+
+    503 rather than 500: nothing is wrong with the request, the file store is
+    simply down, and retrying later is the correct response. Saying so also
+    saves whoever is on call from reading a stack trace to learn that MinIO
+    is not running.
+    """
+
+    status_code = 503
+    code = "STORAGE_UNAVAILABLE"
+    message = "File storage is temporarily unavailable. Please try again shortly."
+
+
 def _envelope(
     *,
     code: str,

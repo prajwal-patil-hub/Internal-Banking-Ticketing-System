@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/Button';
 import { Badge } from '@/components/Badge';
 import { EscalationTimeline } from '@/components/EscalationTimeline';
+import { TicketAttachments } from '@/components/TicketAttachments';
 import { StatusBadge } from '@/components/StatusBadge';
 import { PriorityBadge } from '@/components/PriorityBadge';
 import { SLABadge } from '@/components/SLABadge';
@@ -209,7 +210,12 @@ export function TicketDetailPage() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [aiExpanded, setAiExpanded] = useState(false);
 
+  // Two different questions. `isAgent` governs what you may *see* — internal
+  // comments and the audit trail, which an auditor legitimately reads.
+  // `canWrite` governs what you may *do*, and the auditor is read-only, so
+  // offering it a comment box or an upload target would only earn a 403.
   const isAgent = ['admin', 'agent', 'supervisor', 'auditor'].includes(user?.role ?? '');
+  const canWrite = ['admin', 'agent', 'supervisor'].includes(user?.role ?? '');
 
   const ticketQuery   = useQuery({ queryKey: ['tickets', id],                  queryFn: () => getTicket(id!),                                        enabled: !!id, staleTime: STALE });
   const commentsQuery = useQuery({ queryKey: ['tickets', id, 'comments', isAgent], queryFn: () => getComments(id!, isAgent),                         enabled: !!id, staleTime: STALE });
@@ -279,8 +285,8 @@ export function TicketDetailPage() {
           </h1>
         </div>
 
-        {/* Action buttons (agent only) */}
-        {isAgent && availableTransitions.length > 0 && (
+        {/* Action buttons — writes, so the read-only auditor is excluded. */}
+        {canWrite && availableTransitions.length > 0 && (
           <div className="flex items-center gap-1.5 flex-wrap shrink-0">
             {availableTransitions.map((next) => (
               <Button
@@ -444,7 +450,10 @@ export function TicketDetailPage() {
               )}
             </div>
 
-            {/* Add comment */}
+            {/* Add comment. Hidden for read-only roles rather than shown and
+                rejected — offering a control the server refuses is worse than
+                not offering it. */}
+            {canWrite && (
             <div className="border-t border-slate-100 dark:border-slate-800 pt-3 flex flex-col gap-2">
               <textarea
                 className="input resize-none text-sm"
@@ -454,7 +463,7 @@ export function TicketDetailPage() {
                 onChange={(e) => setCommentText(e.target.value)}
               />
               <div className="flex items-center justify-between">
-                {isAgent && (
+                {canWrite && (
                   <label className="flex items-center gap-2 cursor-pointer select-none text-xs text-slate-500 dark:text-slate-400">
                     <input
                       type="checkbox"
@@ -478,6 +487,7 @@ export function TicketDetailPage() {
                 <p className="text-xs text-red-600">Failed to post comment.</p>
               )}
             </div>
+            )}
           </div>
 
           {/* Audit trail */}
@@ -521,6 +531,13 @@ export function TicketDetailPage() {
           {/* Full history, merged from comments, audit rows and escalations */}
           <EscalationTimeline ticket={ticket} />
 
+          {/* Files. Read access follows the ticket; writing follows the same
+              rule the comment box uses. */}
+          <TicketAttachments
+            ticketId={ticket.id}
+            canModify={canWrite}
+          />
+
           {/* Ticket info */}
           <div className="card-sm p-4">
             <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Ticket Info</h2>
@@ -562,7 +579,7 @@ export function TicketDetailPage() {
           <div className="card-sm p-4">
             <div className="flex items-center justify-between mb-2">
               <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300">SLA</h2>
-              {isAgent && (
+              {canWrite && (
                 <button
                   className="text-xs text-brand-600 dark:text-brand-400 hover:underline"
                   disabled={pauseSLAMutation.isPending || resumeSLAMutation.isPending}

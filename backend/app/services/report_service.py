@@ -11,6 +11,7 @@ from typing import Any
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import ValidationError
 from app.core.logging import get_logger
 from app.models.ticket import Ticket, TicketStatus
 from app.models.user import User
@@ -330,6 +331,60 @@ def _decode_chart_png(image_data_url: str | None) -> bytes | None:
     return decoded or None
 
 
+def _chart_grid(chart: Any) -> tuple[list[str], list[list[Any]]]:
+    """Normalise one chart's rows into (columns, rows-as-lists).
+
+    Rows arrive keyed by column — that is what Recharts holds and what the
+    frontend sends. A list-of-lists is accepted too, because it is the obvious
+    shape for anyone calling this endpoint by hand and there is no reason to
+    reject it.
+
+    Anything genuinely unusable raises ValidationError rather than propagating
+    an AttributeError: the route takes a free-form dict, so a malformed payload
+    is a client error and must not read as a server fault.
+    """
+    if not isinstance(chart, dict):
+        raise ValidationError("Each chart must be an object.")
+
+    rows = chart.get("rows") or []
+    if not isinstance(rows, list):
+        raise ValidationError(
+            f"Chart '{chart.get('title') or 'untitled'}': rows must be a list."
+        )
+    if not rows:
+        return [], []
+
+    declared = chart.get("columns")
+    columns = [str(c) for c in declared] if declared else []
+
+    first = rows[0]
+    if isinstance(first, dict):
+        if not columns:
+            columns = [str(k) for k in first]
+        grid = [
+            [row.get(c, "") for c in columns]
+            for row in rows
+            if isinstance(row, dict)
+        ]
+        return columns, grid
+
+    if isinstance(first, (list, tuple)):
+        if not columns:
+            columns = [f"Column {i + 1}" for i in range(len(first))]
+        grid = [
+            # Pad or trim so a ragged row cannot misalign the whole table.
+            [*row, *([""] * (len(columns) - len(row)))][: len(columns)]
+            for row in rows
+            if isinstance(row, (list, tuple))
+        ]
+        return columns, grid
+
+    raise ValidationError(
+        f"Chart '{chart.get('title') or 'untitled'}': each row must be an "
+        f"object or a list, not {type(first).__name__}."
+    )
+
+
 def generate_analytics_excel(payload: dict) -> bytes:
     """Workbook: a KPI summary sheet, then one sheet per chart's data."""
     from openpyxl import Workbook
@@ -368,8 +423,7 @@ def generate_analytics_excel(payload: dict) -> bytes:
             safe = f"{safe[:28]}_{index}"
         ws = wb.create_sheet(safe)
 
-        rows = chart.get("rows") or []
-        columns = chart.get("columns") or (list(rows[0].keys()) if rows else [])
+        columns, rows = _chart_grid(chart)
 
         ws["A1"] = raw_name
         ws["A1"].font = title_font
@@ -379,8 +433,14 @@ def generate_analytics_excel(payload: dict) -> bytes:
             cell.fill = header_fill
             cell.alignment = Alignment(horizontal="center")
         for row_idx, row in enumerate(rows, start=4):
-            for col_idx, key in enumerate(columns, start=1):
-                ws.cell(row=row_idx, column=col_idx, value=row.get(key))
+            for col_idx, value in enumerate(row, start=1):
+                # openpyxl only accepts scalars; anything nested becomes text.
+                ws.cell(
+                    row=row_idx,
+                    column=col_idx,
+                    value=value if isinstance(value, (str, int, float, bool, type(None)))
+                    else str(value),
+                )
         for col_idx in range(1, max(len(columns), 1) + 1):
             ws.column_dimensions[get_column_letter(col_idx)].width = 22
         if rows:
@@ -466,11 +526,10 @@ def generate_analytics_pdf(payload: dict) -> bytes:
             except Exception:  # noqa: BLE001 - fall back to the table alone
                 log.warning("chart_export.image_render_failed", chart=chart.get("title"))
 
-        rows = chart.get("rows") or []
-        columns = chart.get("columns") or (list(rows[0].keys()) if rows else [])
+        columns, rows = _chart_grid(chart)
         if rows and columns:
             header = [str(c).replace("_", " ").title() for c in columns]
-            body = [[str(r.get(c, "")) for c in columns] for r in rows]
+            body = [[str(v) for v in row] for row in rows]
             table = Table([header] + body, colWidths=[usable_width / len(columns)] * len(columns))
             table.setStyle(TableStyle([
                 ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1A5276")),

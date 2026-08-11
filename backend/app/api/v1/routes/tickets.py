@@ -6,7 +6,8 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, File, Query, Request, UploadFile, status
+from fastapi.responses import Response
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +15,7 @@ from app.api.v1.deps import get_current_user, get_session, require_roles
 from app.core import authz
 from app.core.exceptions import AuthorizationError, NotFoundError, ValidationError
 from app.core.logging import get_logger
+from app.models.attachment import Attachment
 from app.models.audit import AuditAction, AuditLog
 from app.models.comment import CommentSource, TicketComment
 from app.models.escalation import EscalationEvent, EscalationTrigger
@@ -24,6 +26,12 @@ from app.schemas.envelope import ok, paginated
 from app.services.org_service import get_accessible_org_unit_ids
 from app.services.routing_service import RoutingService
 from app.services.sla_service import SLAService
+from app.services.storage_service import (
+    build_key,
+    sanitize_filename,
+    storage,
+    validate_upload,
+)
 from app.services.ticket_service import VALID_TRANSITIONS
 
 log = get_logger(__name__)
@@ -1192,6 +1200,198 @@ async def get_ticket_timeline(
 
     events.sort(key=lambda e: e["at"])
     return ok(events)
+
+
+# ---------------------------------------------------------------------------
+# Attachments
+# ---------------------------------------------------------------------------
+
+def _serialize_attachment(a: Attachment) -> dict:
+    return {
+        "id": str(a.id),
+        "ticket_id": str(a.ticket_id),
+        "filename": a.original_filename,
+        "content_type": a.content_type,
+        "size_bytes": a.size_bytes,
+        "checksum_sha256": a.checksum_sha256,
+        "uploader": (
+            {"id": str(a.uploader.id), "full_name": a.uploader.full_name}
+            if a.uploader else None
+        ),
+        "created_at": a.created_at.isoformat(),
+    }
+
+
+@router.get("/{ticket_id}/attachments", summary="List a ticket's attachments")
+async def list_attachments(
+    ticket_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    # Access is decided by the ticket, not the file: anyone who can read the
+    # ticket can read what is attached to it.
+    await _get_ticket_or_404(ticket_id, db, current_user)
+    rows = (await db.execute(
+        select(Attachment)
+        .where(Attachment.ticket_id == ticket_id)
+        .order_by(Attachment.created_at.desc())
+    )).scalars().all()
+    return ok([_serialize_attachment(a) for a in rows])
+
+
+@router.post(
+    "/{ticket_id}/attachments",
+    status_code=status.HTTP_201_CREATED,
+    summary="Attach a file to a ticket",
+)
+async def upload_attachment(
+    ticket_id: uuid.UUID,
+    request: Request,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Store a file against a ticket.
+
+    The whole body is read into memory before validation because the size limit
+    is small and streaming to storage before knowing the file is acceptable
+    would mean writing rejects to the bucket and cleaning them up afterwards.
+    """
+    authz.assert_can_write(current_user, "attach files")
+    ticket = await _get_ticket_or_404(ticket_id, db, current_user)
+
+    if not _can_modify_ticket(ticket, current_user):
+        raise AuthorizationError("You do not have permission to modify this ticket.")
+
+    data = await file.read()
+    extension = validate_upload(file.filename or "file", file.content_type or "", len(data))
+    safe_name = sanitize_filename(file.filename or f"file.{extension}")
+
+    stored = await storage.upload(
+        build_key(ticket_id, extension), data, file.content_type or "application/octet-stream"
+    )
+
+    attachment = Attachment(
+        id=uuid.uuid4(),
+        ticket_id=ticket_id,
+        uploader_id=current_user.id,
+        original_filename=safe_name,
+        content_type=file.content_type or "application/octet-stream",
+        size_bytes=stored.size_bytes,
+        s3_key=stored.key,
+        s3_bucket=stored.bucket,
+        checksum_sha256=stored.checksum_sha256,
+    )
+    db.add(attachment)
+
+    await _record_audit(
+        db,
+        action=AuditAction.UPDATE,
+        entity_id=str(ticket_id),
+        user=current_user,
+        request=request,
+        new_values={"attachment_added": safe_name, "size_bytes": stored.size_bytes},
+    )
+    await db.commit()
+    await db.refresh(attachment)
+
+    log.info(
+        "attachment_uploaded",
+        ticket_id=str(ticket_id),
+        attachment_id=str(attachment.id),
+        size=stored.size_bytes,
+        user_id=str(current_user.id),
+    )
+    return ok(_serialize_attachment(attachment))
+
+
+@router.get(
+    "/{ticket_id}/attachments/{attachment_id}/download",
+    summary="Download an attachment",
+)
+async def download_attachment(
+    ticket_id: uuid.UUID,
+    attachment_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    """Stream the file back through the API.
+
+    Deliberately not a presigned URL: that would be a bearer token in a query
+    string, outliving the session and readable from history and proxy logs. For
+    bank documents every read goes through the ticket's permission check.
+    """
+    await _get_ticket_or_404(ticket_id, db, current_user)
+
+    attachment = await db.get(Attachment, attachment_id)
+    if attachment is None or attachment.ticket_id != ticket_id:
+        raise NotFoundError("Attachment not found on this ticket.")
+
+    try:
+        data = await storage.download(attachment.s3_key)
+    except Exception as exc:
+        log.exception("attachment_download_failed", key=attachment.s3_key)
+        raise NotFoundError("The stored file could not be retrieved.") from exc
+
+    # The filename was sanitised on the way in, so it is safe in the header.
+    return Response(
+        content=data,
+        media_type=attachment.content_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{attachment.original_filename}"',
+            "Content-Length": str(len(data)),
+        },
+    )
+
+
+@router.delete(
+    "/{ticket_id}/attachments/{attachment_id}",
+    summary="Remove an attachment",
+)
+async def delete_attachment(
+    ticket_id: uuid.UUID,
+    attachment_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    authz.assert_can_write(current_user, "remove attachments")
+    ticket = await _get_ticket_or_404(ticket_id, db, current_user)
+
+    attachment = await db.get(Attachment, attachment_id)
+    if attachment is None or attachment.ticket_id != ticket_id:
+        raise NotFoundError("Attachment not found on this ticket.")
+
+    # The uploader can always remove their own; otherwise agent rights are
+    # needed, so a branch user cannot delete evidence someone else filed.
+    is_uploader = str(attachment.uploader_id) == str(current_user.id)
+    if not is_uploader and not authz.can_write_tickets(current_user):
+        raise AuthorizationError("You can only remove attachments you uploaded.")
+    if not _can_modify_ticket(ticket, current_user):
+        raise AuthorizationError("You do not have permission to modify this ticket.")
+
+    filename = attachment.original_filename
+    key = attachment.s3_key
+
+    await db.delete(attachment)
+    await _record_audit(
+        db,
+        action=AuditAction.UPDATE,
+        entity_id=str(ticket_id),
+        user=current_user,
+        request=request,
+        old_values={"attachment_removed": filename},
+    )
+    await db.commit()
+
+    # Object removed after the row, so a storage failure leaves an orphaned
+    # object rather than a database row pointing at nothing.
+    await storage.delete(key)
+
+    log.info("attachment_deleted", ticket_id=str(ticket_id), attachment_id=str(attachment_id))
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 @router.get(
     "/{ticket_id}/audit",

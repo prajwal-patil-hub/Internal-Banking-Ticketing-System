@@ -132,6 +132,37 @@ def verify_totp(secret: str, code: str) -> bool:
     return pyotp.TOTP(secret).verify(code.strip().replace(" ", ""), valid_window=_TOTP_VALID_WINDOW)
 
 
+#: How many recovery codes an enrolment issues.
+MFA_BACKUP_CODE_COUNT = 10
+
+
+def generate_backup_codes(count: int = MFA_BACKUP_CODE_COUNT) -> list[str]:
+    """Human-transcribable single-use recovery codes.
+
+    Base32 minus the characters people confuse when reading a printed code —
+    no 0/O, no 1/I. Ten characters at 32 symbols is ~50 bits, which needs no
+    rate limit to be unguessable, though login has one anyway.
+    """
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    codes = []
+    for _ in range(count):
+        raw = "".join(secrets.choice(alphabet) for _ in range(10))
+        codes.append(f"{raw[:5]}-{raw[5:]}")
+    return codes
+
+
+def hash_backup_code(code: str) -> str:
+    """Hash for storage and comparison.
+
+    SHA-256, not Argon2: the input is 50 bits of CSPRNG output, so there is no
+    dictionary to slow down, and verification has to scan the user's unused
+    codes on every attempt. Normalised first so case and spacing do not matter
+    to someone typing off a printout.
+    """
+    normalised = code.strip().upper().replace(" ", "").replace("-", "")
+    return hashlib.sha256(normalised.encode()).hexdigest()
+
+
 def create_mfa_challenge_token(*, subject: str) -> tuple[str, datetime]:
     """Short-lived token proving the password step passed.
 

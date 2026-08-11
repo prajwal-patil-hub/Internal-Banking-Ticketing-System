@@ -29,20 +29,17 @@ async def poll_emails_job() -> None:
     try:
         async for _db in get_db():
             try:
-                # Import here to avoid circular imports at module load time.
-                # EmailService and InboundEmail will be implemented in a later phase.
-                from app.models.email_intake import InboundEmail  # noqa: F401
+                # Imported here to avoid a circular import at module load time.
+                from app.services.email_service import EmailService
 
                 log.info("email_poll_started", host=settings.IMAP_HOST, mailbox=settings.IMAP_MAILBOX)
 
-                processed_count = 0
-
-                # EmailService.poll_imap_mailbox() will be wired here once the service
-                # is implemented. The scaffolding below shows the intended contract:
-                #
-                #   email_service = EmailService(db)
-                #   processed_count = await email_service.poll_imap_mailbox()
-                #   await db.commit()
+                # EmailService was fully implemented but nothing ever called
+                # it, so the mailbox was never read and every "Via Email"
+                # ticket came from the seed. Same shape as the SLA worker,
+                # which marked breaches and stopped short of escalating.
+                processed_count = await EmailService(_db).poll_imap_mailbox()
+                await _db.commit()
 
                 log.info("email_poll_completed", processed=processed_count)
 

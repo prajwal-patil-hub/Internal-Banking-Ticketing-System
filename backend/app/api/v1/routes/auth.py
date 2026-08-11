@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
+import uuid
+
 from fastapi import APIRouter, Depends, Request
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import get_current_user, get_session
 from app.core.exceptions import AuthenticationError, ValidationError
 from app.core.logging import get_logger
+from app.models.mfa import MFABackupCode
 from app.core.security import (
     decode_token,
+    generate_backup_codes,
     generate_mfa_secret,
+    hash_backup_code,
     mfa_provisioning_uri,
     mfa_qr_svg,
     verify_password,
@@ -181,11 +187,82 @@ async def mfa_enable(
         raise ValidationError("That code is not valid. Check your authenticator and try again.")
 
     current_user.mfa_enabled = True
+
+    # Recovery codes are shown exactly once, here. Only their hashes are kept,
+    # so there is no way to re-display them later — which is the property that
+    # makes them safe to store at all.
+    await db.execute(
+        delete(MFABackupCode).where(MFABackupCode.user_id == current_user.id)
+    )
+    codes = generate_backup_codes()
+    for code in codes:
+        db.add(MFABackupCode(
+            id=uuid.uuid4(),
+            user_id=current_user.id,
+            code_hash=hash_backup_code(code),
+        ))
     await db.commit()
 
-    log.info("mfa_enabled", user_id=str(current_user.id))
-    return ok({"mfa_enabled": True})
+    log.info("mfa_enabled", user_id=str(current_user.id), backup_codes=len(codes))
+    return ok({
+        "mfa_enabled": True,
+        "backup_codes": codes,
+        "backup_codes_notice": (
+            "Save these now — each works once and they cannot be shown again."
+        ),
+    })
 
+
+
+@router.get("/mfa/backup-codes", summary="How many recovery codes remain")
+async def mfa_backup_code_status(
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    rows = (await db.execute(
+        select(MFABackupCode).where(MFABackupCode.user_id == current_user.id)
+    )).scalars().all()
+    remaining = sum(1 for r in rows if r.used_at is None)
+    return ok({
+        "total": len(rows),
+        "remaining": remaining,
+        "used": len(rows) - remaining,
+        # The codes themselves are unrecoverable by design — only hashes exist.
+        "can_regenerate": current_user.mfa_enabled,
+    })
+
+
+@router.post("/mfa/backup-codes/regenerate", summary="Issue a fresh set of recovery codes")
+async def regenerate_backup_codes(
+    payload: dict,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Replace every code with a new set.
+
+    Requires the password: regenerating invalidates the codes the real owner
+    may be holding, so a hijacked session must not be able to do it quietly.
+    """
+    password = str(payload.get("password", ""))
+    if not password or not verify_password(password, current_user.password_hash):
+        raise AuthenticationError("Password is incorrect.")
+    if not current_user.mfa_enabled:
+        raise ValidationError("Two-factor authentication is not enabled.")
+
+    await db.execute(
+        delete(MFABackupCode).where(MFABackupCode.user_id == current_user.id)
+    )
+    codes = generate_backup_codes()
+    for code in codes:
+        db.add(MFABackupCode(
+            id=uuid.uuid4(),
+            user_id=current_user.id,
+            code_hash=hash_backup_code(code),
+        ))
+    await db.commit()
+
+    log.info("mfa_backup_codes_regenerated", user_id=str(current_user.id))
+    return ok({"backup_codes": codes})
 
 @router.post("/mfa/disable", summary="Turn MFA off (requires the account password)")
 async def mfa_disable(
@@ -201,6 +278,9 @@ async def mfa_disable(
 
     current_user.mfa_enabled = False
     current_user.mfa_secret = None
+    await db.execute(
+        delete(MFABackupCode).where(MFABackupCode.user_id == current_user.id)
+    )
     await db.commit()
 
     log.info("mfa_disabled", user_id=str(current_user.id))
