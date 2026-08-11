@@ -364,6 +364,29 @@ asyncio.run(main())
 
 Run it twice: the second call returns `duplicate` and creates nothing.
 
+## Operations
+
+[`docs/runbook.md`](docs/runbook.md) covers deploying, rolling back, health
+checks, credential rotation, and the failure modes that actually occur here —
+Ollama unreachable, storage down, escalations not firing.
+
+Backups are the part worth reading before you need them:
+
+```bash
+docker compose -f infra/docker-compose.yml exec backend \
+  python scripts/backup.py --out /backups --keep 14
+```
+
+A ticket's attachments live in two stores — the row in Postgres, the bytes in
+S3 — so a database-only backup restores to a system where every attachment
+lists correctly and fails on download. `backup.py` captures both and deletes
+the set rather than write half of one; `restore.py` refuses a half set and
+verifies row counts and object presence before reporting success.
+
+The drill in the runbook has been run against a seeded database: after dropping
+the schema and emptying the bucket, restore brought back 56 tickets and 15
+attachments, each downloading with a checksum identical to before the backup.
+
 ### Running the checks yourself
 
 ```bash
@@ -386,10 +409,11 @@ import restored the check is real, and email intake works.
 
 ```
 backend/    FastAPI service (clean architecture: api → services → repositories → models)
+  scripts/  seed_dev.py, backup.py, restore.py
 frontend/   React SPA (feature-sliced)
-infra/      docker-compose, nginx, CI configs
-docs/       architecture, API reference, runbook
-.github/    CI workflows
+infra/      docker-compose
+docs/       architecture, roadmap, runbook
+.github/    CI workflow
 ```
 
 ## Roadmap (high level)
