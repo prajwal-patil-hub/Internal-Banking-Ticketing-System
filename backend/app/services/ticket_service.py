@@ -248,7 +248,7 @@ class TicketService:
 
         now = datetime.now(UTC)
         old_status_value = current_status.value
-        ticket.status = new_status.value
+        ticket.status = new_status
 
         # Update lifecycle timestamps
         if new_status == TicketStatus.RESOLVED:
@@ -302,7 +302,7 @@ class TicketService:
         )
         current_status = TicketStatus(current_status_str)
         if current_status in (TicketStatus.NEW, TicketStatus.ACKNOWLEDGED):
-            ticket.status = TicketStatus.ASSIGNED.value
+            ticket.status = TicketStatus.ASSIGNED
 
         await self.db.flush()
         await self._audit.log(
@@ -449,7 +449,7 @@ class TicketService:
 
         ticket.duplicate_of_id = original_id
         ticket.is_duplicate = True
-        ticket.status = TicketStatus.CLOSED.value
+        ticket.status = TicketStatus.CLOSED
         ticket.closed_at = datetime.now(UTC)
 
         await self.db.flush()

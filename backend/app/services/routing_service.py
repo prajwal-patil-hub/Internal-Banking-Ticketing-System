@@ -174,10 +174,15 @@ class RoutingService:
         )
 
         ticket.assignee_id = assignee.id
-        # Transition to ASSIGNED if in a pre-assignment state
-        current_status = ticket.status if isinstance(ticket.status, str) else ticket.status.value
-        if current_status in (TicketStatus.NEW.value, TicketStatus.ACKNOWLEDGED.value):
-            ticket.status = TicketStatus.ASSIGNED.value
+        # Transition to ASSIGNED if in a pre-assignment state.
+        #
+        # The isinstance dance that used to be here existed because other code
+        # assigned `TicketStatus.X.value` — a bare string — to this column, so
+        # an in-session ticket could hold either type. Those all assign the
+        # enum now, and `TicketStatus` subclasses `str`, so a plain comparison
+        # is correct either way.
+        if ticket.status in (TicketStatus.NEW, TicketStatus.ACKNOWLEDGED):
+            ticket.status = TicketStatus.ASSIGNED
 
         await self.db.flush()
         log.info(

@@ -292,7 +292,14 @@ async def _generate_ai_response(
                 system=system_prompt or _build_system_prompt(),
                 messages=messages_a,
             )
-            response_text = response.content[0].text if response.content else ""
+            # First block that actually carries text. Indexing [0].text assumes
+            # the first block is a TextBlock, which stops being true the moment
+            # a response leads with a thinking or tool-use block — and the
+            # failure is an AttributeError mid-request, not a bad answer.
+            response_text = next(
+                (block.text for block in response.content if hasattr(block, "text")),
+                "",
+            )
             return AIResult(
                 response_text, response.usage.input_tokens, response.usage.output_tokens
             )

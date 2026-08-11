@@ -389,16 +389,24 @@ attachments, each downloading with a checksum identical to before the backup.
 
 ### Running the checks yourself
 
-```bash
-# Backend suite
-docker compose -f infra/docker-compose.yml exec backend python -m pytest -q
+These are exactly what CI runs, so a green run here means a green run there.
 
-# Frontend typecheck and production build
-cd frontend && npx tsc --noEmit && npm run build
+```bash
+# Backend — lint and 326 tests
+docker compose -f infra/docker-compose.yml exec backend ruff check .
+docker compose -f infra/docker-compose.yml exec backend python -m pytest -q
 
 # Confirm the models and the database still agree
 docker compose -f infra/docker-compose.yml exec backend alembic check
+
+# Frontend — lint, typecheck, 42 tests, production build
+cd frontend && npm run lint && npm run typecheck && npm run test && npm run build
 ```
+
+Use the pinned `ruff` from `pyproject.toml`, not whatever is on your PATH.
+A newer one deprecates rules the pinned version still enforces, so "clean
+locally" can mean nothing about CI — which is exactly how five findings got
+through once.
 
 `alembic check` is worth running after any model change. It was reporting a
 clean bill of health while `inbound_emails` was missing eleven columns, because

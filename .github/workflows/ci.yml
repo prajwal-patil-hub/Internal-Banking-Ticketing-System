@@ -62,9 +62,16 @@ jobs:
       - name: Ruff
         run: ruff check .
 
-      # Still advisory: the annotations are incomplete and turning this into a
-      # gate today would block every unrelated change. It runs so the output is
-      # visible in the log rather than silently skipped.
+      # Advisory, with a number attached so it is not a permanent shrug:
+      # `strict = true` currently reports ~278 errors, of which ~190 are
+      # `dict` written without type parameters. The substantive ones — a raw
+      # string assigned to an enum column in four places — have been fixed.
+      # What remains is missing annotations and imprecise third-party stubs.
+      #
+      # The path to a gate is to relax the two strictness flags the codebase
+      # has never met (`disallow_any_generics`, `disallow_untyped_calls`),
+      # which leaves ~39, then work that down. Turning it on today would block
+      # every unrelated change, which is how a gate gets deleted.
       - name: Mypy (advisory)
         run: mypy app || true
 
