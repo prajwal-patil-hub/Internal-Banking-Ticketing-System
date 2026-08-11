@@ -108,16 +108,36 @@ message to test the parse → ticket path without a server.
 
 ### Attachments
 
-Tickets take file attachments — images, PDFs, text, CSV and Office documents,
-up to 15 MB each — stored in S3/MinIO under randomised per-ticket keys.
+Images, PDFs, text, CSV and Office documents, up to 15 MB each, stored in
+S3/MinIO under randomised per-ticket keys. Files attach at three points:
 
-Files stream **through the API** rather than via presigned URLs. A presigned URL
-is a bearer token in a query string: it outlives the session, survives in
-browser history and proxy logs, and grants access to anyone holding it. For
-bank documents every read goes through the same ticket permission check as the
-rest of the record instead. Executables and archives are refused outright —
-there is no malware scanner here, and an unscanned archive is the classic
-delivery route.
+- **Raising a ticket.** A screenshot of the error or the statement in question
+  usually explains a problem faster than describing it, so the evidence travels
+  with the report rather than arriving later from a side panel.
+- **Replying.** An agent's fix — a corrected statement, a screenshot of the
+  working screen — attaches to the reply that explains it, and the person who
+  raised the ticket sees the two together.
+- **The ticket itself**, from the Attachments panel, which lists every file on
+  the ticket and marks the ones that came in with a reply.
+
+The raiser can answer on their own ticket and attach to it too, which is what
+keeps a "can you send a screenshot of the error?" exchange inside the system
+instead of pushing it out to email.
+
+Two rules worth knowing:
+
+**A file on an internal note is as invisible as the note.** Filtering the note
+while still serving its attachment would leak exactly what the flag exists to
+withhold, and the file is usually the sensitive part. Enforced on both the
+listing and the download, and the download answers 404 rather than 403 so the
+response does not confirm a hidden note exists.
+
+**Files stream through the API**, not via presigned URLs. A presigned URL is a
+bearer token in a query string: it outlives the session, survives in browser
+history and proxy logs, and grants access to anyone holding it. Every read goes
+through the same ticket permission check as the rest of the record. Executables
+and archives are refused outright — there is no malware scanner here, and an
+unscanned archive is the classic delivery route.
 
 ## Branch network
 
@@ -272,8 +292,15 @@ back already `assigned`, with an owner and both SLA deadlines stamped. The
 assignee is the agent with the lightest open queue, never a supervisor or an
 auditor.
 
-**4. Attach a file.** Drag a PDF or screenshot onto the ticket. Then try an
-`.exe` or a `.zip` — refused by type, before a byte is stored.
+**4. Attach files, both ways.** Raise a second ticket as
+`sunita.desai@successbank.local` (a branch user) and drag a screenshot and a PDF
+onto the form *before* submitting — they upload with the ticket. Try an `.exe`
+or a `.zip` too: refused by type, before a byte is stored.
+
+Then pick that ticket up as an agent, reply with a file attached, and switch
+back to Sunita: the file appears under the agent's reply, not in a separate
+pile. Now post an **internal note** with a file attached as the agent — Sunita
+can neither see it nor download it, even with the attachment id.
 
 **5. Try an illegal move.** Push the ticket straight from `assigned` to
 `resolved`. It is rejected, and the error names the moves that *are* available.

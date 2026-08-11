@@ -96,6 +96,11 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
+# `token_type = "Bearer"` is the RFC 6750 scheme name. Newer ruff versions
+# added it to the S105 heuristic while the pinned one has not, so a `noqa`
+# here is flagged as unused by one and required by the other. Ignoring the
+# rule for this file is the one form both versions agree on.
+"app/schemas/auth.py" = ["S105"]
 # `MockAudit` and friends are class-like stand-ins, so the class naming reads
 # correctly even inside a function. S105/S106 fire on every test password.
 "tests/*" = ["S105", "S106", "N806", "E501"]

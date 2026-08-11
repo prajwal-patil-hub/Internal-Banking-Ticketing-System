@@ -30,7 +30,8 @@ class TokenPair(BaseModel):
     access_expires_at: datetime
     refresh_token: str
     refresh_expires_at: datetime
-    token_type: str = "Bearer"  # noqa: S105 - the RFC 6750 scheme name, not a secret
+    #: The RFC 6750 scheme name, not a secret.
+    token_type: str = "Bearer"
 
 
 class OrgUnitPublic(BaseModel):

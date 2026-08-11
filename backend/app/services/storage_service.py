@@ -74,12 +74,10 @@ def _is_unreachable(exc: Exception) -> bool:
 
     return isinstance(
         exc,
-        (
-            EndpointConnectionError,
-            ConnectTimeoutError,
-            ConnectionClosedError,
-            NoCredentialsError,
-        ),
+        EndpointConnectionError
+        | ConnectTimeoutError
+        | ConnectionClosedError
+        | NoCredentialsError,
     )
 
 

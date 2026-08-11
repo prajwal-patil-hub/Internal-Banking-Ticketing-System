@@ -74,14 +74,31 @@ jobs:
       # noisy by design and would fail on every run.
       - name: Check for model/schema drift
         run: |
-          set -o pipefail
-          alembic check 2>&1 | tee /tmp/alembic-check.log || true
+          if alembic check > /tmp/alembic-check.log 2>&1; then
+            echo "No drift: models and migrations agree."
+            exit 0
+          fi
+
+          # `alembic check` exits non-zero for three different reasons, and
+          # they must not be conflated. An earlier version of this step piped
+          # through `|| true` and then grepped for drift markers, so a check
+          # that never connected produced no markers and was reported as a
+          # pass — the exact false-negative this gate exists to prevent.
           if grep -qE "'(add|remove)_(table|column)'" /tmp/alembic-check.log; then
             echo "::error::Models and migrations disagree — a migration is missing."
-            grep -oE "'(add|remove)_(table|column)'.*" /tmp/alembic-check.log | head -20
+            grep -oE "'(add|remove)_(table|column)'[^)]*" /tmp/alembic-check.log | head -20
+            exit 1
+          elif grep -q "New upgrade operations detected" /tmp/alembic-check.log; then
+            # Server defaults and index comparisons differ by design between
+            # SQLAlchemy's python-side defaults and the migrations. Noisy, not
+            # a defect.
+            echo "Only server-default/index differences; no table or column drift."
+            exit 0
+          else
+            echo "::error::alembic check did not run — see log below."
+            cat /tmp/alembic-check.log
             exit 1
           fi
-          echo "No table or column drift."
 
       # No fallback. This step failing must fail the build — the previous
       # `pytest -q || pytest --collect-only -q` reported success whenever the

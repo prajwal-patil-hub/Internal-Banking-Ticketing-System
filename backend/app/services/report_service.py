@@ -365,14 +365,14 @@ def _chart_grid(chart: Any) -> tuple[list[str], list[list[Any]]]:
         ]
         return columns, grid
 
-    if isinstance(first, (list, tuple)):
+    if isinstance(first, list | tuple):
         if not columns:
             columns = [f"Column {i + 1}" for i in range(len(first))]
         grid = [
             # Pad or trim so a ragged row cannot misalign the whole table.
             [*row, *([""] * (len(columns) - len(row)))][: len(columns)]
             for row in rows
-            if isinstance(row, (list, tuple))
+            if isinstance(row, list | tuple)
         ]
         return columns, grid
 
@@ -435,7 +435,7 @@ def generate_analytics_excel(payload: dict) -> bytes:
                 ws.cell(
                     row=row_idx,
                     column=col_idx,
-                    value=value if isinstance(value, (str, int, float, bool, type(None)))
+                    value=value if isinstance(value, str | int | float | bool | None)
                     else str(value),
                 )
         for col_idx in range(1, max(len(columns), 1) + 1):
