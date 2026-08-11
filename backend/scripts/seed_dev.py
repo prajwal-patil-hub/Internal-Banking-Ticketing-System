@@ -856,6 +856,9 @@ async def seed(db: AsyncSession) -> None:
     # --- Demo tickets, comments, escalation events ---------------------------
     await seed_demo_tickets(db)
 
+    # --- Ticket attachments (needs the tickets and comments above) ----------
+    await seed_attachments(db)
+
     # --- Branch network -----------------------------------------------------
     await seed_branches(db)
     await assign_tickets_to_branches(db)
@@ -1162,6 +1165,140 @@ BRANCHES = [
     ("AN-011", "Andheri East",      "Mumbai Metro", "operational", 22, ""),
     ("PI-012", "Pimpri-Chinchwad",  "Pune",         "operational", 14, ""),
 ]
+
+
+#: Small but genuinely valid files, so a demo download opens in a real viewer
+#: rather than producing a corrupt-file warning. Each is a complete document of
+#: its type — a 1x1 PNG, a minimal one-page PDF, and plain CSV.
+_PNG_1PX = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
+    "890000000a49444154789c6360000002000100fdff03fa0000000049454e44ae426082"
+)
+
+_MINIMAL_PDF = (
+    b"%PDF-1.4\n"
+    b"1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+    b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
+    b"3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 100]>>endobj\n"
+    b"trailer<</Root 1 0 R>>\n"
+    b"%%EOF\n"
+)
+
+_DISPUTE_CSV = (
+    b"date,description,amount,channel\n"
+    b"2026-08-09,POS PURCHASE 4417,12400.00,card\n"
+    b"2026-08-09,POS PURCHASE 4417,12400.00,card\n"
+    b"2026-08-10,REVERSAL 4417,-12400.00,card\n"
+)
+
+
+async def seed_attachments(db: AsyncSession) -> None:
+    """Put real files on a few demo tickets, and one on an agent's reply.
+
+    Uploads the bytes to object storage rather than only writing rows: an
+    Attachment whose `s3_key` points at nothing looks fine in the list and
+    fails on download, which is a worse demo than having no attachments.
+
+    Skipped with an explanation if storage is unreachable — seeding must not
+    fail because MinIO happens to be down.
+    """
+    from sqlalchemy import select
+
+    from app.models.attachment import Attachment
+    from app.models.comment import TicketComment
+    from app.models.ticket import Ticket
+    from app.services.storage_service import build_key, storage
+
+    existing = (await db.execute(select(Attachment).limit(1))).scalar_one_or_none()
+    if existing is not None:
+        print("  [seed] Attachments already exist — skipped")
+        return
+
+    try:
+        await storage.ensure_bucket()
+    except Exception as exc:  # storage is optional for a demo
+        print(f"  [seed] Object storage unavailable, skipping attachments ({exc})")
+        return
+
+    tickets = list((await db.execute(
+        select(Ticket).where(Ticket.tags.any(DEMO_TAG)).order_by(Ticket.created_at.desc()).limit(6)
+    )).scalars().all())
+    if not tickets:
+        print("  [seed] No demo tickets to attach files to — skipped")
+        return
+
+    files = [
+        ("screenshot_error.png", _PNG_1PX, "image/png"),
+        ("account_statement.pdf", _MINIMAL_PDF, "application/pdf"),
+        ("disputed_transactions.csv", _DISPUTE_CSV, "text/csv"),
+    ]
+
+    created = 0
+    on_replies = 0
+
+    for index, ticket in enumerate(tickets):
+        # Evidence from the person who raised it — one or two files per ticket.
+        for name, payload, content_type in files[: 1 + (index % 3)]:
+            extension = name.rsplit(".", 1)[-1]
+            try:
+                stored = await storage.upload(build_key(ticket.id, extension), payload, content_type)
+            except Exception as exc:  # see docstring
+                print(f"  [seed] Upload failed, skipping attachments ({exc})")
+                return
+            db.add(Attachment(
+                ticket_id=ticket.id,
+                uploader_id=ticket.reporter_id,
+                original_filename=name,
+                content_type=content_type,
+                size_bytes=stored.size_bytes,
+                s3_key=stored.key,
+                s3_bucket=stored.bucket,
+                checksum_sha256=stored.checksum_sha256,
+            ))
+            created += 1
+
+        # And a fix attached to an agent's public reply, so the ticket page
+        # shows the answer and its file together.
+        reply = (await db.execute(
+            select(TicketComment)
+            .where(
+                TicketComment.ticket_id == ticket.id,
+                TicketComment.is_internal.is_(False),
+                TicketComment.author_id.is_not(None),
+                TicketComment.author_id != ticket.reporter_id,
+            )
+            .order_by(TicketComment.created_at.desc())
+            .limit(1)
+        )).scalar_one_or_none()
+        if reply is None:
+            continue
+
+        try:
+            stored = await storage.upload(
+                build_key(ticket.id, "pdf"), _MINIMAL_PDF, "application/pdf"
+            )
+        except Exception as exc:  # see docstring
+            print(f"  [seed] Upload failed, skipping reply attachments ({exc})")
+            break
+        db.add(Attachment(
+            ticket_id=ticket.id,
+            comment_id=reply.id,
+            uploader_id=reply.author_id,
+            original_filename="corrected_statement.pdf",
+            content_type="application/pdf",
+            size_bytes=stored.size_bytes,
+            s3_key=stored.key,
+            s3_bucket=stored.bucket,
+            checksum_sha256=stored.checksum_sha256,
+        ))
+        created += 1
+        on_replies += 1
+
+    await db.flush()
+    print(
+        f"  [seed] Created {created} attachments across {len(tickets)} tickets "
+        f"({on_replies} attached to an agent's reply)"
+    )
 
 
 async def seed_branches(db: AsyncSession) -> None:
