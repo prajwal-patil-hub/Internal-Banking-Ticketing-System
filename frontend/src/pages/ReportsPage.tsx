@@ -223,8 +223,12 @@ export function ReportsPage() {
         status: statusFilter || undefined,
         priority: priorityFilter || undefined,
       });
-    } catch (e: any) {
-      setDownloadError(e?.response?.data?.detail ?? 'Download failed. Please try again.');
+    } catch (e) {
+      // `extractError` reads this API's envelope, `{error: {message}}`. The
+      // previous `e.response.data.detail` is FastAPI's default shape, which
+      // this app does not return — so the server's real message was never
+      // shown and every failure read "Download failed. Please try again."
+      setDownloadError(extractError(e).message);
     } finally {
       setDownloading(false);
     }

@@ -124,7 +124,12 @@ export function AIChatWidget() {
         },
         abort.signal,
       );
-    } catch (err) {
+    } catch (streamErr) {
+      // Held separately from the catch binding: if the blocking fallback also
+      // fails, its error is the one worth reporting — it is the more recent
+      // and more specific failure.
+      let failure: unknown = streamErr;
+
       if (abort.signal.aborted) {
         setMessages((prev) => prev.filter((m) => m.id !== STREAMING_ID));
         setSending(false);
@@ -151,14 +156,14 @@ export function AIChatWidget() {
           );
           return;
         } catch (fallbackErr) {
-          err = fallbackErr;
+          failure = fallbackErr;
         }
       }
 
       setMessages((prev) => prev.filter((m) => m.id !== STREAMING_ID));
       // A failed call is usually a local-Ollama setup problem, not a bug in the
       // app — ask the backend what is actually wrong so the user sees the fix.
-      const base = extractError(err).message;
+      const base = extractError(failure).message;
       try {
         const health = await getAIHealth();
         setError(health.hint ? `${base} — ${health.hint}` : base);

@@ -121,7 +121,8 @@ export function TicketsPage() {
     const t = setTimeout(() => {
       setSearchParams((prev) => {
         const next = new URLSearchParams(prev);
-        searchInput ? next.set('q', searchInput) : next.delete('q');
+        if (searchInput) next.set('q', searchInput);
+        else next.delete('q');
         next.delete('page');
         return next;
       });
@@ -132,9 +133,12 @@ export function TicketsPage() {
   const applyFilters = () => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
-      draftStatus   ? next.set('status',   draftStatus)   : next.delete('status');
-      draftPriority ? next.set('priority', draftPriority) : next.delete('priority');
-      draftMyTickets ? next.set('mine', '1')              : next.delete('mine');
+      if (draftStatus) next.set('status', draftStatus);
+      else next.delete('status');
+      if (draftPriority) next.set('priority', draftPriority);
+      else next.delete('priority');
+      if (draftMyTickets) next.set('mine', '1');
+      else next.delete('mine');
       next.delete('page');
       return next;
     });

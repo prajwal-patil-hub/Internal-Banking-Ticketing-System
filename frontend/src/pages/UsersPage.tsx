@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/Button';
 import { cn } from '@/lib/cn';
+import { extractError } from '@/lib/api';
 import {
   listUsers, createUser, updateUser, deactivateUser,
   getLevels, listOrgUnits, listOrgRoles,
@@ -53,7 +54,10 @@ function UserFormModal({
       is_super_admin: form.is_super_admin,
     }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); onClose(); },
-    onError: (e: any) => setError(e?.response?.data?.detail ?? 'Failed to create user.'),
+    // `.detail` is FastAPI's default error shape; this API returns
+    // `{error: {message}}`, so the real reason — "Only a super admin can grant
+    // super admin privileges", for one — was never reaching the screen.
+    onError: (e) => setError(extractError(e).message),
   });
 
   const updateMut = useMutation({
@@ -67,7 +71,7 @@ function UserFormModal({
       ...(form.password ? { password: form.password } : {}),
     }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); onClose(); },
-    onError: (e: any) => setError(e?.response?.data?.detail ?? 'Failed to update user.'),
+    onError: (e) => setError(extractError(e).message),
   });
 
   return (
