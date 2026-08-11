@@ -4,8 +4,10 @@ Production-style internal ticketing platform for a bank. Branches raise issues,
 admin triages, agents resolve, supervisors monitor SLAs, auditors review
 immutable logs.
 
-> Status: **Phase P0 — Bootstrap complete.** See `docs/architecture.md` for the
-> full plan and `docs/roadmap.md` for phase-by-phase delivery.
+> Status: **P0–P8 delivered.** Auth and RBAC, the ticket lifecycle, SLA engine,
+> escalations, audit trail, attachments, email intake, MFA with recovery codes,
+> and a grounded local-model assistant are all wired end to end. See
+> `docs/architecture.md` for the design and `docs/roadmap.md` for the phases.
 
 ## Stack
 
@@ -81,6 +83,42 @@ agents entirely. Auditors and branch users are never candidates.
 Pass `auto_assign: false` when creating a ticket to leave it unassigned for
 manual triage.
 
+### By email
+
+With `IMAP_ENABLED=true` the mail worker polls the support mailbox every two
+minutes. A new message becomes a ticket; a reply is threaded onto the ticket it
+belongs to as a public comment, matched on `In-Reply-To`, `References` or an
+`X-Ticket-ID` header rather than on the subject line alone. Messages are
+de-duplicated by `Message-ID`, so a mailbox re-scan cannot create the same
+ticket twice, and obvious spam is scored and parked instead of raised.
+
+The model is asked to extract a title, category and priority from the body. If
+it is unreachable the message still becomes a ticket, carrying the subject and
+the raw body — a triage backlog is recoverable, a silently dropped customer
+email is not.
+
+`infra/docker-compose.yml` includes Mailpit, which catches everything the system
+**sends** — SLA breach warnings, escalation notices — at <http://localhost:8025>,
+so those stop failing silently in development.
+
+Mailpit speaks SMTP, not IMAP, so it cannot feed the intake poller. Point
+`IMAP_HOST`/`IMAP_USER`/`IMAP_PASSWORD` at a real mailbox to exercise inbound
+mail, or drive `EmailService.process_inbound_email()` directly with a parsed
+message to test the parse → ticket path without a server.
+
+### Attachments
+
+Tickets take file attachments — images, PDFs, text, CSV and Office documents,
+up to 15 MB each — stored in S3/MinIO under randomised per-ticket keys.
+
+Files stream **through the API** rather than via presigned URLs. A presigned URL
+is a bearer token in a query string: it outlives the session, survives in
+browser history and proxy logs, and grants access to anyone holding it. For
+bank documents every read goes through the same ticket permission check as the
+rest of the record instead. Executables and archives are refused outright —
+there is no malware scanner here, and an unscanned archive is the classic
+delivery route.
+
 ## Branch network
 
 **Branches** in the sidebar shows the physical network: which branches are
@@ -127,8 +165,16 @@ for a code before issuing any token.
 Turning MFA off requires the account password, not just a live session — a
 stolen access token must not be enough to strip the second factor.
 
-There are no printed backup codes yet, so a lost device is recovered by an
-admin clearing the enrolment (`POST /api/v1/users/{id}/mfa/reset`).
+Enrolment issues **ten single-use recovery codes**, shown once and never again:
+only their SHA-256 hashes are stored, which is what makes them safe to keep at
+all. Any one of them can be typed in place of a code at sign-in, so a lost
+phone is not a lost account. Spending a code marks it used rather than deleting
+it, so "a recovery code was used at 09:14" stays answerable after an incident,
+and replaying one fails. Regenerating the set requires the account password,
+since it invalidates whatever the real owner is holding.
+
+If every code is also gone, an admin can still clear the enrolment
+(`POST /api/v1/users/{id}/mfa/reset`).
 
 ## Escalation
 
@@ -202,6 +248,113 @@ Note that the first reply after an idle period is slow — the model has to load
 before it emits a token, which on an M2 Mac can take under a minute. Timeouts on
 both sides are sized for that (`AI_TIMEOUT_SECONDS`, default 180s).
 
+## Walking the system
+
+A pass that touches every subsystem, in an order where each step sets up the
+next. Roughly fifteen minutes.
+
+**1. Bring it up and sign in as an agent.**
+
+```bash
+docker compose -f infra/docker-compose.yml up -d
+```
+
+Open <http://localhost:5173> as `aisha.khan@successbank.local` / `Passw0rd@123`.
+
+**2. Check the dashboard adds up.** Click any KPI card — *Open*, *SLA
+Breached*, *Critical*, *AI Sorted*, *Escalated*, and the three live tiles in the
+AI panel. Each opens a ticket list filtered to exactly the number on the card.
+That equality is the point: a card that opens a list with a different total
+reads as a broken filter, so it is verified on every build.
+
+**3. Raise a ticket and watch it route itself.** *New Ticket* → save. It comes
+back already `assigned`, with an owner and both SLA deadlines stamped. The
+assignee is the agent with the lightest open queue, never a supervisor or an
+auditor.
+
+**4. Attach a file.** Drag a PDF or screenshot onto the ticket. Then try an
+`.exe` or a `.zip` — refused by type, before a byte is stored.
+
+**5. Try an illegal move.** Push the ticket straight from `assigned` to
+`resolved`. It is rejected, and the error names the moves that *are* available.
+`resolved` requires the ticket to have been worked; `closed` is reachable from
+anywhere, because closing early is a withdrawal rather than a resolution.
+
+**6. Escalate it.** Use *Escalate* on the ticket page. The ticket moves to
+`escalated`, is reassigned to the least-loaded holder of the target role, and
+gains an entry in the timeline. Escalating again does nothing — the same
+trigger will not fire twice.
+
+**7. Confirm the auditor really is read-only.** Sign in as
+`deepak.iyer@successbank.local`. Every dashboard, report and audit log opens;
+every write — comment, status change, upload — is refused. This is enforced in
+`backend/app/core/authz.py`, not in the UI, so hitting the API directly gets the
+same answer.
+
+**8. Enrol a second factor.** As `super.admin@successbank.local`, open
+**Security** → scan the QR → confirm one code. Save the ten recovery codes it
+shows you. Sign out, sign back in — it now asks for a code. Use a **recovery
+code** instead of the app. It works once; try the same one again and it is
+rejected.
+
+**9. Export something.** On **Reports** or the dashboard, export as PNG, PDF and
+Excel. The PDF carries each chart's image above the numbers behind it; the
+workbook has a summary sheet plus one sheet per chart.
+
+**10. Ask the assistant.** Open a ticket and ask *"what is this about?"*, then
+*"what should I pick up first?"*. It answers from the record, streaming as it
+goes. Then point it at a ticket your role cannot see — it declines rather than
+inventing one. If it cannot reach the model, `GET /api/v1/ai/health` says why in
+plain English.
+
+**11. Check the outbound mail.** Open Mailpit at <http://localhost:8025> — the
+escalation you raised in step 6 is sitting there. Inbound intake needs a real
+IMAP mailbox (see *Ticket intake → By email*); to exercise the parse → ticket
+path without one:
+
+```bash
+docker compose -f infra/docker-compose.yml exec backend python -c "
+import asyncio
+from app.db.session import SessionLocal
+from app.services.email_service import EmailService, _parse_raw_email
+
+RAW = b'''From: Priya Customer <priya@example.com>
+To: support@successbank.local
+Subject: Card blocked after travel
+Message-ID: <demo-1@example.com>
+
+My debit card was blocked while travelling. Please unblock it.
+'''
+
+async def main():
+    async with SessionLocal() as db:
+        rec = await EmailService(db).process_inbound_email(_parse_raw_email(RAW))
+        print(rec.status, rec.ticket_id)
+
+asyncio.run(main())
+"
+```
+
+Run it twice: the second call returns `duplicate` and creates nothing.
+
+### Running the checks yourself
+
+```bash
+# Backend suite
+docker compose -f infra/docker-compose.yml exec backend python -m pytest -q
+
+# Frontend typecheck and production build
+cd frontend && npx tsc --noEmit && npm run build
+
+# Confirm the models and the database still agree
+docker compose -f infra/docker-compose.yml exec backend alembic check
+```
+
+`alembic check` is worth running after any model change. It was reporting a
+clean bill of health while `inbound_emails` was missing eleven columns, because
+`alembic/env.py` never imported the models and its metadata was empty. With the
+import restored the check is real, and email intake works.
+
 ## Repository layout
 
 ```
@@ -215,15 +368,15 @@ docs/       architecture, API reference, runbook
 ## Roadmap (high level)
 
 - **P0** Bootstrap *(✓)*
-- **P1** Auth & RBAC
-- **P2** Core domain (branches, categories, teams, tickets)
-- **P3** Ticket workflow (assignment, comments, attachments)
-- **P4** SLA engine
-- **P5** Escalations & notifications
-- **P6** Audit trail
-- **P7** UI polish
-- **P8** Hardening (rate limit, MFA, metrics)
-- **P9** DevOps finalisation
+- **P1** Auth & RBAC *(✓)*
+- **P2** Core domain (branches, categories, teams, tickets) *(✓)*
+- **P3** Ticket workflow (assignment, comments, attachments) *(✓)*
+- **P4** SLA engine *(✓)*
+- **P5** Escalations & notifications *(✓)*
+- **P6** Audit trail *(✓)*
+- **P7** UI polish *(✓)*
+- **P8** Hardening (rate limit, MFA, metrics) *(✓)*
+- **P9** DevOps finalisation — CI gates, deployment, backup/restore drill
 
 ## License
 
