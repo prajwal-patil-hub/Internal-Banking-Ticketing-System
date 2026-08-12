@@ -45,12 +45,45 @@ class TicketStatus(str, enum.Enum):
     REOPENED = "reopened"
 
 
+#: Statuses where work is still outstanding.
+#:
+#: One definition, because there were six and they disagreed: the dashboard and
+#: the SLA worker excluded ON_HOLD while the ticket list and the AI's workspace
+#: digest included it, so "Open: 15" on the dashboard and the list it linked to
+#: showed different totals. A ticket on hold is unresolved work — it is paused,
+#: not finished — so it counts as open everywhere.
+OPEN_STATUSES: tuple[TicketStatus, ...] = ()  # populated below
+
+
 class TicketSource(str, enum.Enum):
     EMAIL = "email"
     PORTAL = "portal"
     PHONE = "phone"
     CHAT = "chat"
     API = "api"
+
+
+OPEN_STATUSES = (
+    TicketStatus.NEW,
+    TicketStatus.ACKNOWLEDGED,
+    TicketStatus.ASSIGNED,
+    TicketStatus.IN_PROGRESS,
+    TicketStatus.ON_HOLD,
+    TicketStatus.ESCALATED,
+    TicketStatus.REOPENED,
+)
+
+#: Same set as raw strings, for the queries that compare against the column
+#: value rather than the enum member.
+OPEN_STATUS_VALUES: frozenset[str] = frozenset(s.value for s in OPEN_STATUSES)
+
+#: Boundaries for the AI risk bands, shared by the dashboard's "High Risk"
+#: tile and the `?ai_risk=` list filter. Defined once for the same reason
+#: OPEN_STATUSES is: when a tile's threshold and its drill-down's threshold
+#: are written out separately, they drift, and the card opens a list that
+#: contradicts the number on it.
+AI_RISK_HIGH_THRESHOLD: float = 0.7
+AI_RISK_MEDIUM_THRESHOLD: float = 0.4
 
 
 class TicketCategory(UUIDPKMixin, TimestampMixin, Base):
@@ -63,7 +96,7 @@ class TicketCategory(UUIDPKMixin, TimestampMixin, Base):
     description: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
-    subcategories: Mapped[list["TicketSubCategory"]] = relationship(
+    subcategories: Mapped[list[TicketSubCategory]] = relationship(
         back_populates="category", lazy="selectin"
     )
 
@@ -82,7 +115,7 @@ class TicketSubCategory(UUIDPKMixin, TimestampMixin, Base):
     description: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
-    category: Mapped["TicketCategory"] = relationship(
+    category: Mapped[TicketCategory] = relationship(
         back_populates="subcategories", lazy="selectin"
     )
 
@@ -102,24 +135,24 @@ class Ticket(UUIDPKMixin, TimestampMixin, Base):
 
     # Core identity
     ticket_number: Mapped[str] = mapped_column(
-        String(20), unique=True, index=True, nullable=False
+        String(50), unique=True, index=True, nullable=False
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Status / priority / source
     status: Mapped[TicketStatus] = mapped_column(
-        Enum(TicketStatus, name="ticketstatus"),
+        Enum(TicketStatus, name="ticketstatus", values_callable=lambda x: [e.value for e in x]),
         default=TicketStatus.NEW,
         nullable=False,
     )
     priority: Mapped[TicketPriority] = mapped_column(
-        Enum(TicketPriority, name="ticketpriority"),
+        Enum(TicketPriority, name="ticketpriority", values_callable=lambda x: [e.value for e in x]),
         default=TicketPriority.MEDIUM,
         nullable=False,
     )
     source: Mapped[TicketSource] = mapped_column(
-        Enum(TicketSource, name="ticketsource"),
+        Enum(TicketSource, name="ticketsource", values_callable=lambda x: [e.value for e in x]),
         default=TicketSource.PORTAL,
         nullable=False,
     )
@@ -148,13 +181,20 @@ class Ticket(UUIDPKMixin, TimestampMixin, Base):
         nullable=True,
     )
 
-    # Branch / department
+    # Branch / department / org unit
     branch_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("branches.id", ondelete="SET NULL"),
         nullable=True,
     )
+    org_unit_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("org_units.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     department: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    reopen_count: Mapped[int] = mapped_column(default=0, nullable=False)
 
     # Tags
     tags: Mapped[list[str] | None] = mapped_column(
@@ -215,24 +255,27 @@ class Ticket(UUIDPKMixin, TimestampMixin, Base):
     internal_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Relationships
-    category: Mapped["TicketCategory | None"] = relationship(
+    category: Mapped[TicketCategory | None] = relationship(
         foreign_keys=[category_id], lazy="selectin"
     )
-    subcategory: Mapped["TicketSubCategory | None"] = relationship(
+    subcategory: Mapped[TicketSubCategory | None] = relationship(
         foreign_keys=[subcategory_id], lazy="selectin"
     )
-    reporter: Mapped["User"] = relationship(  # type: ignore[name-defined]
+    reporter: Mapped[User] = relationship(  # type: ignore[name-defined]  # noqa: F821
         foreign_keys=[reporter_id], lazy="selectin"
     )
-    assignee: Mapped["User | None"] = relationship(  # type: ignore[name-defined]
+    assignee: Mapped[User | None] = relationship(  # type: ignore[name-defined]  # noqa: F821
         foreign_keys=[assignee_id], lazy="selectin"
     )
-    comments: Mapped[list["TicketComment"]] = relationship(  # type: ignore[name-defined]
+    comments: Mapped[list[TicketComment]] = relationship(  # type: ignore[name-defined]  # noqa: F821
         back_populates="ticket", lazy="selectin", cascade="all, delete-orphan"
     )
-    attachments: Mapped[list["Attachment"]] = relationship(  # type: ignore[name-defined]
+    attachments: Mapped[list[Attachment]] = relationship(  # type: ignore[name-defined]  # noqa: F821
         back_populates="ticket", lazy="selectin", cascade="all, delete-orphan"
     )
-    duplicate_of: Mapped["Ticket | None"] = relationship(
+    duplicate_of: Mapped[Ticket | None] = relationship(
         foreign_keys=[duplicate_of_id], remote_side="Ticket.id", lazy="selectin"
+    )
+    org_unit: Mapped[OrgUnit | None] = relationship(  # type: ignore[name-defined]  # noqa: F821
+        foreign_keys=[org_unit_id], lazy="selectin"
     )

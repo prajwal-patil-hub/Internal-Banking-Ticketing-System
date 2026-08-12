@@ -1,4 +1,4 @@
-import { api } from '@/lib/api';
+import { api, AI_TIMEOUT_MS, extractError } from '@/lib/api';
 
 export type TicketStatus =
   | 'new'
@@ -24,10 +24,17 @@ export interface Ticket {
   source: TicketSource;
   category_id: string | null;
   subcategory_id: string | null;
+  category: { id: string; code: string; name: string } | null;
+  subcategory: { id: string; code: string; name: string } | null;
   reporter_id: string;
+  reporter: { id: string; email: string; full_name: string } | null;
   assignee_id: string | null;
+  assignee: { id: string; email: string; full_name: string } | null;
   branch_id: string | null;
+  org_unit_id: string | null;
+  org_unit: { id: string; name: string; code: string; level: string | null } | null;
   department: string | null;
+  reopen_count: number;
   tags: string[];
   ai_category: string | null;
   ai_confidence: number | null;
@@ -36,10 +43,12 @@ export interface Ticket {
   ai_sentiment: string | null;
   email_from: string | null;
   sla_breached: boolean;
+  sla_paused_at: string | null;
   response_due_at: string | null;
   resolution_due_at: string | null;
   first_response_at: string | null;
   resolved_at: string | null;
+  closed_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -74,6 +83,8 @@ export interface Comment {
   is_internal: boolean;
   source: string;
   ai_generated: boolean;
+  /** Files sent with this reply. Absent on responses from an older server. */
+  attachments?: Attachment[];
   created_at: string;
 }
 
@@ -106,6 +117,14 @@ export interface TicketListParams {
   page?: number;
   page_size?: number;
   my_tickets?: boolean;
+  sla_breached?: boolean;
+  source?: TicketSource;
+  /** All statuses with outstanding work, or everything finished. */
+  status_group?: 'open' | 'closed';
+  ai_categorized?: boolean;
+  /** ISO date or datetime; a bare date means midnight UTC. */
+  created_from?: string;
+  resolved_from?: string;
 }
 
 export interface PaginatedResponse<T> {
@@ -117,8 +136,20 @@ export interface PaginatedResponse<T> {
 }
 
 export async function listTickets(params?: TicketListParams): Promise<PaginatedResponse<TicketSummary>> {
-  const { data } = await api.get('/tickets', { params });
-  return data.data;
+  // Backend uses `per_page`; frontend convention is `page_size` — map here
+  const { page_size, ...rest } = params ?? {};
+  const queryParams = { ...rest, ...(page_size !== undefined ? { per_page: page_size } : {}) };
+  const { data } = await api.get('/tickets', { params: queryParams });
+  // Backend envelope: { data: items[], meta: { pagination: { page, size, total, pages } } }
+  const items: TicketSummary[] = data.data ?? [];
+  const pg = data.meta?.pagination ?? {};
+  return {
+    items,
+    total:       pg.total      ?? 0,
+    page:        pg.page       ?? 1,
+    page_size:   pg.size       ?? (page_size ?? 20),
+    total_pages: pg.pages      ?? 1,
+  };
 }
 
 export async function getTicket(id: string): Promise<Ticket> {
@@ -141,17 +172,19 @@ export async function updateTicketStatus(
   status: TicketStatus,
   comment?: string,
 ): Promise<Ticket> {
-  const { data } = await api.patch(`/tickets/${id}/status`, { status, comment });
+  const { data } = await api.post(`/tickets/${id}/status`, { status, reason: comment });
   return data.data;
 }
 
 export async function assignTicket(id: string, assignee_id: string): Promise<Ticket> {
-  const { data } = await api.patch(`/tickets/${id}/assign`, { assignee_id });
+  const { data } = await api.post(`/tickets/${id}/assign`, { assignee_id });
   return data.data;
 }
 
-export async function getComments(ticketId: string): Promise<Comment[]> {
-  const { data } = await api.get(`/tickets/${ticketId}/comments`);
+export async function getComments(ticketId: string, includeInternal = true): Promise<Comment[]> {
+  const { data } = await api.get(`/tickets/${ticketId}/comments`, {
+    params: { include_internal: includeInternal },
+  });
   return data.data;
 }
 
@@ -170,22 +203,26 @@ export async function getCategories(): Promise<Category[]> {
 }
 
 export async function aiSummarize(ticketId: string): Promise<{ summary: string; sentiment: string; risk_score: number }> {
-  const { data } = await api.post(`/tickets/${ticketId}/ai/summarize`);
+  const { data } = await api.post(`/tickets/${ticketId}/ai-summarize`, undefined, {
+    timeout: AI_TIMEOUT_MS,
+  });
   return data.data;
 }
 
 export async function aiSuggest(ticketId: string): Promise<{ suggestions: string[]; next_actions: string[] }> {
-  const { data } = await api.post(`/tickets/${ticketId}/ai/suggest`);
+  const { data } = await api.post(`/tickets/${ticketId}/ai-suggest`, undefined, {
+    timeout: AI_TIMEOUT_MS,
+  });
   return data.data;
 }
 
 export async function pauseSLA(ticketId: string, reason?: string): Promise<Ticket> {
-  const { data } = await api.post(`/tickets/${ticketId}/sla/pause`, { reason });
+  const { data } = await api.post(`/tickets/${ticketId}/pause-sla`, { reason });
   return data.data;
 }
 
 export async function resumeSLA(ticketId: string): Promise<Ticket> {
-  const { data } = await api.post(`/tickets/${ticketId}/sla/resume`);
+  const { data } = await api.post(`/tickets/${ticketId}/resume-sla`);
   return data.data;
 }
 
@@ -197,6 +234,159 @@ export async function getAuditLog(params?: {
   page?: number;
   page_size?: number;
 }): Promise<PaginatedResponse<AuditEntry>> {
-  const { data } = await api.get('/audit', { params });
+  const { page_size, ...rest } = params ?? {};
+  const queryParams = { ...rest, ...(page_size !== undefined ? { per_page: page_size } : {}) };
+  const { data } = await api.get('/audit', { params: queryParams });
+  const items: AuditEntry[] = data.data ?? [];
+  const pg = data.meta?.pagination ?? {};
+  return {
+    items,
+    total:       pg.total      ?? 0,
+    page:        pg.page       ?? 1,
+    page_size:   pg.size       ?? (page_size ?? 50),
+    total_pages: pg.pages      ?? 1,
+  };
+}
+
+// ── Timeline ─────────────────────────────────────────────────────────────────
+
+export type TimelineKind =
+  | 'created' | 'comment' | 'internal_note' | 'status_change'
+  | 'assignment' | 'escalation' | 'resolved' | 'closed';
+
+export interface TimelineEvent {
+  kind: TimelineKind;
+  /** ISO timestamp. */
+  at: string;
+  title: string;
+  detail: string;
+  actor: string | null;
+  /** Escalations only: raised by the SLA worker rather than a person. */
+  automatic?: boolean;
+}
+
+/** The ticket's full history, merged from comments, audit rows and escalations. */
+export async function getTicketTimeline(ticketId: string): Promise<TimelineEvent[]> {
+  const { data } = await api.get(`/tickets/${ticketId}/timeline`);
   return data.data;
+}
+
+export interface EscalateResult {
+  ticket: Ticket;
+  escalated_to: { id: string; full_name: string } | null;
+  rule: string | null;
+}
+
+/** Run the escalation engine by hand — same path the breach worker takes. */
+export async function escalateTicket(
+  ticketId: string,
+  reason: string,
+  trigger: 'manual' | 'high_risk' | 'regulatory' | 'vip_customer' = 'manual',
+): Promise<EscalateResult> {
+  const { data } = await api.post(`/tickets/${ticketId}/escalate`, { reason, trigger });
+  return data.data;
+}
+
+// ── Attachments ──────────────────────────────────────────────────────────────
+
+export interface Attachment {
+  id: string;
+  ticket_id: string;
+  /** null when the file came in with the ticket; set when sent with a reply. */
+  comment_id: string | null;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  checksum_sha256: string | null;
+  uploader: { id: string; full_name: string } | null;
+  created_at: string;
+}
+
+/** Mirrors the server's limit — checked here only to fail fast, not to trust. */
+export const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024;
+
+export async function listAttachments(ticketId: string): Promise<Attachment[]> {
+  const { data } = await api.get(`/tickets/${ticketId}/attachments`);
+  return data.data;
+}
+
+/**
+ * Upload one file. Pass `commentId` to hang it off a reply rather than the
+ * ticket — that is what puts an agent's fix next to the answer explaining it.
+ */
+export async function uploadAttachment(
+  ticketId: string,
+  file: File,
+  commentId?: string,
+): Promise<Attachment> {
+  const form = new FormData();
+  form.append('file', file);
+  const { data } = await api.post(`/tickets/${ticketId}/attachments`, form, {
+    params: commentId ? { comment_id: commentId } : undefined,
+    // Uploads are slower than JSON calls and the default 15s is too tight for
+    // a 15MB file on a slow link.
+    timeout: 120_000,
+  });
+  return data.data;
+}
+
+/** What the server accepts. Kept here so the picker and the hint agree. */
+export const ATTACHMENT_ACCEPT =
+  'image/*,.pdf,.txt,.csv,.xlsx,.xls,.doc,.docx';
+
+export interface UploadOutcome {
+  file: File;
+  ok: boolean;
+  error?: string;
+}
+
+/**
+ * Upload several files, reporting each one's fate rather than failing the set.
+ *
+ * Uploads run one at a time on purpose: a ticket raised with five screenshots
+ * would otherwise open five concurrent multipart requests, and the failure
+ * that matters (the store being down) is the one where firing them in parallel
+ * helps least.
+ */
+export async function uploadAttachments(
+  ticketId: string,
+  files: File[],
+  opts: { commentId?: string; onProgress?: (done: number, total: number) => void } = {},
+): Promise<UploadOutcome[]> {
+  const results: UploadOutcome[] = [];
+  for (const [index, file] of files.entries()) {
+    try {
+      await uploadAttachment(ticketId, file, opts.commentId);
+      results.push({ file, ok: true });
+    } catch (err) {
+      results.push({ file, ok: false, error: extractError(err).message });
+    }
+    opts.onProgress?.(index + 1, files.length);
+  }
+  return results;
+}
+
+/**
+ * Fetch through the API and save via a blob URL.
+ *
+ * A plain <a href> cannot carry the bearer token, and the server deliberately
+ * does not issue presigned URLs — every read goes through the permission check.
+ */
+export async function downloadAttachment(ticketId: string, att: Attachment): Promise<void> {
+  const res = await api.get(`/tickets/${ticketId}/attachments/${att.id}/download`, {
+    responseType: 'blob',
+    timeout: 120_000,
+  });
+  const url = URL.createObjectURL(new Blob([res.data], { type: att.content_type }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = att.filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+export async function deleteAttachment(ticketId: string, attachmentId: string): Promise<void> {
+  await api.delete(`/tickets/${ticketId}/attachments/${attachmentId}`);
 }

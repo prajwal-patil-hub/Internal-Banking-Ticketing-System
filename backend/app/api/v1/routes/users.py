@@ -1,28 +1,287 @@
-"""User-self endpoints. Admin user management lands later (P2)."""
+"""User management API — full CRUD with org hierarchy assignment."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+import uuid
+from typing import Annotated
 
-from app.api.v1.deps import get_current_user
+from fastapi import APIRouter, Depends, Query, Response, status
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.v1.deps import get_current_user, get_session, require_roles
+from app.core import authz
+from app.core.exceptions import AuthorizationError, ConflictError, NotFoundError, ValidationError
+from app.models.org import OrgRole, OrgUnit
+from app.models.role import Role
 from app.models.user import User
-from app.schemas.auth import UserPublic
-from app.schemas.envelope import ok
+from app.schemas.envelope import ok, paginated
 
 router = APIRouter(prefix="/users", tags=["users"])
 
 
-@router.get("/me")
-async def me(user: User = Depends(get_current_user)) -> dict:
-    return ok(
-        UserPublic.model_validate(
-            {
-                "id": user.id,
-                "email": user.email,
-                "full_name": user.full_name,
-                "role": user.role.name,
-                "branch_id": user.branch_id,
-                "mfa_enabled": user.mfa_enabled,
-            }
-        ).model_dump(mode="json")
+# ---------------------------------------------------------------------------
+# Serializer
+# ---------------------------------------------------------------------------
+
+def _serialize_user(user: User) -> dict:
+    return {
+        "id": str(user.id),
+        "email": user.email,
+        "full_name": user.full_name,
+        "role_id": str(user.role_id),
+        "role": user.role.name if user.role else None,
+        "branch_id": str(user.branch_id) if user.branch_id else None,
+        "org_unit_id": str(user.org_unit_id) if user.org_unit_id else None,
+        "org_unit": {
+            "id": str(user.org_unit.id),
+            "name": user.org_unit.name,
+            "code": user.org_unit.code,
+            "level": user.org_unit.hierarchy_level.name if user.org_unit.hierarchy_level else None,
+        } if user.org_unit else None,
+        "org_role_id": str(user.org_role_id) if user.org_role_id else None,
+        "org_role": {
+            "id": str(user.org_role.id),
+            "name": user.org_role.name,
+            "can_manage_unit": user.org_role.can_manage_unit,
+            "can_manage_subtree": user.org_role.can_manage_subtree,
+        } if user.org_role else None,
+        "is_super_admin": user.is_super_admin,
+        "is_active": user.is_active,
+        "mfa_enabled": user.mfa_enabled,
+        "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
+        "created_at": user.created_at.isoformat(),
+        "updated_at": user.updated_at.isoformat(),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+
+@router.get("/me", summary="Get current user profile")
+async def get_me(current_user: User = Depends(get_current_user)) -> dict:
+    return ok(_serialize_user(current_user))
+
+
+@router.get("", summary="List users (admin)")
+async def list_users(
+    org_unit_id: Annotated[uuid.UUID | None, Query()] = None,
+    role: Annotated[str | None, Query()] = None,
+    search: Annotated[str | None, Query(max_length=100)] = None,
+    is_active: Annotated[bool | None, Query()] = None,
+    page: Annotated[int, Query(ge=1)] = 1,
+    per_page: Annotated[int, Query(ge=1, le=100)] = 20,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_roles("admin", "supervisor")),
+) -> dict:
+    from sqlalchemy import or_
+    stmt = select(User)
+    if org_unit_id:
+        stmt = stmt.where(User.org_unit_id == org_unit_id)
+    if is_active is not None:
+        stmt = stmt.where(User.is_active == is_active)
+    if search:
+        term = f"%{search}%"
+        stmt = stmt.where(or_(User.full_name.ilike(term), User.email.ilike(term)))
+    if role:
+        stmt = stmt.join(Role, User.role_id == Role.id).where(Role.name == role)
+
+    # Non-super-admins with org_unit scope see only users in their accessible subtree
+    if not current_user.is_super_admin and current_user.org_unit_id:
+        from app.services.org_service import get_accessible_org_unit_ids
+        accessible = await get_accessible_org_unit_ids(current_user, db)
+        if accessible is not None:
+            stmt = stmt.where(User.org_unit_id.in_(accessible))
+
+    total = (await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
+    stmt = stmt.order_by(User.full_name).offset((page - 1) * per_page).limit(per_page)
+    users = (await db.execute(stmt)).scalars().all()
+    return paginated([_serialize_user(u) for u in users], page=page, size=per_page, total=total)
+
+
+@router.get("/{user_id}", summary="Get user by ID (admin)")
+async def get_user(
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_roles("admin", "supervisor")),
+) -> dict:
+    user = await _get_user_or_404(user_id, db)
+    return ok(_serialize_user(user))
+
+
+@router.post("", status_code=status.HTTP_201_CREATED, summary="Create user (admin)")
+async def create_user(
+    payload: dict,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_roles("admin")),
+) -> dict:
+    from app.core.security import hash_password
+
+    email = payload.get("email", "").strip().lower()
+    full_name = payload.get("full_name", "").strip()
+    password = payload.get("password", "")
+    role_name = payload.get("role", "branch_user")
+
+    if not email or not full_name or not password:
+        raise ValidationError("email, full_name, and password are required.")
+    if len(password) < 8:
+        raise ValidationError("Password must be at least 8 characters.")
+
+    # Check uniqueness
+    existing = await db.execute(select(User.id).where(User.email == email))
+    if existing.scalar_one_or_none():
+        raise ConflictError(f"User with email '{email}' already exists.")
+
+    # Resolve role
+    role_result = await db.execute(select(Role).where(Role.name == role_name))
+    role = role_result.scalar_one_or_none()
+    if not role:
+        raise ValidationError(f"Role '{role_name}' not found.")
+
+    # Resolve org_unit
+    org_unit_id = None
+    if payload.get("org_unit_id"):
+        org_unit_id = uuid.UUID(str(payload["org_unit_id"]))
+        ou = await db.execute(select(OrgUnit.id).where(OrgUnit.id == org_unit_id))
+        if not ou.scalar_one_or_none():
+            raise ValidationError(f"OrgUnit '{org_unit_id}' not found.")
+
+    # Resolve org_role
+    org_role_id = None
+    if payload.get("org_role_id"):
+        org_role_id = uuid.UUID(str(payload["org_role_id"]))
+        orole = await db.execute(select(OrgRole.id).where(OrgRole.id == org_role_id))
+        if not orole.scalar_one_or_none():
+            raise ValidationError(f"OrgRole '{org_role_id}' not found.")
+
+    # An ordinary admin must not be able to mint a super admin: they choose the
+    # password too, so it would be a two-call path to full control.
+    wants_super = bool(payload.get("is_super_admin", False))
+    authz.assert_can_grant_super_admin(current_user, wants_super)
+
+    user = User(
+        email=email,
+        full_name=full_name,
+        password_hash=hash_password(password),
+        role_id=role.id,
+        org_unit_id=org_unit_id,
+        org_role_id=org_role_id,
+        is_super_admin=wants_super,
+        is_active=bool(payload.get("is_active", True)),
     )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    return ok(_serialize_user(user))
+
+
+@router.patch("/{user_id}", summary="Update user (admin)")
+async def update_user(
+    user_id: uuid.UUID,
+    payload: dict,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_roles("admin")),
+) -> dict:
+    user = await _get_user_or_404(user_id, db)
+    # Without this an admin could reset a super admin's password and sign in
+    # as them — the whole privilege ladder in one call.
+    authz.assert_can_manage_user(current_user, user)
+
+    if "is_super_admin" in payload:
+        authz.assert_can_grant_super_admin(current_user, bool(payload["is_super_admin"]))
+
+    if "role" in payload and str(user.id) == str(current_user.id):
+        raise AuthorizationError("You cannot change your own role.")
+
+    if "full_name" in payload:
+        user.full_name = payload["full_name"]
+    if "is_active" in payload:
+        user.is_active = bool(payload["is_active"])
+    if "is_super_admin" in payload:
+        user.is_super_admin = bool(payload["is_super_admin"])
+
+    if "role" in payload:
+        role_result = await db.execute(select(Role).where(Role.name == payload["role"]))
+        role = role_result.scalar_one_or_none()
+        if not role:
+            raise ValidationError(f"Role '{payload['role']}' not found.")
+        user.role_id = role.id
+
+    if "org_unit_id" in payload:
+        if payload["org_unit_id"]:
+            org_unit_id = uuid.UUID(str(payload["org_unit_id"]))
+            ou = await db.execute(select(OrgUnit.id).where(OrgUnit.id == org_unit_id))
+            if not ou.scalar_one_or_none():
+                raise ValidationError(f"OrgUnit '{org_unit_id}' not found.")
+            user.org_unit_id = org_unit_id
+        else:
+            user.org_unit_id = None
+
+    if "org_role_id" in payload:
+        if payload["org_role_id"]:
+            org_role_id = uuid.UUID(str(payload["org_role_id"]))
+            orole = await db.execute(select(OrgRole.id).where(OrgRole.id == org_role_id))
+            if not orole.scalar_one_or_none():
+                raise ValidationError(f"OrgRole '{org_role_id}' not found.")
+            user.org_role_id = org_role_id
+        else:
+            user.org_role_id = None
+
+    if "password" in payload:
+        from app.core.security import hash_password
+        if len(payload["password"]) < 8:
+            raise ValidationError("Password must be at least 8 characters.")
+        user.password_hash = hash_password(payload["password"])
+
+    await db.commit()
+    await db.refresh(user)
+    return ok(_serialize_user(user))
+
+
+@router.post("/{user_id}/mfa/reset", summary="Clear a user's MFA enrolment (admin)")
+async def reset_user_mfa(
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_roles("admin")),
+) -> dict:
+    """Recovery path for a lost authenticator device.
+
+    There are no printed backup codes, so without this an enrolled user who
+    loses their phone is permanently locked out — a password reset alone would
+    not help, because the second factor is still demanded.
+    """
+    user = await _get_user_or_404(user_id, db)
+    authz.assert_can_manage_user(current_user, user)
+
+    user.mfa_enabled = False
+    user.mfa_secret = None
+    await db.commit()
+    return ok({"user_id": str(user_id), "mfa_enabled": False})
+
+
+@router.delete("/{user_id}")
+async def deactivate_user(
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_roles("admin")),
+) -> Response:
+    if str(user_id) == str(current_user.id):
+        raise AuthorizationError("Cannot deactivate your own account.")
+    user = await _get_user_or_404(user_id, db)
+    authz.assert_can_manage_user(current_user, user)
+    user.is_active = False
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------------
+# Helper
+# ---------------------------------------------------------------------------
+
+async def _get_user_or_404(user_id: uuid.UUID, db: AsyncSession) -> User:
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise NotFoundError(f"User {user_id} not found.")
+    return user

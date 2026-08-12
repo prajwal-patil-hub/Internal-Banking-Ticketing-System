@@ -6,16 +6,15 @@ is unavailable (logs the failure, does not raise into the caller).
 
 from __future__ import annotations
 
-import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 import aiosmtplib
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.ticket import Ticket
-from sqlalchemy.ext.asyncio import AsyncSession
 
 log = get_logger(__name__)
 

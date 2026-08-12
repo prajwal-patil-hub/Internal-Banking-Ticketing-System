@@ -1,6 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { Card } from '@/components/Card';
 import { Button } from '@/components/Button';
 import { TicketCard } from '@/components/TicketCard';
 import { useAuth } from '@/store/auth';
@@ -14,28 +13,17 @@ import {
   getAIMetrics,
 } from '@/features/dashboard/api';
 import type { KPIData, SLAStatus, AIMetrics } from '@/features/dashboard/api';
-import type { TicketSummary } from '@/features/tickets/api';
+import { listTickets } from '@/features/tickets/api';
 
 const STALE = 30_000;
 
-// ---------- Skeleton ----------
+// ── Skeleton ─────────────────────────────────────────────────────────────────
 
-function Skeleton({ className }: { className?: string }) {
-  return (
-    <div className={cn('animate-pulse rounded-xl bg-slate-200 dark:bg-slate-800', className)} />
-  );
+function Sk({ className }: { className?: string }) {
+  return <div className={cn('animate-pulse rounded-lg bg-[var(--inset)]', className)} />;
 }
 
-function KPISkeleton() {
-  return (
-    <Card className="flex flex-col gap-2">
-      <Skeleton className="h-3 w-24" />
-      <Skeleton className="h-8 w-16 mt-1" />
-    </Card>
-  );
-}
-
-// ---------- KPI Card ----------
+// ── KPI Card ─────────────────────────────────────────────────────────────────
 
 interface KPICardProps {
   label: string;
@@ -43,331 +31,409 @@ interface KPICardProps {
   suffix?: string;
   tone?: 'default' | 'danger' | 'success' | 'warning';
   icon: string;
+  delta?: { value: number; label: string };
+  /** Where this number lives in full. Omit to leave the card inert. */
+  to?: string;
+  /** Tooltip naming the drill-down, so the destination is not a surprise. */
+  hint?: string;
 }
 
-function KPICard({ label, value, suffix, tone = 'default', icon }: KPICardProps) {
-  const valueClass = {
-    default: 'text-slate-900 dark:text-slate-100',
-    danger: 'text-red-600',
-    success: 'text-emerald-600',
-    warning: 'text-amber-600',
+function KPICard({ label, value, suffix, tone = 'default', icon, delta, to, hint }: KPICardProps) {
+  const navigate = useNavigate();
+  const toneClasses = {
+    default: { value: 'text-[var(--tx)]',   icon: 'bg-[var(--brand-xs)] text-[var(--brand)]' },
+    danger:  { value: 'text-[var(--err)]',  icon: 'bg-[var(--err-bg)] text-[var(--err)]' },
+    success: { value: 'text-[var(--ok)]',   icon: 'bg-[var(--ok-bg)] text-[var(--ok)]' },
+    warning: { value: 'text-[var(--warn)]', icon: 'bg-[var(--warn-bg)] text-[var(--warn)]' },
   }[tone];
 
-  return (
-    <Card className="flex flex-col gap-1 relative overflow-hidden">
-      <div className="flex items-start justify-between">
-        <span className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400 font-medium">
+  const body = (
+    <>
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] uppercase tracking-widest text-[var(--tx-3)] font-semibold truncate pr-2">
           {label}
         </span>
-        <div className="h-8 w-8 rounded-lg bg-brand-50 dark:bg-brand-900/30 flex items-center justify-center shrink-0">
-          <svg className="h-4 w-4 text-brand-600 dark:text-brand-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <div className={cn('h-7 w-7 rounded-lg flex items-center justify-center shrink-0', toneClasses.icon)}>
+          <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d={icon} />
           </svg>
         </div>
       </div>
-      <div className="flex items-end gap-1 mt-1">
-        <span className={cn('text-3xl font-semibold tabular-nums', valueClass)}>
+      <div className="flex items-end gap-1.5">
+        <span className={cn('text-2xl font-bold tabular-nums leading-none', toneClasses.value)}>
           {value}
         </span>
         {suffix && (
-          <span className="text-sm text-slate-500 mb-1">{suffix}</span>
+          <span className="text-xs text-[var(--tx-3)] mb-0.5 font-medium">{suffix}</span>
         )}
       </div>
-    </Card>
+      {delta && (
+        <div className="flex items-center gap-1">
+          <span className={cn('text-[10px] font-medium', delta.value >= 0 ? 'text-[var(--ok)]' : 'text-[var(--err)]')}>
+            {delta.value >= 0 ? '↑' : '↓'} {Math.abs(delta.value)}
+          </span>
+          <span className="text-[10px] text-[var(--tx-3)]">{delta.label}</span>
+        </div>
+      )}
+    </>
+  );
+
+  if (!to) {
+    return <div className="card-sm flex flex-col gap-2.5">{body}</div>;
+  }
+
+  // A real <button>, not a div with onClick: this gets keyboard activation,
+  // focus-visible and screen-reader semantics for free.
+  return (
+    <button
+      type="button"
+      onClick={() => navigate(to)}
+      title={hint}
+      aria-label={`${label}: ${value}${suffix ? ' ' + suffix : ''}. ${hint ?? 'View details'}`}
+      className={cn(
+        'card-sm flex flex-col gap-2.5 text-left w-full group',
+        'transition-transform duration-150 hover:-translate-y-0.5',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)] focus-visible:ring-offset-2',
+        'focus-visible:ring-offset-[var(--bg)] cursor-pointer',
+      )}
+    >
+      {body}
+      <span className="text-[10px] text-[var(--tx-3)] opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
+        View
+        <svg className="h-2.5 w-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M9 18l6-6-6-6" />
+        </svg>
+      </span>
+    </button>
   );
 }
 
-// ---------- SLA Health Bar ----------
+// ── SLA Health ────────────────────────────────────────────────────────────────
 
-function SLAHealthBar({ sla }: { sla: SLAStatus }) {
+function SLAHealthCard({ sla }: { sla: SLAStatus }) {
+  const navigate = useNavigate();
   const total = sla.on_time + sla.at_risk + sla.breached;
-  const onTimePct = total > 0 ? (sla.on_time / total) * 100 : 0;
-  const atRiskPct = total > 0 ? (sla.at_risk / total) * 100 : 0;
-  const breachedPct = total > 0 ? (sla.breached / total) * 100 : 0;
+  const pct = (n: number) => (total > 0 ? (n / total) * 100 : 0);
 
   return (
-    <Card>
+    <div className="card-sm">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-base font-semibold">SLA Health</h2>
+        <span className="text-sm font-semibold text-[var(--tx)]">SLA Health</span>
         <span className={cn(
-          'pill text-sm font-semibold',
-          sla.compliance_rate >= 90 ? 'bg-emerald-100 text-emerald-700' :
-          sla.compliance_rate >= 75 ? 'bg-amber-100 text-amber-700' :
-          'bg-red-100 text-red-700',
+          'pill',
+          sla.compliance_rate >= 90 ? 'pill-ok' :
+          sla.compliance_rate >= 75 ? 'pill-warn' :
+          'pill-err',
         )}>
-          {sla.compliance_rate.toFixed(1)}% compliant
+          {sla.compliance_rate.toFixed(1)}% SLO
         </span>
       </div>
 
       {/* Segmented bar */}
-      <div className="flex rounded-full overflow-hidden h-4 gap-0.5">
-        {onTimePct > 0 && (
-          <div
-            className="bg-emerald-500 transition-all duration-700"
-            style={{ width: `${onTimePct}%` }}
-            title={`On time: ${sla.on_time}`}
-          />
+      <div className="flex rounded-full overflow-hidden h-2.5 gap-px mb-3 bg-[var(--inset)]">
+        {pct(sla.on_time) > 0 && (
+          <div className="bg-emerald-500 transition-all duration-700" style={{ width: `${pct(sla.on_time)}%` }} title={`On time: ${sla.on_time}`} />
         )}
-        {atRiskPct > 0 && (
-          <div
-            className="bg-amber-400 transition-all duration-700"
-            style={{ width: `${atRiskPct}%` }}
-            title={`At risk: ${sla.at_risk}`}
-          />
+        {pct(sla.at_risk) > 0 && (
+          <div className="bg-amber-400 transition-all duration-700" style={{ width: `${pct(sla.at_risk)}%` }} title={`At risk: ${sla.at_risk}`} />
         )}
-        {breachedPct > 0 && (
-          <div
-            className="bg-red-500 transition-all duration-700"
-            style={{ width: `${breachedPct}%` }}
-            title={`Breached: ${sla.breached}`}
-          />
+        {pct(sla.breached) > 0 && (
+          <div className="bg-red-500 transition-all duration-700" style={{ width: `${pct(sla.breached)}%` }} title={`Breached: ${sla.breached}`} />
         )}
       </div>
 
-      <div className="flex items-center gap-4 mt-3 text-xs text-slate-600 dark:text-slate-400">
-        <span className="flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 inline-block" />
-          On Time: {sla.on_time}
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-full bg-amber-400 inline-block" />
-          At Risk: {sla.at_risk}
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-full bg-red-500 inline-block" />
-          Breached: {sla.breached}
-        </span>
+      <div className="grid grid-cols-3 gap-2 text-center">
+        {[
+          // At Risk has no server-side filter of its own — it is a derived
+          // "due within the hour" window — so it opens the SLA Monitor, which
+          // computes exactly that. The other two map to real filters.
+          { label: 'On Time',  count: sla.on_time,  color: 'bg-emerald-500', to: '/sla' },
+          { label: 'At Risk',  count: sla.at_risk,  color: 'bg-amber-400',   to: '/sla' },
+          { label: 'Breached', count: sla.breached, color: 'bg-red-500',
+            to: '/tickets?status_group=open&sla_breached=1' },
+        ].map(({ label, count, color, to }) => (
+          <button
+            key={label}
+            type="button"
+            onClick={() => navigate(to)}
+            aria-label={`${label}: ${count}. View these tickets.`}
+            className={cn(
+              'flex flex-col items-center gap-0.5 rounded-lg py-1 -my-1 transition-colors',
+              'hover:bg-[var(--inset)] cursor-pointer',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]',
+            )}
+          >
+            <div className="flex items-center gap-1">
+              <span className={cn('h-2 w-2 rounded-full inline-block', color)} />
+              <span className="text-xs font-bold tabular-nums text-[var(--tx)]">{count}</span>
+            </div>
+            <span className="text-[10px] text-[var(--tx-3)]">{label}</span>
+          </button>
+        ))}
       </div>
-    </Card>
+    </div>
   );
 }
 
-// ---------- Category Distribution ----------
+// ── Category Distribution ─────────────────────────────────────────────────────
 
-interface CategoryItem {
-  category: string;
-  count: number;
-  percentage: number;
-}
+interface CategoryItem { category: string; count: number; percentage: number }
 
-function CategoryDistribution({ items }: { items: CategoryItem[] }) {
+function CategoryChart({ items }: { items: CategoryItem[] }) {
   const maxCount = Math.max(...items.map((i) => i.count), 1);
+  const shown = items.slice(0, 7);
 
   return (
-    <Card>
-      <h2 className="text-base font-semibold mb-4">Category Distribution</h2>
-      <div className="flex flex-col gap-2.5">
-        {items.slice(0, 8).map((item) => (
-          <div key={item.category} className="flex items-center gap-3">
-            <span className="text-xs text-slate-600 dark:text-slate-400 w-32 truncate shrink-0" title={item.category}>
+    <div className="card-sm">
+      <span className="text-sm font-semibold text-[var(--tx)] block mb-3">Category Breakdown</span>
+      <div className="flex flex-col gap-1.5">
+        {shown.map((item) => (
+          <div key={item.category} className="flex items-center gap-2">
+            <span className="text-xs text-[var(--tx-2)] w-28 truncate shrink-0" title={item.category}>
               {item.category}
             </span>
-            <div className="flex-1 h-5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+            <div className="flex-1 h-1.5 bg-[var(--inset)] rounded-full overflow-hidden">
               <div
-                className="h-full bg-brand-500 rounded-full transition-all duration-700"
+                className="h-full bg-[var(--brand)] rounded-full transition-all duration-700"
                 style={{ width: `${(item.count / maxCount) * 100}%` }}
               />
             </div>
-            <span className="text-xs font-medium text-slate-700 dark:text-slate-300 w-10 text-right shrink-0">
-              {item.count}
-            </span>
-            <span className="text-xs text-slate-400 w-10 text-right shrink-0">
-              {item.percentage.toFixed(0)}%
-            </span>
+            <div className="flex items-center gap-1 shrink-0">
+              <span className="text-xs font-semibold tabular-nums text-[var(--tx-2)] w-7 text-right">{item.count}</span>
+              <span className="text-[10px] text-[var(--tx-3)] w-7 text-right">{item.percentage.toFixed(0)}%</span>
+            </div>
           </div>
         ))}
         {items.length === 0 && (
-          <p className="text-sm text-slate-400 text-center py-4">No data available</p>
+          <p className="text-xs text-[var(--tx-3)] text-center py-3">No data yet</p>
         )}
       </div>
-    </Card>
+    </div>
   );
 }
 
-// ---------- Department Load Table ----------
+// ── Department Table ─────────────────────────────────────────────────────────
 
-interface DeptLoad {
-  department: string;
-  open_count: number;
-  breached_count: number;
-  avg_age_hours: number;
-}
+interface DeptLoad { department: string; open_count: number; breached_count: number; avg_age_hours: number }
 
-function DepartmentTable({ rows }: { rows: DeptLoad[] }) {
+function DeptTable({ rows }: { rows: DeptLoad[] }) {
   return (
-    <Card padded={false}>
-      <div className="p-6 pb-2">
-        <h2 className="text-base font-semibold">Department Load</h2>
+    <div className="card-sm !p-0 overflow-hidden">
+      <div className="px-4 py-3 border-b border-[var(--line)]">
+        <span className="text-sm font-semibold text-[var(--tx)]">Department Load</span>
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-slate-100 dark:border-slate-800">
-              <th className="text-left px-6 py-2 text-xs uppercase tracking-wide text-slate-500 font-medium">Department</th>
-              <th className="text-right px-4 py-2 text-xs uppercase tracking-wide text-slate-500 font-medium">Open</th>
-              <th className="text-right px-4 py-2 text-xs uppercase tracking-wide text-slate-500 font-medium">Breached</th>
-              <th className="text-right px-6 py-2 text-xs uppercase tracking-wide text-slate-500 font-medium">Avg Age</th>
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="border-b border-[var(--line)]">
+            <th className="text-left px-4 py-2 text-[10px] uppercase tracking-wider text-[var(--tx-3)] font-semibold">Department</th>
+            <th className="text-right px-3 py-2 text-[10px] uppercase tracking-wider text-[var(--tx-3)] font-semibold">Open</th>
+            <th className="text-right px-3 py-2 text-[10px] uppercase tracking-wider text-[var(--tx-3)] font-semibold">Breached</th>
+            <th className="text-right px-4 py-2 text-[10px] uppercase tracking-wider text-[var(--tx-3)] font-semibold">Avg Age</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, idx) => (
+            <tr
+              key={row.department}
+              className={cn(
+                'transition-colors hover:bg-[var(--raised)]',
+                idx < rows.length - 1 && 'border-b border-[var(--line)]',
+              )}
+            >
+              <td className="px-4 py-2.5 font-medium text-[var(--tx)]">{row.department}</td>
+              <td className="px-3 py-2.5 text-right tabular-nums text-[var(--tx-2)]">{row.open_count}</td>
+              <td className="px-3 py-2.5 text-right tabular-nums">
+                {row.breached_count > 0
+                  ? <span className="text-[var(--err)] font-semibold">{row.breached_count}</span>
+                  : <span className="text-[var(--tx-3)]">—</span>}
+              </td>
+              <td className="px-4 py-2.5 text-right tabular-nums text-[var(--tx-2)]">
+                {row.avg_age_hours < 24 ? `${row.avg_age_hours.toFixed(1)}h` : `${(row.avg_age_hours / 24).toFixed(1)}d`}
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, idx) => (
-              <tr
-                key={row.department}
-                className={cn(
-                  'border-b border-slate-50 dark:border-slate-800/50 hover:bg-surface-subtle dark:hover:bg-slate-800/30 transition-colors',
-                  idx === rows.length - 1 && 'border-b-0',
-                )}
-              >
-                <td className="px-6 py-3 font-medium text-slate-800 dark:text-slate-200">{row.department}</td>
-                <td className="px-4 py-3 text-right tabular-nums">{row.open_count}</td>
-                <td className="px-4 py-3 text-right tabular-nums">
-                  {row.breached_count > 0 ? (
-                    <span className="text-red-600 font-medium">{row.breached_count}</span>
-                  ) : (
-                    <span className="text-slate-400">0</span>
-                  )}
-                </td>
-                <td className="px-6 py-3 text-right tabular-nums text-slate-500">
-                  {row.avg_age_hours < 24
-                    ? `${row.avg_age_hours.toFixed(1)}h`
-                    : `${(row.avg_age_hours / 24).toFixed(1)}d`}
-                </td>
-              </tr>
-            ))}
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={4} className="px-6 py-8 text-center text-slate-400 text-sm">No department data</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </Card>
+          ))}
+          {rows.length === 0 && (
+            <tr>
+              <td colSpan={4} className="px-4 py-6 text-center text-[var(--tx-3)]">No department data</td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
-// ---------- AI Metrics Card ----------
+// ── AI Metrics ────────────────────────────────────────────────────────────────
 
-function AIMetricsCard({ metrics }: { metrics: AIMetrics }) {
+function AIMetricsPanel({ metrics, sinceDate }: { metrics: AIMetrics; sinceDate: string }) {
+  const navigate = useNavigate();
+
+  // Every tile that stands for a set of tickets opens that set, matching the
+  // KPI strip above. Latency and confidence describe the model rather than a
+  // list of tickets, so they stay inert instead of navigating somewhere
+  // arbitrary.
+  const tiles: Array<{
+    label: string;
+    value: string | number;
+    className?: string;
+    to?: string;
+    hint?: string;
+  }> = [
+    {
+      label: 'Categorized',
+      value: metrics.total_categorized,
+      to: `/tickets?ai_categorized=1&created_from=${sinceDate}`,
+      hint: 'Show tickets the AI categorised',
+    },
+    {
+      label: 'Avg Confidence',
+      value: `${(metrics.avg_confidence * 100).toFixed(0)}%`,
+    },
+    {
+      label: 'High Risk',
+      value: metrics.high_risk_tickets,
+      className: metrics.high_risk_tickets > 0 ? 'text-[var(--err)]' : '',
+      to: '/tickets?status_group=open&ai_risk=high',
+      hint: 'Show open tickets the AI scored high risk',
+    },
+    {
+      label: 'AI-Assisted Resolved',
+      value: metrics.ai_assisted_resolved ?? metrics.auto_resolved,
+      // `status_group=closed` is exactly {resolved, closed} — the set the
+      // metric counts. Linking to status=resolved alone would drop every
+      // ticket that has since been closed and undercount the card.
+      to: `/tickets?status_group=closed&ai_categorized=1&resolved_from=${sinceDate}`,
+      hint: 'Show AI-triaged tickets that were resolved',
+    },
+    { label: 'Avg Latency', value: `${metrics.avg_latency_ms.toFixed(0)}ms` },
+  ];
+
   return (
-    <Card>
-      <div className="flex items-center gap-2 mb-4">
-        <div className="h-7 w-7 rounded-lg bg-accent-100 dark:bg-accent-500/20 flex items-center justify-center">
-          <svg className="h-4 w-4 text-accent-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <div className="card-sm">
+      <div className="flex items-center gap-2 mb-3">
+        <div className="h-6 w-6 rounded-lg bg-[var(--brand-xs)] flex items-center justify-center">
+          <svg className="h-3.5 w-3.5 text-[var(--brand)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M12 2a10 10 0 0 1 0 20M12 2a10 10 0 0 0 0 20M12 8v4M12 16h.01" />
           </svg>
         </div>
-        <h2 className="text-base font-semibold">AI Metrics</h2>
+        <span className="text-sm font-semibold text-[var(--tx)]">AI Metrics</span>
       </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div className="flex flex-col gap-0.5">
-          <span className="text-xs text-slate-500">Categorized</span>
-          <span className="text-xl font-semibold tabular-nums">{metrics.total_categorized}</span>
-        </div>
-        <div className="flex flex-col gap-0.5">
-          <span className="text-xs text-slate-500">Avg Confidence</span>
-          <span className="text-xl font-semibold tabular-nums">{(metrics.avg_confidence * 100).toFixed(0)}%</span>
-        </div>
-        <div className="flex flex-col gap-0.5">
-          <span className="text-xs text-slate-500">High Risk</span>
-          <span className="text-xl font-semibold tabular-nums text-red-600">{metrics.high_risk_tickets}</span>
-        </div>
-        <div className="flex flex-col gap-0.5">
-          <span className="text-xs text-slate-500">Avg Latency</span>
-          <span className="text-xl font-semibold tabular-nums">{metrics.avg_latency_ms.toFixed(0)}ms</span>
-        </div>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+        {tiles.map(({ label, value, className, to, hint }) => {
+          const body = (
+            <>
+              <span className="text-[10px] text-[var(--tx-3)] uppercase tracking-wide font-medium">{label}</span>
+              <span className={cn('text-xl font-bold tabular-nums text-[var(--tx)]', className)}>{value}</span>
+            </>
+          );
+
+          return to ? (
+            <button
+              key={label}
+              type="button"
+              onClick={() => navigate(to)}
+              title={hint}
+              className="flex flex-col gap-0.5 text-left rounded-lg -mx-1 px-1 py-0.5
+                         hover:bg-[var(--inset)] focus-visible:outline-none
+                         focus-visible:ring-2 focus-visible:ring-[var(--brand)] transition-colors"
+            >
+              {body}
+            </button>
+          ) : (
+            <div key={label} className="flex flex-col gap-0.5">{body}</div>
+          );
+        })}
       </div>
-    </Card>
+    </div>
   );
 }
 
-// ---------- Error state ----------
+// ── Error Card ────────────────────────────────────────────────────────────────
 
 function ErrorCard({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
-    <Card className="flex flex-col items-center gap-3 py-8">
-      <svg className="h-10 w-10 text-red-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="10" />
-        <path d="M12 8v4M12 16h.01" />
+    <div className="card-sm flex items-center gap-3" style={{ borderLeft: '3px solid var(--err)' }}>
+      <svg className="h-5 w-5 text-[var(--err)] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10" /><path d="M12 8v4M12 16h.01" />
       </svg>
-      <p className="text-sm text-slate-600 dark:text-slate-400">{message}</p>
-      <Button variant="ghost" onClick={onRetry}>Retry</Button>
-    </Card>
+      <p className="text-sm text-[var(--tx-2)] flex-1">{message}</p>
+      <button onClick={onRetry} className="text-xs text-[var(--brand)] hover:underline font-medium">Retry</button>
+    </div>
   );
 }
 
-// ---------- Main Dashboard ----------
+// ── Main Dashboard ────────────────────────────────────────────────────────────
 
 export function DashboardPage() {
+  // The KPI queries count from midnight UTC; the drill-downs must use the same
+  // boundary or the list will not match the number the user clicked.
+  const todayUtc = new Date().toISOString().slice(0, 10);
+  // "AI Sorted" counts the last seven days, so its drill-down has to as well —
+  // otherwise the card says 28 and the list it opens shows every ticket ever.
+  const sevenDaysAgo = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
+
   const { user } = useAuth();
   const navigate = useNavigate();
 
-  const kpiQuery = useQuery({
-    queryKey: ['dashboard', 'kpis'],
-    queryFn: getDashboardKPIs,
-    staleTime: STALE,
-    refetchInterval: STALE,
-  });
+  // Every analytics endpoint below is agent-and-above server-side. Asking for
+  // them as a branch user returns 403, and the page then rendered four red
+  // "failed to load" cards — so the landing screen of the role that uses the
+  // system most looked broken. Don't ask for what this role may not have.
+  const orgMetrics = !!user && user.role !== 'branch_user';
 
-  const slaQuery = useQuery({
-    queryKey: ['dashboard', 'sla'],
-    queryFn: getSLAStatus,
-    staleTime: STALE,
-    refetchInterval: STALE,
-  });
+  const kpiQuery      = useQuery({ queryKey: ['dashboard', 'kpis'],        queryFn: getDashboardKPIs,       staleTime: STALE, refetchInterval: STALE, enabled: orgMetrics });
+  const slaQuery      = useQuery({ queryKey: ['dashboard', 'sla'],         queryFn: getSLAStatus,           staleTime: STALE, refetchInterval: STALE, enabled: orgMetrics });
+  const categoryQuery = useQuery({ queryKey: ['dashboard', 'categories'],  queryFn: getCategoryDistribution, staleTime: STALE, refetchInterval: STALE, enabled: orgMetrics });
+  const deptQuery     = useQuery({ queryKey: ['dashboard', 'departments'], queryFn: getDepartmentLoad,      staleTime: STALE, refetchInterval: STALE, enabled: orgMetrics });
+  const recentQuery   = useQuery({ queryKey: ['dashboard', 'recent'],      queryFn: getRecentTickets,       staleTime: STALE, refetchInterval: STALE });
+  const aiQuery       = useQuery({ queryKey: ['dashboard', 'ai-metrics'],  queryFn: getAIMetrics,           staleTime: STALE, refetchInterval: STALE, enabled: orgMetrics });
 
-  const categoryQuery = useQuery({
-    queryKey: ['dashboard', 'categories'],
-    queryFn: getCategoryDistribution,
+  // What a branch user gets instead: counts of their own tickets. The list
+  // endpoint already scopes them to what they raised, so these are their
+  // numbers and nobody else's.
+  const mineQuery = useQuery({
+    queryKey: ['dashboard', 'mine'],
+    queryFn: () => listTickets({ page_size: 1 }),
     staleTime: STALE,
-    refetchInterval: STALE,
+    enabled: !orgMetrics && !!user,
   });
-
-  const deptQuery = useQuery({
-    queryKey: ['dashboard', 'departments'],
-    queryFn: getDepartmentLoad,
+  const mineOpenQuery = useQuery({
+    queryKey: ['dashboard', 'mine', 'open'],
+    queryFn: () => listTickets({ page_size: 1, status_group: 'open' }),
     staleTime: STALE,
-    refetchInterval: STALE,
+    enabled: !orgMetrics && !!user,
   });
-
-  const recentQuery = useQuery({
-    queryKey: ['dashboard', 'recent'],
-    queryFn: getRecentTickets,
+  const mineBreachedQuery = useQuery({
+    queryKey: ['dashboard', 'mine', 'breached'],
+    queryFn: () => listTickets({ page_size: 1, status_group: 'open', sla_breached: true }),
     staleTime: STALE,
-    refetchInterval: STALE,
-  });
-
-  const aiMetricsQuery = useQuery({
-    queryKey: ['dashboard', 'ai-metrics'],
-    queryFn: getAIMetrics,
-    staleTime: STALE,
-    refetchInterval: STALE,
+    enabled: !orgMetrics && !!user,
   });
 
   const kpis: KPIData | undefined = kpiQuery.data;
-  const recentTickets = (recentQuery.data ?? []) as TicketSummary[];
+  const recentTickets = recentQuery.data ?? [];
+  const isRefreshing = kpiQuery.isFetching || slaQuery.isFetching;
 
   return (
-    <div className="flex flex-col gap-6">
-      {/* Page header */}
-      <div className="flex items-start justify-between">
+    <div className="flex flex-col gap-5">
+
+      {/* ── Page header ──────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Welcome back, {user?.full_name?.split(' ')[0] ?? 'User'}
+          <h1 className="text-xl font-semibold tracking-tight text-[var(--tx)]">
+            Welcome, <span className="text-[var(--brand)]">{user?.full_name?.split(' ')[0] ?? 'User'}</span>
           </h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
-            SUCCESS Bank · Internal Ticketing Platform · Operational overview
-          </p>
+          <p className="text-xs text-[var(--tx-3)] mt-0.5">Operational overview · SUCCESS Bank Internal Ticketing</p>
         </div>
-        <div className="flex items-center gap-3">
-          {kpiQuery.isFetching && (
-            <span className="text-xs text-slate-400 flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse inline-block" />
-              Refreshing…
+        <div className="flex items-center gap-2">
+          {isRefreshing && (
+            <span className="text-[11px] text-[var(--tx-3)] flex items-center gap-1.5">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse inline-block" />
+              Live
             </span>
           )}
           <Button onClick={() => navigate('/tickets/new')}>
-            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 5v14M5 12h14" />
             </svg>
             New Ticket
@@ -375,157 +441,155 @@ export function DashboardPage() {
         </div>
       </div>
 
-      {/* Primary KPIs row 1 */}
-      {kpiQuery.isLoading ? (
-        <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
-          {Array.from({ length: 4 }).map((_, i) => <KPISkeleton key={i} />)}
+      {/* ── Branch user: their own three numbers ─────────────────────── */}
+      {!orgMetrics && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <KPICard label="Your Tickets" value={mineQuery.data?.total ?? '—'} tone="default"
+                   to="/tickets" hint="Show every ticket you have raised"
+                   icon="M9 12h6M9 16h6M13 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-5-5z" />
+          <KPICard label="Still Open" value={mineOpenQuery.data?.total ?? '—'} tone="default"
+                   to="/tickets?status_group=open" hint="Show your tickets that are still open"
+                   icon="M12 8v4l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" />
+          <KPICard label="Past Deadline" value={mineBreachedQuery.data?.total ?? '—'}
+                   tone={(mineBreachedQuery.data?.total ?? 0) > 0 ? 'danger' : 'default'}
+                   to="/tickets?status_group=open&sla_breached=1"
+                   hint="Show your open tickets that are past their SLA"
+                   icon="M12 9v4M12 17h.01M4.93 19h14.14L12 5z" />
+        </div>
+      )}
+
+      {/* ── 8-column KPI strip ───────────────────────────────────────── */}
+      {!orgMetrics ? null : kpiQuery.isLoading ? (
+        <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-3">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="card-sm flex flex-col gap-2">
+              <Sk className="h-2.5 w-20 rounded" />
+              <Sk className="h-7 w-12 rounded-lg" />
+            </div>
+          ))}
         </div>
       ) : kpiQuery.isError ? (
         <ErrorCard message="Failed to load KPI data" onRetry={() => kpiQuery.refetch()} />
       ) : kpis ? (
-        <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-3">
+          <KPICard label="Open"         value={kpis.open_tickets}       tone="default" to="/tickets?status_group=open" hint="Show all open tickets"                                           icon="M9 12h6M9 16h6M13 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-5-5z" />
+          <KPICard label="SLA Breached" value={kpis.sla_breached}       tone="danger" to="/tickets?status_group=open&sla_breached=1" hint="Show open tickets past their SLA"                                            icon="M12 9v4M12 17h.01M4.93 19h14.14L12 5z" />
+          <KPICard label="Resolved"     value={kpis.resolved_today}     tone="success" to={`/tickets?status=resolved&resolved_from=${todayUtc}`} hint="Show tickets resolved today"                                           icon="M5 13l4 4L19 7" />
+          <KPICard label="Critical"     value={kpis.critical_open}      tone={kpis.critical_open > 0 ? 'danger' : 'default'} to="/tickets?status_group=open&priority=critical" hint="Show open critical tickets"    icon="M12 8v4M12 16h.01M4.93 19h14.14L12 5z" />
+          <KPICard label="AI Sorted"    value={kpis.ai_auto_categorized} tone="default" to={`/tickets?ai_categorized=1&created_from=${sevenDaysAgo}`} hint="Show tickets the AI categorised"                                          icon="M12 2a10 10 0 0 1 0 20M12 2a10 10 0 0 0 0 20M12 8v4M12 16h.01" />
+          <KPICard label="Via Email"    value={kpis.email_tickets_today} tone="default" to={`/tickets?source=email&created_from=${todayUtc}`} hint="Show tickets that arrived by email today"                                          icon="M4 4h16v16H4V4zm0 0l8 9 8-9" />
+          <KPICard label="Escalated"    value={kpis.escalations_active} tone={kpis.escalations_active > 0 ? 'warning' : 'default'} to="/escalations" hint="Open the escalation queue" icon="M12 9v4M12 17h.01M4.93 19h14.14L12 5z" />
           <KPICard
-            label="Open Tickets"
-            value={kpis.open_tickets}
+            label="Avg Resolve"
+            value={kpis.avg_resolution_hours < 24
+              ? kpis.avg_resolution_hours.toFixed(1)
+              : (kpis.avg_resolution_hours / 24).toFixed(1)}
+            suffix={kpis.avg_resolution_hours < 24 ? 'h' : 'd'}
             tone="default"
-            icon="M9 12h6M9 16h6M13 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-5-5z"
-          />
-          <KPICard
-            label="SLA Breached"
-            value={kpis.sla_breached}
-            tone="danger"
-            icon="M12 9v4M12 17h.01M4.93 19h14.14L12 5z"
-          />
-          <KPICard
-            label="Resolved Today"
-            value={kpis.resolved_today}
-            tone="success"
-            icon="M5 13l4 4L19 7"
-          />
-          <KPICard
-            label="Critical Open"
-            value={kpis.critical_open}
-            tone={kpis.critical_open > 0 ? 'danger' : 'default'}
-            icon="M12 8v4M12 16h.01M4.93 19h14.14L12 5z"
+            to="/reports"
+            hint="Open reports and resolution trends"
+            icon="M12 8v4l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"
           />
         </div>
       ) : null}
 
-      {/* Secondary KPIs row 2 */}
-      {kpis && (
-        <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
-          <KPICard
-            label="AI Categorized"
-            value={kpis.ai_auto_categorized}
-            tone="default"
-            icon="M12 2a10 10 0 0 1 0 20M12 2a10 10 0 0 0 0 20M12 8v4M12 16h.01"
-          />
-          <KPICard
-            label="Email Tickets Today"
-            value={kpis.email_tickets_today}
-            tone="default"
-            icon="M4 4h16v16H4V4zm0 0l8 9 8-9"
-          />
-          <KPICard
-            label="Escalations Active"
-            value={kpis.escalations_active}
-            tone={kpis.escalations_active > 0 ? 'warning' : 'default'}
-            icon="M12 9v4M12 17h.01M4.93 19h14.14L12 5z"
-          />
-          <KPICard
-            label="Avg Resolution"
-            value={kpis.avg_resolution_hours < 24
-              ? kpis.avg_resolution_hours.toFixed(1)
-              : (kpis.avg_resolution_hours / 24).toFixed(1)}
-            suffix={kpis.avg_resolution_hours < 24 ? 'hrs' : 'days'}
-            tone="default"
-            icon="M12 8v4l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"
-          />
+      {/* ── Middle row: SLA + Categories + AI ───────────────────────── */}
+      {orgMetrics && (
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* SLA */}
+        <div>
+          {slaQuery.isLoading ? (
+            <div className="card-sm"><Sk className="h-32" /></div>
+          ) : slaQuery.isError ? (
+            <ErrorCard message="Failed to load SLA data" onRetry={() => slaQuery.refetch()} />
+          ) : slaQuery.data ? (
+            <SLAHealthCard sla={slaQuery.data} />
+          ) : null}
         </div>
+
+        {/* Categories */}
+        <div>
+          {categoryQuery.isLoading ? (
+            <div className="card-sm"><Sk className="h-32" /></div>
+          ) : categoryQuery.isError ? (
+            <ErrorCard message="Failed to load category data" onRetry={() => categoryQuery.refetch()} />
+          ) : categoryQuery.data ? (
+            <CategoryChart items={categoryQuery.data} />
+          ) : null}
+        </div>
+
+        {/* AI metrics */}
+        <div>
+          {aiQuery.isLoading ? (
+            <div className="card-sm"><Sk className="h-32" /></div>
+          ) : aiQuery.isError ? (
+            <div className="card-sm text-xs text-[var(--tx-3)] text-center py-8">AI metrics unavailable</div>
+          ) : aiQuery.data ? (
+            <AIMetricsPanel metrics={aiQuery.data} sinceDate={sevenDaysAgo} />
+          ) : null}
+        </div>
+      </div>
       )}
 
-      {/* Middle row: SLA + Category */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        {slaQuery.isLoading ? (
-          <Card><Skeleton className="h-32" /></Card>
-        ) : slaQuery.isError ? (
-          <ErrorCard message="Failed to load SLA data" onRetry={() => slaQuery.refetch()} />
-        ) : slaQuery.data ? (
-          <SLAHealthBar sla={slaQuery.data} />
-        ) : null}
-
-        {categoryQuery.isLoading ? (
-          <Card><Skeleton className="h-32" /></Card>
-        ) : categoryQuery.isError ? (
-          <ErrorCard message="Failed to load category data" onRetry={() => categoryQuery.refetch()} />
-        ) : categoryQuery.data ? (
-          <CategoryDistribution items={categoryQuery.data} />
-        ) : null}
-      </div>
-
-      {/* Bottom row: dept table + AI metrics */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+      {/* ── Bottom row: dept table + recent tickets ──────────────────── */}
+      <div className={cn('grid grid-cols-1 gap-4', orgMetrics && 'xl:grid-cols-5')}>
+        {/* Dept table — takes 2 of 5 cols */}
+        {orgMetrics && (
         <div className="xl:col-span-2">
           {deptQuery.isLoading ? (
-            <Card><Skeleton className="h-40" /></Card>
+            <div className="card-sm"><Sk className="h-40" /></div>
           ) : deptQuery.isError ? (
             <ErrorCard message="Failed to load department data" onRetry={() => deptQuery.refetch()} />
           ) : deptQuery.data ? (
-            <DepartmentTable rows={deptQuery.data} />
+            <DeptTable rows={deptQuery.data} />
           ) : null}
         </div>
-
-        <div>
-          {aiMetricsQuery.isLoading ? (
-            <Card><Skeleton className="h-40" /></Card>
-          ) : aiMetricsQuery.isError ? (
-            <Card className="text-sm text-slate-400 text-center py-8">AI metrics unavailable</Card>
-          ) : aiMetricsQuery.data ? (
-            <AIMetricsCard metrics={aiMetricsQuery.data} />
-          ) : null}
-        </div>
-      </div>
-
-      {/* Recent Tickets */}
-      <div>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-base font-semibold">Recent Tickets</h2>
-          <Button variant="ghost" onClick={() => navigate('/tickets')}>
-            View all tickets
-            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M5 12h14M12 5l7 7-7 7" />
-            </svg>
-          </Button>
-        </div>
-
-        {recentQuery.isLoading ? (
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <Card key={i} padded={false} className="p-4">
-                <div className="flex flex-col gap-2">
-                  <Skeleton className="h-3 w-20" />
-                  <Skeleton className="h-4 w-full" />
-                  <Skeleton className="h-3 w-3/4" />
-                </div>
-              </Card>
-            ))}
-          </div>
-        ) : recentQuery.isError ? (
-          <ErrorCard message="Failed to load recent tickets" onRetry={() => recentQuery.refetch()} />
-        ) : recentTickets.length === 0 ? (
-          <Card className="flex flex-col items-center gap-2 py-10 text-center">
-            <svg className="h-10 w-10 text-slate-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M9 12h6M9 16h6M13 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-5-5z" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            <p className="text-sm text-slate-500">No recent tickets</p>
-          </Card>
-        ) : (
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-            {recentTickets.slice(0, 10).map((ticket) => (
-              <TicketCard key={ticket.id} ticket={ticket} />
-            ))}
-          </div>
         )}
+
+        {/* Recent tickets — takes 3 of 5 cols for agents, full width otherwise */}
+        <div className={orgMetrics ? 'xl:col-span-3' : ''}>
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-sm font-semibold text-[var(--tx)]">Recent Tickets</span>
+            <button
+              onClick={() => navigate('/tickets')}
+              className="text-xs text-[var(--brand)] hover:underline font-medium flex items-center gap-1"
+            >
+              View all
+              <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M5 12h14M12 5l7 7-7 7" />
+              </svg>
+            </button>
+          </div>
+
+          {recentQuery.isLoading ? (
+            <div className="flex flex-col gap-2">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="card-sm !p-3">
+                  <div className="flex flex-col gap-2">
+                    <Sk className="h-3 w-24" />
+                    <Sk className="h-4 w-full" />
+                    <Sk className="h-2.5 w-1/2" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : recentQuery.isError ? (
+            <ErrorCard message="Failed to load recent tickets" onRetry={() => recentQuery.refetch()} />
+          ) : recentTickets.length === 0 ? (
+            <div className="card-sm flex flex-col items-center gap-2 text-center py-8">
+              <svg className="h-8 w-8 text-[var(--tx-3)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M9 12h6M9 16h6M13 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-5-5z" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              <p className="text-sm text-[var(--tx-3)]">No recent tickets</p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {recentTickets.slice(0, 8).map((ticket) => (
+                <TicketCard key={ticket.id} ticket={ticket} compact />
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -13,7 +13,6 @@ from pydantic import BaseModel, ConfigDict
 
 from app.schemas.ticket import TicketSummary
 
-
 # ---------------------------------------------------------------------------
 # KPI / aggregation
 # ---------------------------------------------------------------------------

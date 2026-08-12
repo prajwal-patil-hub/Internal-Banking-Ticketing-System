@@ -31,7 +31,7 @@ async def get_current_user(
         raise AuthenticationError("Missing bearer token.")
     try:
         payload = decode_token(creds.credentials)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         raise AuthenticationError("Invalid or expired token.") from e
 
     if payload.get("type") != "access":

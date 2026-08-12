@@ -36,7 +36,7 @@ class SLAPolicy(UUIDPKMixin, TimestampMixin, Base):
     )
     is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
-    category: Mapped["TicketCategory | None"] = relationship(  # type: ignore[name-defined]
+    category: Mapped[TicketCategory | None] = relationship(  # type: ignore[name-defined]  # noqa: F821
         foreign_keys=[category_id], lazy="selectin"
     )
 
@@ -87,6 +87,6 @@ class SLATracking(UUIDPKMixin, TimestampMixin, Base):
         DateTime(timezone=True), nullable=True
     )
 
-    policy: Mapped["SLAPolicy | None"] = relationship(
+    policy: Mapped[SLAPolicy | None] = relationship(
         foreign_keys=[policy_id], lazy="selectin"
     )

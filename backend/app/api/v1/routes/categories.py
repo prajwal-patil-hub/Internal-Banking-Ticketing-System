@@ -247,5 +247,10 @@ async def create_subcategory(
     db.add(subcategory)
     await db.commit()
     await db.refresh(subcategory)
-    log.info("subcategory_created", subcategory_id=str(subcategory.id), category_id=str(category_id), user_id=str(current_user.id))
+    log.info(
+        "subcategory_created",
+        subcategory_id=str(subcategory.id),
+        category_id=str(category_id),
+        user_id=str(current_user.id),
+    )
     return ok(_serialize_subcategory(subcategory))

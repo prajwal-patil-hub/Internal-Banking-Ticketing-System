@@ -1,28 +1,44 @@
-"""Ticket management API routes.
-
-Covers the full ticket lifecycle: creation, listing, status transitions,
-assignment, SLA management, comments, AI enrichment, and audit trail.
-
-Branch users see only their own tickets. Agents and admins can see all.
-"""
+"""Ticket management API routes."""
 
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, File, Query, Request, UploadFile, status
+from fastapi.responses import Response
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import get_current_user, get_session, require_roles
+from app.core import authz
 from app.core.exceptions import AuthorizationError, NotFoundError, ValidationError
 from app.core.logging import get_logger
+from app.models.attachment import Attachment
 from app.models.audit import AuditAction, AuditLog
 from app.models.comment import CommentSource, TicketComment
-from app.models.ticket import Ticket, TicketCategory, TicketStatus
+from app.models.escalation import EscalationEvent, EscalationTrigger
+from app.models.ticket import (
+    AI_RISK_HIGH_THRESHOLD,
+    AI_RISK_MEDIUM_THRESHOLD,
+    Ticket,
+    TicketSource,
+    TicketStatus,
+)
+from app.models.ticket import OPEN_STATUSES as _OPEN_STATUSES
 from app.models.user import User
 from app.schemas.envelope import ok, paginated
+from app.services.org_service import get_accessible_org_unit_ids
+from app.services.routing_service import RoutingService
+from app.services.sla_service import SLAService
+from app.services.storage_service import (
+    build_key,
+    sanitize_filename,
+    storage,
+    validate_upload,
+)
+from app.services.ticket_service import VALID_TRANSITIONS
 
 log = get_logger(__name__)
 
@@ -32,19 +48,57 @@ router = APIRouter(prefix="/tickets", tags=["tickets"])
 # Helpers
 # ---------------------------------------------------------------------------
 
-_BRANCH_USER_ROLE = "branch_user"
-_AGENT_ROLES = {"agent", "supervisor", "admin", "auditor"}
+_BRANCH_USER_ROLE = authz.BRANCH_USER
+#: Roles permitted to act on other people's tickets. Sourced from the central
+#: policy — `auditor` used to be in this set and silently held write access.
+_AGENT_ROLES = authz.TICKET_WRITE_ROLES
+
 
 
 def _is_branch_user(user: User) -> bool:
     return user.role.name == _BRANCH_USER_ROLE
 
 
-def _ticket_access_filter(user: User):
-    """Return a SQLAlchemy WHERE clause that respects branch-user visibility."""
+def _parse_dt(value: str, field: str) -> datetime:
+    """Accept an ISO date or datetime; `2026-08-10` means midnight UTC."""
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        raise ValidationError(f"{field} must be an ISO 8601 date or datetime.")
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+async def _ticket_access_filter(user: User, db: AsyncSession):
+    """Return a SQLAlchemy WHERE clause respecting org-scoped visibility."""
+    if user.is_super_admin:
+        return None
+    # New org-hierarchy visibility: strictly org-unit scoped
+    if user.org_unit_id:
+        accessible = await get_accessible_org_unit_ids(user, db)
+        if accessible is not None:
+            return or_(
+                Ticket.org_unit_id.in_(accessible),
+                Ticket.assignee_id == user.id,
+            )
+        return None  # subtree admin sees all
+    # Legacy: branch_user sees only own tickets
     if _is_branch_user(user):
         return Ticket.reporter_id == user.id
     return None  # agents/admins see all
+
+
+def _can_modify_ticket(ticket: Ticket, user: User) -> bool:
+    """Check if user can modify a ticket."""
+    if user.is_super_admin:
+        return True
+    # Only the raiser can modify/communicate
+    if str(ticket.reporter_id) == str(user.id):
+        return True
+    # Assigned agent can update status
+    if ticket.assignee_id and str(ticket.assignee_id) == str(user.id):
+        return True
+    # Legacy agent/admin/supervisor roles
+    return user.role.name in _AGENT_ROLES
 
 
 async def _get_ticket_or_404(
@@ -57,8 +111,19 @@ async def _get_ticket_or_404(
     ticket = result.scalar_one_or_none()
     if ticket is None:
         raise NotFoundError(f"Ticket {ticket_id} not found.")
-    if _is_branch_user(user) and ticket.reporter_id != user.id:
-        raise AuthorizationError("You do not have access to this ticket.")
+    # Org-scoped visibility check
+    if not user.is_super_admin:
+        if user.org_unit_id:
+            accessible = await get_accessible_org_unit_ids(user, db)
+            if accessible is not None:
+                is_accessible = (
+                    ticket.org_unit_id in accessible
+                    or str(ticket.assignee_id) == str(user.id)
+                )
+                if not is_accessible:
+                    raise AuthorizationError("You do not have access to this ticket.")
+        elif _is_branch_user(user) and ticket.reporter_id != user.id:
+            raise AuthorizationError("You do not have access to this ticket.")
     return ticket
 
 
@@ -90,6 +155,24 @@ async def _record_audit(
     db.add(log_entry)
 
 
+def _person_ref(user: User | None) -> dict | None:
+    """The shape every person field on a ticket uses.
+
+    Written out five times before this, once per field, which is how
+    `full_name` ended up present on some and absent on others.
+    """
+    if user is None:
+        return None
+    return {"id": str(user.id), "email": user.email, "full_name": user.full_name}
+
+
+def _lookup_ref(row) -> dict | None:
+    """Same idea for the code/name lookups — category, subcategory."""
+    if row is None:
+        return None
+    return {"id": str(row.id), "code": row.code, "name": row.name}
+
+
 def _serialize_ticket(ticket: Ticket) -> dict:
     return {
         "id": str(ticket.id),
@@ -101,14 +184,22 @@ def _serialize_ticket(ticket: Ticket) -> dict:
         "source": ticket.source.value,
         "category_id": str(ticket.category_id) if ticket.category_id else None,
         "subcategory_id": str(ticket.subcategory_id) if ticket.subcategory_id else None,
-        "category": {"id": str(ticket.category.id), "code": ticket.category.code, "name": ticket.category.name} if ticket.category else None,
-        "subcategory": {"id": str(ticket.subcategory.id), "code": ticket.subcategory.code, "name": ticket.subcategory.name} if ticket.subcategory else None,
+        "category": _lookup_ref(ticket.category),
+        "subcategory": _lookup_ref(ticket.subcategory),
         "reporter_id": str(ticket.reporter_id),
-        "reporter": {"id": str(ticket.reporter.id), "email": ticket.reporter.email, "full_name": ticket.reporter.full_name} if ticket.reporter else None,
+        "reporter": _person_ref(ticket.reporter),
         "assignee_id": str(ticket.assignee_id) if ticket.assignee_id else None,
-        "assignee": {"id": str(ticket.assignee.id), "email": ticket.assignee.email, "full_name": ticket.assignee.full_name} if ticket.assignee else None,
+        "assignee": _person_ref(ticket.assignee),
         "branch_id": str(ticket.branch_id) if ticket.branch_id else None,
+        "org_unit_id": str(ticket.org_unit_id) if ticket.org_unit_id else None,
+        "org_unit": {
+            "id": str(ticket.org_unit.id),
+            "name": ticket.org_unit.name,
+            "code": ticket.org_unit.code,
+            "level": ticket.org_unit.hierarchy_level.name if ticket.org_unit.hierarchy_level else None,
+        } if ticket.org_unit else None,
         "department": ticket.department,
+        "reopen_count": ticket.reopen_count or 0,
         "tags": ticket.tags or [],
         "ai_category": ticket.ai_category,
         "ai_subcategory": ticket.ai_subcategory,
@@ -140,11 +231,18 @@ def _serialize_comment(comment: TicketComment) -> dict:
         "id": str(comment.id),
         "ticket_id": str(comment.ticket_id),
         "author_id": str(comment.author_id) if comment.author_id else None,
-        "author": {"id": str(comment.author.id), "email": comment.author.email, "full_name": comment.author.full_name} if comment.author else None,
+        "author": _person_ref(comment.author),
         "body": comment.body,
         "is_internal": comment.is_internal,
         "source": comment.source.value,
         "ai_generated": comment.ai_generated,
+        # Files sent with this reply, so the raiser sees an agent's fix next to
+        # the answer that explains it. Callers only ever reach a comment they
+        # are allowed to read, so no separate filter is needed here.
+        "attachments": [
+            _serialize_attachment(a)
+            for a in sorted(comment.attachments, key=lambda a: a.created_at)
+        ],
         "created_at": comment.created_at.isoformat(),
         "updated_at": comment.updated_at.isoformat(),
     }
@@ -154,11 +252,13 @@ def _serialize_comment(comment: TicketComment) -> dict:
 # Ticket number generator
 # ---------------------------------------------------------------------------
 
-async def _generate_ticket_number(db: AsyncSession) -> str:
-    """Generate a sequential ticket number like TKT-000001."""
-    result = await db.execute(select(func.count(Ticket.id)))
-    count = result.scalar_one() or 0
-    return f"TKT-{count + 1:06d}"
+async def _generate_ticket_number(db: AsyncSession, org_unit_id: uuid.UUID | None = None) -> str:
+    """Generate ticket number: org-scoped format or legacy TKT-NNNNNN."""
+    if org_unit_id:
+        from app.services.ticket_seq_service import generate_ticket_number
+        return await generate_ticket_number(db, org_unit_id)
+    from app.services.ticket_seq_service import generate_ticket_number_legacy
+    return await generate_ticket_number_legacy(db)
 
 
 # ---------------------------------------------------------------------------
@@ -176,19 +276,77 @@ async def list_tickets(
     category_id: Annotated[uuid.UUID | None, Query()] = None,
     search: Annotated[str | None, Query(max_length=200)] = None,
     my_tickets: Annotated[bool, Query()] = False,
+    sla_breached: Annotated[bool | None, Query()] = None,
+    source: Annotated[str | None, Query()] = None,
+    status_group: Annotated[str | None, Query(pattern="^(open|closed)$")] = None,
+    ai_categorized: Annotated[bool | None, Query()] = None,
+    ai_risk: Annotated[str | None, Query(pattern="^(high|medium|low)$")] = None,
+    created_from: Annotated[str | None, Query()] = None,
+    resolved_from: Annotated[str | None, Query()] = None,
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> dict:
+    """List tickets.
+
+    The filters beyond status/priority exist so every dashboard KPI has a
+    destination that reproduces its own number. A card reading "9 breached"
+    that links to an unfiltered list is worse than a card that does nothing —
+    it looks like the count is wrong.
+    """
     stmt = select(Ticket)
 
     # Visibility filter
-    access_filter = _ticket_access_filter(current_user)
+    access_filter = await _ticket_access_filter(current_user, db)
     if access_filter is not None:
         stmt = stmt.where(access_filter)
 
     # my_tickets filter (agents requesting only their assigned tickets)
     if my_tickets and not _is_branch_user(current_user):
         stmt = stmt.where(Ticket.assignee_id == current_user.id)
+
+    if sla_breached is not None:
+        stmt = stmt.where(Ticket.sla_breached == sla_breached)
+
+    # `open` covers every status where work is still outstanding — the same
+    # set the dashboard counts, so "Open: 27" and this filter agree.
+    if status_group == "open":
+        stmt = stmt.where(Ticket.status.in_(_OPEN_STATUSES))
+    elif status_group == "closed":
+        stmt = stmt.where(Ticket.status.notin_(_OPEN_STATUSES))
+
+    if source:
+        try:
+            stmt = stmt.where(Ticket.source == TicketSource(source))
+        except ValueError:
+            raise ValidationError(f"Invalid source: {source}")
+
+    if ai_categorized is not None:
+        stmt = stmt.where(
+            Ticket.ai_category.is_not(None) if ai_categorized
+            else Ticket.ai_category.is_(None)
+        )
+
+    # Thresholds come from the model so this filter and the dashboard's
+    # "High Risk" tile cannot drift apart.
+    if ai_risk == "high":
+        stmt = stmt.where(Ticket.ai_risk_score >= AI_RISK_HIGH_THRESHOLD)
+    elif ai_risk == "medium":
+        stmt = stmt.where(
+            Ticket.ai_risk_score >= AI_RISK_MEDIUM_THRESHOLD,
+            Ticket.ai_risk_score < AI_RISK_HIGH_THRESHOLD,
+        )
+    elif ai_risk == "low":
+        stmt = stmt.where(
+            Ticket.ai_risk_score.is_not(None),
+            Ticket.ai_risk_score < AI_RISK_MEDIUM_THRESHOLD,
+        )
+
+    # Date bounds back the "today" cards (resolved today, arrived by email
+    # today) without inventing a separate endpoint for each.
+    if created_from:
+        stmt = stmt.where(Ticket.created_at >= _parse_dt(created_from, "created_from"))
+    if resolved_from:
+        stmt = stmt.where(Ticket.resolved_at >= _parse_dt(resolved_from, "resolved_from"))
 
     if status:
         try:
@@ -246,14 +404,17 @@ async def create_ticket(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> dict:
-    from datetime import datetime, timezone
     from app.models.ticket import TicketPriority, TicketSource, TicketStatus
+
+    authz.assert_can_write(current_user, "raise tickets")
 
     title = payload.get("title", "").strip()
     if not title:
         raise ValidationError("Title is required.")
 
-    ticket_number = await _generate_ticket_number(db)
+    # Determine org_unit_id from reporter (prefer explicit, fall back to user's org unit)
+    org_unit_id = current_user.org_unit_id
+    ticket_number = await _generate_ticket_number(db, org_unit_id)
 
     priority_val = payload.get("priority", "medium")
     try:
@@ -292,6 +453,7 @@ async def create_ticket(
         subcategory_id=subcategory_id,
         reporter_id=current_user.id,
         branch_id=current_user.branch_id,
+        org_unit_id=org_unit_id,
         department=payload.get("department"),
         tags=payload.get("tags"),
         internal_notes=payload.get("internal_notes"),
@@ -299,18 +461,44 @@ async def create_ticket(
     db.add(ticket)
     await db.flush()
 
+    # Stamp the SLA deadlines and create the tracking row. This route builds
+    # the Ticket inline rather than going through TicketService, so it never
+    # inherited that step: a ticket raised in the UI had no due dates, never
+    # appeared in the SLA monitor, and could never breach.
+    await SLAService(db).apply_to_ticket(ticket)
+
+    # Auto-assign by current workload. The routing service existed but nothing
+    # called it, so every ticket arrived unassigned and waited for someone to
+    # notice. Callers can opt out with auto_assign=false to triage by hand.
+    routing_reason: str | None = None
+    if payload.get("auto_assign", True):
+        assignee, routing_reason = await RoutingService(db).auto_route_ticket(ticket)
+        if assignee is not None:
+            ticket.ai_routing_reason = routing_reason[:500]
+
     await _record_audit(
         db,
         action=AuditAction.CREATE,
         entity_id=str(ticket.id),
         user=current_user,
         request=request,
-        new_values={"ticket_number": ticket_number, "title": title, "priority": priority.value},
+        new_values={
+            "ticket_number": ticket_number,
+            "title": title,
+            "priority": priority.value,
+            **({"auto_assigned_to": str(ticket.assignee_id)} if ticket.assignee_id else {}),
+        },
     )
     await db.commit()
     await db.refresh(ticket)
 
-    log.info("ticket_created", ticket_id=str(ticket.id), ticket_number=ticket_number, user_id=str(current_user.id))
+    log.info(
+        "ticket_created",
+        ticket_id=str(ticket.id),
+        ticket_number=ticket_number,
+        user_id=str(current_user.id),
+        assignee_id=str(ticket.assignee_id) if ticket.assignee_id else None,
+    )
     return ok(_serialize_ticket(ticket))
 
 
@@ -352,14 +540,20 @@ async def update_ticket(
 ) -> dict:
     from app.models.ticket import TicketPriority
 
+    authz.assert_can_write(current_user, "modify tickets")
+
     ticket = await _get_ticket_or_404(ticket_id, db, current_user)
 
-    # Branch users may only update their own tickets with restricted fields
-    if _is_branch_user(current_user):
+    if not _can_modify_ticket(ticket, current_user):
+        raise AuthorizationError("You do not have permission to modify this ticket.")
+
+    # Non-admin users may only update restricted fields
+    can_modify_all = current_user.is_super_admin or current_user.role.name in _AGENT_ROLES
+    if not can_modify_all:
         allowed_fields = {"description", "tags"}
         invalid = set(payload.keys()) - allowed_fields
         if invalid:
-            raise AuthorizationError(f"Branch users cannot modify: {', '.join(invalid)}")
+            raise AuthorizationError(f"You cannot modify: {', '.join(invalid)}")
 
     old_values: dict = {}
     new_values: dict = {}
@@ -433,7 +627,7 @@ async def transition_status(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> dict:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     ticket = await _get_ticket_or_404(ticket_id, db, current_user)
 
@@ -445,12 +639,34 @@ async def transition_status(
     except ValueError:
         raise ValidationError(f"Invalid status: {new_status_val}")
 
-    # Branch users can only reopen or close their own tickets
-    if _is_branch_user(current_user) and new_status not in {TicketStatus.CLOSED, TicketStatus.REOPENED}:
+    # Only the raiser or agents can transition status
+    authz.assert_can_write(current_user, "change ticket status")
+
+    if not _can_modify_ticket(ticket, current_user):
+        raise AuthorizationError("You do not have permission to transition this ticket.")
+
+    # Org users (not agents) may only reopen or close their own tickets
+    is_agent = authz.can_write_tickets(current_user)
+    if not is_agent and not _is_branch_user(current_user):
+        if new_status not in {TicketStatus.CLOSED, TicketStatus.REOPENED}:
+            raise AuthorizationError("You may only close or reopen tickets.")
+    elif _is_branch_user(current_user) and new_status not in {TicketStatus.CLOSED, TicketStatus.REOPENED}:
         raise AuthorizationError("Branch users may only close or reopen tickets.")
 
-    now = datetime.now(timezone.utc)
-    old_status = ticket.status
+    # Enforce the lifecycle. VALID_TRANSITIONS was previously consulted only by
+    # TicketService, which this endpoint never calls — so the state machine was
+    # documentation rather than a constraint, and a new ticket could be marked
+    # resolved without ever being assigned.
+    old_status = ticket.status if isinstance(ticket.status, TicketStatus) else TicketStatus(ticket.status)
+    if new_status != old_status:
+        allowed = VALID_TRANSITIONS.get(old_status, [])
+        if new_status not in allowed:
+            raise ValidationError(
+                f"Cannot move a ticket from '{old_status.value}' to '{new_status.value}'. "
+                f"Allowed from here: {', '.join(s.value for s in allowed) or 'nothing'}."
+            )
+
+    now = datetime.now(UTC)
     ticket.status = new_status
 
     if new_status == TicketStatus.RESOLVED and not ticket.resolved_at:
@@ -459,6 +675,9 @@ async def transition_status(
         ticket.closed_at = now
     if new_status in {TicketStatus.IN_PROGRESS, TicketStatus.ACKNOWLEDGED} and not ticket.first_response_at:
         ticket.first_response_at = now
+    if new_status == TicketStatus.REOPENED:
+        ticket.reopen_count = (ticket.reopen_count or 0) + 1
+        ticket.resolved_at = None
 
     reason = payload.get("reason", "")
 
@@ -565,7 +784,11 @@ async def mark_duplicate(
         user=current_user,
         request=request,
         old_values={"is_duplicate": False},
-        new_values={"is_duplicate": True, "duplicate_of_id": str(original_id), "original_ticket_number": original.ticket_number},
+        new_values={
+            "is_duplicate": True,
+            "duplicate_of_id": str(original_id),
+            "original_ticket_number": original.ticket_number,
+        },
     )
     await db.commit()
     await db.refresh(ticket)
@@ -583,13 +806,13 @@ async def pause_sla(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> dict:
-    from datetime import datetime, timezone
+    from datetime import datetime
     ticket = await _get_ticket_or_404(ticket_id, db, current_user)
 
     if ticket.sla_paused_at is not None:
         raise ValidationError("SLA is already paused for this ticket.")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     ticket.sla_paused_at = now
 
     await _record_audit(
@@ -604,7 +827,7 @@ async def pause_sla(
     await db.commit()
     await db.refresh(ticket)
     log.info("sla_paused", ticket_id=str(ticket.id))
-    return ok({"ticket_id": str(ticket.id), "sla_paused_at": now.isoformat()})
+    return ok(_serialize_ticket(ticket))
 
 
 @router.post(
@@ -618,13 +841,13 @@ async def resume_sla(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> dict:
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime
     ticket = await _get_ticket_or_404(ticket_id, db, current_user)
 
     if ticket.sla_paused_at is None:
         raise ValidationError("SLA is not currently paused for this ticket.")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     paused_duration = now - ticket.sla_paused_at
 
     # Extend due dates by the paused duration
@@ -650,7 +873,7 @@ async def resume_sla(
     await db.commit()
     await db.refresh(ticket)
     log.info("sla_resumed", ticket_id=str(ticket.id))
-    return ok({"ticket_id": str(ticket.id), "sla_resumed_at": now.isoformat()})
+    return ok(_serialize_ticket(ticket))
 
 
 @router.get("/{ticket_id}/comments", summary="List comments for a ticket")
@@ -665,7 +888,7 @@ async def list_comments(
 
     stmt = select(TicketComment).where(TicketComment.ticket_id == ticket.id)
 
-    # Branch users cannot see internal comments
+    # Branch users never see internal comments; agents see them when include_internal=true
     if _is_branch_user(current_user) or not include_internal:
         stmt = stmt.where(TicketComment.is_internal == False)  # noqa: E712
 
@@ -690,6 +913,8 @@ async def add_comment(
     if not body:
         raise ValidationError("Comment body cannot be empty.")
 
+    authz.assert_can_write(current_user, "comment on tickets")
+
     is_internal = bool(payload.get("is_internal", False))
     # Branch users cannot post internal comments
     if _is_branch_user(current_user) and is_internal:
@@ -707,8 +932,8 @@ async def add_comment(
 
     # Record first response time
     if not ticket.first_response_at and not _is_branch_user(current_user):
-        from datetime import datetime, timezone
-        ticket.first_response_at = datetime.now(timezone.utc)
+        from datetime import datetime
+        ticket.first_response_at = datetime.now(UTC)
 
     await _record_audit(
         db,
@@ -782,10 +1007,12 @@ async def ai_summarize(
         raise ValidationError("AI features are not enabled.")
 
     result = {
-        "ticket_id": str(ticket.id),
-        "ticket_number": ticket.ticket_number,
-        "summary": ticket.ai_summary or "Summary not yet generated. Trigger AI categorization first.",
-        "status": "ai_summarize_triggered",
+        "summary": ticket.ai_summary or (
+            "AI summary not yet generated. The ticket will be categorized "
+            "on the next processing cycle."
+        ),
+        "sentiment": ticket.ai_sentiment or "neutral",
+        "risk_score": ticket.ai_risk_score or 0.0,
     }
 
     await _record_audit(
@@ -817,34 +1044,26 @@ async def ai_suggest(
     if not settings.AI_ENABLED:
         raise ValidationError("AI features are not enabled.")
 
-    # Build contextual suggestions based on category
-    suggestions: list[dict] = [
-        {
-            "rank": 1,
-            "suggestion": "Review the customer's transaction history in the core banking system.",
-            "confidence": 0.85,
-        },
-        {
-            "rank": 2,
-            "suggestion": "Check if there are any pending maintenance windows affecting this service.",
-            "confidence": 0.72,
-        },
-        {
-            "rank": 3,
-            "suggestion": "Escalate to the relevant department head if unresolved within SLA.",
-            "confidence": 0.65,
-        },
+    # Build contextual suggestions based on category and priority
+    suggestions: list[str] = [
+        "Review the customer's transaction history and any recent account activity.",
+        f"This is a {ticket.priority.value}-priority ticket — ensure SLA targets are tracked.",
+        "Check if there are any pending maintenance windows or known incidents affecting this service.",
     ]
+    next_actions: list[str] = [
+        "Assign to the appropriate department team for investigation.",
+        "Escalate to the relevant department head if unresolved within SLA.",
+    ]
+    if ticket.ai_category:
+        suggestions.insert(
+            0,
+            f"Based on AI categorization ({ticket.ai_category}): "
+            "verify all related systems are checked.",
+        )
 
     result = {
-        "ticket_id": str(ticket.id),
-        "ticket_number": ticket.ticket_number,
         "suggestions": suggestions,
-        "based_on": {
-            "title": ticket.title,
-            "category": ticket.ai_category,
-            "priority": ticket.priority.value,
-        },
+        "next_actions": next_actions,
     }
 
     await _record_audit(
@@ -858,6 +1077,433 @@ async def ai_suggest(
     await db.commit()
     return ok(result)
 
+
+
+
+@router.post(
+    "/{ticket_id}/escalate",
+    summary="Escalate a ticket by hand",
+    dependencies=[Depends(require_roles("agent", "supervisor", "admin"))],
+)
+async def escalate_ticket(
+    ticket_id: uuid.UUID,
+    payload: dict,
+    request: Request,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Raise a ticket to the escalation target for its rule.
+
+    Escalating was previously just a status change: the ticket turned red and
+    nothing else happened — no event recorded, nobody reassigned, nobody told.
+    This runs the same engine the breach worker uses, so a manual escalation
+    and an automatic one leave identical evidence behind.
+    """
+    from app.services.escalation_service import (
+        EscalationService,
+        notify_escalation_outcome,
+    )
+
+    authz.assert_can_write(current_user, "escalate tickets")
+    ticket = await _get_ticket_or_404(ticket_id, db, current_user)
+
+    reason = str(payload.get("reason", "")).strip() or "Escalated manually."
+    trigger_name = str(payload.get("trigger", "manual"))
+    try:
+        trigger = EscalationTrigger(trigger_name)
+    except ValueError:
+        raise ValidationError(
+            f"Invalid trigger: {trigger_name}. "
+            f"Expected one of: {', '.join(t.value for t in EscalationTrigger)}"
+        )
+
+    outcome = await EscalationService(db).escalate(
+        ticket, trigger=trigger, reason=reason, actor_id=current_user.id
+    )
+
+    if not outcome.escalated:
+        raise ValidationError(outcome.reason)
+
+    await _record_audit(
+        db,
+        action=AuditAction.ESCALATION,
+        entity_id=str(ticket.id),
+        user=current_user,
+        request=request,
+        new_values={
+            "trigger": trigger.value,
+            "reason": reason,
+            "escalated_to": str(outcome.assignee.id) if outcome.assignee else None,
+        },
+    )
+    await db.commit()
+    await db.refresh(ticket)
+
+    await notify_escalation_outcome(db, ticket, outcome)
+
+    log.info(
+        "ticket_escalated_manually",
+        ticket_id=str(ticket.id),
+        actor=str(current_user.id),
+        to=str(outcome.assignee.id) if outcome.assignee else None,
+    )
+    return ok({
+        "ticket": _serialize_ticket(ticket),
+        "escalated_to": (
+            {"id": str(outcome.assignee.id), "full_name": outcome.assignee.full_name}
+            if outcome.assignee else None
+        ),
+        "rule": outcome.rule.name if outcome.rule else None,
+    })
+
+@router.get("/{ticket_id}/timeline", summary="Chronological history of a ticket")
+async def get_ticket_timeline(
+    ticket_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """One ordered feed of everything that happened to this ticket.
+
+    The facts live in three tables — comments, the audit log, and escalation
+    events — and reading a ticket's history meant looking in all three. This
+    merges them into the single narrative a person actually wants: raised,
+    commented, reassigned, escalated, resolved.
+    """
+    ticket = await _get_ticket_or_404(ticket_id, db, current_user)
+    events: list[dict] = []
+
+    events.append({
+        "kind": "created",
+        "at": ticket.created_at.isoformat(),
+        "title": f"Ticket created by {ticket.reporter.full_name}" if ticket.reporter else "Ticket created",
+        "detail": f"Priority {ticket.priority.value} · via {ticket.source.value}",
+        "actor": ticket.reporter.full_name if ticket.reporter else None,
+    })
+
+    # Comments. Internal notes stay hidden from branch users, matching the
+    # comment list endpoint — the timeline must not become a way around that.
+    comment_stmt = select(TicketComment).where(TicketComment.ticket_id == ticket_id)
+    if _is_branch_user(current_user):
+        comment_stmt = comment_stmt.where(TicketComment.is_internal.is_(False))
+    for comment in (await db.execute(comment_stmt)).scalars().all():
+        events.append({
+            "kind": "internal_note" if comment.is_internal else "comment",
+            "at": comment.created_at.isoformat(),
+            "title": (
+                f"{comment.author.full_name if comment.author else 'System'} "
+                f"{'added an internal note' if comment.is_internal else 'commented'}"
+            ),
+            "detail": comment.body[:200],
+            "actor": comment.author.full_name if comment.author else None,
+        })
+
+    # Status changes and assignments, from the audit trail.
+    audit_rows = (await db.execute(
+        select(AuditLog).where(
+            AuditLog.entity_type == "ticket",
+            AuditLog.entity_id == str(ticket_id),
+            AuditLog.action.in_([AuditAction.STATUS_CHANGE, AuditAction.ASSIGNMENT]),
+        )
+    )).scalars().all()
+    for row in audit_rows:
+        new_values = row.new_values or {}
+        old_values = row.old_values or {}
+        if row.action == AuditAction.STATUS_CHANGE:
+            old = str(old_values.get("status", "?")).replace("_", " ")
+            new = str(new_values.get("status", "?")).replace("_", " ")
+            title = f"Status changed from {old} to {new}"
+            detail = new_values.get("reason") or ""
+        else:
+            title = "Ticket reassigned"
+            detail = ""
+        events.append({
+            "kind": "status_change" if row.action == AuditAction.STATUS_CHANGE else "assignment",
+            "at": row.created_at.isoformat(),
+            "title": title,
+            "detail": detail,
+            "actor": row.actor_email,
+        })
+
+    # Escalations.
+    for event in (await db.execute(
+        select(EscalationEvent).where(EscalationEvent.ticket_id == ticket_id)
+    )).scalars().all():
+        target = event.escalated_to.full_name if event.escalated_to else None
+        automatic = event.escalated_by_id is None
+        events.append({
+            "kind": "escalation",
+            "at": event.triggered_at.isoformat(),
+            "title": (
+                f"{'Auto-escalated' if automatic else 'Escalated'} — "
+                f"{event.trigger.value.replace('_', ' ')}"
+            ),
+            "detail": event.reason or "",
+            "actor": target,
+            "automatic": automatic,
+        })
+
+    if ticket.resolved_at:
+        events.append({
+            "kind": "resolved", "at": ticket.resolved_at.isoformat(),
+            "title": "Ticket resolved", "detail": "", "actor": None,
+        })
+    if ticket.closed_at:
+        events.append({
+            "kind": "closed", "at": ticket.closed_at.isoformat(),
+            "title": "Ticket closed", "detail": "", "actor": None,
+        })
+
+    events.sort(key=lambda e: e["at"])
+    return ok(events)
+
+
+# ---------------------------------------------------------------------------
+# Attachments
+# ---------------------------------------------------------------------------
+
+def _attachment_is_internal(a: Attachment) -> bool:
+    """True when this file hangs off an internal note.
+
+    An internal comment is invisible to the person who raised the ticket, so
+    anything attached to it has to be invisible too. Filtering the note but
+    serving its attachment would leak exactly the content the flag exists to
+    withhold — and the file is usually the sensitive part.
+    """
+    return a.comment is not None and a.comment.is_internal
+
+
+def _visible_attachments(rows: list[Attachment], user: User) -> list[Attachment]:
+    """Drop what this user must not see. Applied server-side, never in the UI."""
+    if _is_branch_user(user):
+        return [a for a in rows if not _attachment_is_internal(a)]
+    return rows
+
+
+def _serialize_attachment(a: Attachment) -> dict:
+    return {
+        "id": str(a.id),
+        "ticket_id": str(a.ticket_id),
+        # None means the file came in with the ticket; a value ties it to the
+        # reply it was sent with.
+        "comment_id": str(a.comment_id) if a.comment_id else None,
+        "filename": a.original_filename,
+        "content_type": a.content_type,
+        "size_bytes": a.size_bytes,
+        "checksum_sha256": a.checksum_sha256,
+        "uploader": (
+            {"id": str(a.uploader.id), "full_name": a.uploader.full_name}
+            if a.uploader else None
+        ),
+        "created_at": a.created_at.isoformat(),
+    }
+
+
+@router.get("/{ticket_id}/attachments", summary="List a ticket's attachments")
+async def list_attachments(
+    ticket_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Every file on the ticket, including those sent with a reply.
+
+    Returned as one list so an agent hunting for "the statement they sent"
+    does not have to scroll the conversation to find it. Each row carries its
+    `comment_id`, so the UI can still say which reply a file arrived with.
+    """
+    # Access is decided by the ticket, not the file: anyone who can read the
+    # ticket can read what is attached to it — with one exception, below.
+    await _get_ticket_or_404(ticket_id, db, current_user)
+    rows = list((await db.execute(
+        select(Attachment)
+        .where(Attachment.ticket_id == ticket_id)
+        .order_by(Attachment.created_at.desc())
+    )).scalars().all())
+    return ok([_serialize_attachment(a) for a in _visible_attachments(rows, current_user)])
+
+
+@router.post(
+    "/{ticket_id}/attachments",
+    status_code=status.HTTP_201_CREATED,
+    summary="Attach a file to a ticket",
+)
+async def upload_attachment(
+    ticket_id: uuid.UUID,
+    request: Request,
+    file: UploadFile = File(...),
+    comment_id: Annotated[uuid.UUID | None, Query(
+        description="Attach to this reply instead of the ticket itself.",
+    )] = None,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Store a file against a ticket, or against one of its replies.
+
+    Both flows post the file after their anchor exists — the ticket is created
+    first and its evidence follows, a reply is posted and its solution file
+    follows. That ordering means a failed upload leaves a ticket or a reply
+    without its file, which the user can see and retry, rather than an orphaned
+    object in the bucket that nothing points at.
+
+    The whole body is read into memory before validation because the size limit
+    is small and streaming to storage before knowing the file is acceptable
+    would mean writing rejects to the bucket and cleaning them up afterwards.
+    """
+    authz.assert_can_write(current_user, "attach files")
+    ticket = await _get_ticket_or_404(ticket_id, db, current_user)
+
+    if not _can_modify_ticket(ticket, current_user):
+        raise AuthorizationError("You do not have permission to modify this ticket.")
+
+    comment: TicketComment | None = None
+    if comment_id is not None:
+        comment = await db.get(TicketComment, comment_id)
+        # Checking the parent rather than trusting the id stops a file being
+        # hung off someone else's ticket by passing a foreign comment id.
+        if comment is None or comment.ticket_id != ticket_id:
+            raise NotFoundError(f"Comment {comment_id} not found on this ticket.")
+        # Only the author may add to their own reply. Without this an agent
+        # could append a file to the customer's message and it would read as
+        # something the customer had sent.
+        if comment.author_id != current_user.id:
+            raise AuthorizationError("You can only attach files to your own reply.")
+
+    data = await file.read()
+    extension = validate_upload(file.filename or "file", file.content_type or "", len(data))
+    safe_name = sanitize_filename(file.filename or f"file.{extension}")
+
+    stored = await storage.upload(
+        build_key(ticket_id, extension), data, file.content_type or "application/octet-stream"
+    )
+
+    attachment = Attachment(
+        id=uuid.uuid4(),
+        ticket_id=ticket_id,
+        comment_id=comment_id,
+        uploader_id=current_user.id,
+        original_filename=safe_name,
+        content_type=file.content_type or "application/octet-stream",
+        size_bytes=stored.size_bytes,
+        s3_key=stored.key,
+        s3_bucket=stored.bucket,
+        checksum_sha256=stored.checksum_sha256,
+    )
+    db.add(attachment)
+
+    await _record_audit(
+        db,
+        action=AuditAction.UPDATE,
+        entity_id=str(ticket_id),
+        user=current_user,
+        request=request,
+        new_values={"attachment_added": safe_name, "size_bytes": stored.size_bytes},
+    )
+    await db.commit()
+    await db.refresh(attachment)
+
+    log.info(
+        "attachment_uploaded",
+        ticket_id=str(ticket_id),
+        attachment_id=str(attachment.id),
+        size=stored.size_bytes,
+        user_id=str(current_user.id),
+    )
+    return ok(_serialize_attachment(attachment))
+
+
+@router.get(
+    "/{ticket_id}/attachments/{attachment_id}/download",
+    summary="Download an attachment",
+)
+async def download_attachment(
+    ticket_id: uuid.UUID,
+    attachment_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    """Stream the file back through the API.
+
+    Deliberately not a presigned URL: that would be a bearer token in a query
+    string, outliving the session and readable from history and proxy logs. For
+    bank documents every read goes through the ticket's permission check.
+    """
+    await _get_ticket_or_404(ticket_id, db, current_user)
+
+    attachment = await db.get(Attachment, attachment_id)
+    if attachment is None or attachment.ticket_id != ticket_id:
+        raise NotFoundError("Attachment not found on this ticket.")
+
+    # A file on an internal note is as invisible as the note. Reported as "not
+    # found" rather than "forbidden" so the response does not confirm that a
+    # hidden note exists — the id would otherwise be a probe.
+    if _is_branch_user(current_user) and _attachment_is_internal(attachment):
+        raise NotFoundError("Attachment not found on this ticket.")
+
+    try:
+        data = await storage.download(attachment.s3_key)
+    except Exception as exc:
+        log.exception("attachment_download_failed", key=attachment.s3_key)
+        raise NotFoundError("The stored file could not be retrieved.") from exc
+
+    # The filename was sanitised on the way in, so it is safe in the header.
+    return Response(
+        content=data,
+        media_type=attachment.content_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{attachment.original_filename}"',
+            "Content-Length": str(len(data)),
+        },
+    )
+
+
+@router.delete(
+    "/{ticket_id}/attachments/{attachment_id}",
+    summary="Remove an attachment",
+)
+async def delete_attachment(
+    ticket_id: uuid.UUID,
+    attachment_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    authz.assert_can_write(current_user, "remove attachments")
+    ticket = await _get_ticket_or_404(ticket_id, db, current_user)
+
+    attachment = await db.get(Attachment, attachment_id)
+    if attachment is None or attachment.ticket_id != ticket_id:
+        raise NotFoundError("Attachment not found on this ticket.")
+
+    # The uploader can always remove their own; otherwise agent rights are
+    # needed, so a branch user cannot delete evidence someone else filed.
+    is_uploader = str(attachment.uploader_id) == str(current_user.id)
+    if not is_uploader and not authz.can_write_tickets(current_user):
+        raise AuthorizationError("You can only remove attachments you uploaded.")
+    if not _can_modify_ticket(ticket, current_user):
+        raise AuthorizationError("You do not have permission to modify this ticket.")
+
+    filename = attachment.original_filename
+    key = attachment.s3_key
+
+    await db.delete(attachment)
+    await _record_audit(
+        db,
+        action=AuditAction.UPDATE,
+        entity_id=str(ticket_id),
+        user=current_user,
+        request=request,
+        old_values={"attachment_removed": filename},
+    )
+    await db.commit()
+
+    # Object removed after the row, so a storage failure leaves an orphaned
+    # object rather than a database row pointing at nothing.
+    await storage.delete(key)
+
+    log.info("attachment_deleted", ticket_id=str(ticket_id), attachment_id=str(attachment_id))
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 @router.get(
     "/{ticket_id}/audit",

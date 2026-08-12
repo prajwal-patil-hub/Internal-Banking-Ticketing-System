@@ -1,0 +1,117 @@
+name: CD
+
+# Publishes container images to GHCR.
+#
+# Only from `main` and version tags. A branch build would put an untested tag
+# in the registry that somebody could deploy by accident.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false   # never abandon a half-finished push to a registry
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  # The gate. CD reruns the same checks rather than trusting that CI passed on
+  # this commit: workflows can be skipped, re-run, or added after a merge, and
+  # "some run was green once" is not the same as "this commit is good".
+  verify:
+    name: Verify before publishing
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    name: Build and push ${{ matrix.component }}
+    needs: verify
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: backend
+            context: ./backend
+          - component: frontend
+            context: ./frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.component }}
+          # The SHA tag is the one to deploy: it names exactly one build.
+          # `latest` exists for convenience and is only moved from main.
+          tags: |
+            type=sha,format=long
+            type=ref,event=tag
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          target: prod
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Layer cache in the registry, so an unchanged dependency tree is not
+          # recompiled on every push.
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
+
+      - name: Report digest
+        run: |
+          echo "### ${{ matrix.component }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "digest: ${{ steps.push.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "tags:" >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.meta.outputs.tags }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-instructions:
+    name: How to deploy this build
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      # Deliberately not deploying. There is no target environment configured,
+      # and a CD job that pretends to deploy is worse than one that hands over
+      # the exact command. Wire this to your host when there is one.
+      - name: Summary
+        run: |
+          {
+            echo "## Images published"
+            echo ""
+            echo "Deploy with:"
+            echo ""
+            echo '```bash'
+            echo "export IMAGE_TAG=sha-${{ github.sha }}"
+            echo "docker compose -f infra/docker-compose.prod.yml --env-file infra/.env.prod pull"
+            echo "docker compose -f infra/docker-compose.prod.yml --env-file infra/.env.prod up -d"
+            echo "docker compose -f infra/docker-compose.prod.yml exec backend alembic upgrade head"
+            echo '```'
+            echo ""
+            echo "Back up before migrating — see docs/runbook.md."
+          } >> "$GITHUB_STEP_SUMMARY"

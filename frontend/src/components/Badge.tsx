@@ -6,20 +6,20 @@ type Tone =
   | 'neutral' | 'success' | 'warning' | 'danger' | 'info';
 
 const toneClass: Record<Tone, string> = {
-  new:        'bg-slate-100 text-slate-700',
-  ack:        'bg-blue-100 text-blue-700',
-  assigned:   'bg-violet-100 text-violet-700',
-  progress:   'bg-sky-100 text-sky-700',
-  hold:       'bg-amber-100 text-amber-700',
-  escalated:  'bg-red-100 text-red-700',
-  resolved:   'bg-emerald-100 text-emerald-700',
-  closed:     'bg-slate-200 text-slate-800',
-  reopened:   'bg-pink-100 text-pink-700',
-  neutral:    'bg-slate-100 text-slate-700',
-  success:    'bg-emerald-100 text-emerald-700',
-  warning:    'bg-amber-100 text-amber-700',
-  danger:     'bg-red-100 text-red-700',
-  info:       'bg-blue-100 text-blue-700',
+  new:        'bg-status-new/10 text-status-new',
+  ack:        'bg-status-ack/10 text-status-ack',
+  assigned:   'bg-status-assigned/10 text-status-assigned',
+  progress:   'bg-status-progress/10 text-status-progress',
+  hold:       'bg-status-hold/10 text-status-hold',
+  escalated:  'bg-status-escalated/10 text-status-escalated',
+  resolved:   'bg-status-resolved/10 text-status-resolved',
+  closed:     'bg-status-closed/10 text-status-closed',
+  reopened:   'bg-status-reopened/10 text-status-reopened',
+  neutral:    'pill-neu',
+  success:    'pill-ok',
+  warning:    'pill-warn',
+  danger:     'pill-err',
+  info:       'pill-info',
 };
 
 interface Props {

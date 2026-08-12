@@ -5,14 +5,46 @@ on:
     branches: [main, "claude/**"]
   pull_request:
     branches: [main]
+  # Lets CD reuse these exact checks instead of trusting that some earlier run
+  # was green — see .github/workflows/cd.yml.
+  workflow_call:
+
+# A second push to the same branch makes the first run's answer irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   backend:
-    name: Backend — lint & test
+    name: Backend — lint, types & tests
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: backend
+
+    # The suite runs against PostgreSQL because the application does. Several
+    # tests depend on Postgres behaviour that SQLite does not reproduce —
+    # ARRAY columns, `now()` as transaction start time — so passing on SQLite
+    # would mean nothing about whether the code works.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: success_bank_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/success_bank_test
+      JWT_SECRET: test_secret_must_be_at_least_32_characters_long
+      PASSWORD_PEPPER: ""
+
     steps:
       - uses: actions/checkout@v4
 
@@ -20,6 +52,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: backend/pyproject.toml
 
       - name: Install
         run: |
@@ -29,21 +62,67 @@ jobs:
       - name: Ruff
         run: ruff check .
 
-      - name: Mypy
-        run: mypy app || true   # P0: warn-only; tightened in P8
+      # Advisory, with a number attached so it is not a permanent shrug:
+      # `strict = true` currently reports ~278 errors, of which ~190 are
+      # `dict` written without type parameters. The substantive ones — a raw
+      # string assigned to an enum column in four places — have been fixed.
+      # What remains is missing annotations and imprecise third-party stubs.
+      #
+      # The path to a gate is to relax the two strictness flags the codebase
+      # has never met (`disallow_any_generics`, `disallow_untyped_calls`),
+      # which leaves ~39, then work that down. Turning it on today would block
+      # every unrelated change, which is how a gate gets deleted.
+      - name: Mypy (advisory)
+        run: mypy app || true
 
+      - name: Migrate
+        run: alembic upgrade head
+
+      # Catches the failure mode that let `inbound_emails` drift eleven columns
+      # from its model: a migration that was never written. Restricted to
+      # tables and columns, because server-default and index comparisons are
+      # noisy by design and would fail on every run.
+      - name: Check for model/schema drift
+        run: |
+          if alembic check > /tmp/alembic-check.log 2>&1; then
+            echo "No drift: models and migrations agree."
+            exit 0
+          fi
+
+          # `alembic check` exits non-zero for three different reasons, and
+          # they must not be conflated. An earlier version of this step piped
+          # through `|| true` and then grepped for drift markers, so a check
+          # that never connected produced no markers and was reported as a
+          # pass — the exact false-negative this gate exists to prevent.
+          if grep -qE "'(add|remove)_(table|column)'" /tmp/alembic-check.log; then
+            echo "::error::Models and migrations disagree — a migration is missing."
+            grep -oE "'(add|remove)_(table|column)'[^)]*" /tmp/alembic-check.log | head -20
+            exit 1
+          elif grep -q "New upgrade operations detected" /tmp/alembic-check.log; then
+            # Server defaults and index comparisons differ by design between
+            # SQLAlchemy's python-side defaults and the migrations. Noisy, not
+            # a defect.
+            echo "Only server-default/index differences; no table or column drift."
+            exit 0
+          else
+            echo "::error::alembic check did not run — see log below."
+            cat /tmp/alembic-check.log
+            exit 1
+          fi
+
+      # No fallback. This step failing must fail the build — the previous
+      # `pytest -q || pytest --collect-only -q` reported success whenever the
+      # tests failed, which is worse than having no CI at all.
       - name: Pytest
-        env:
-          JWT_SECRET: test_secret_must_be_at_least_32_characters_long
-          DATABASE_URL: sqlite+aiosqlite:///./test.db
-        run: pytest -q || pytest --collect-only -q   # P0 keeps green even with no DB
+        run: pytest -q
 
   frontend:
-    name: Frontend — lint & build
+    name: Frontend — typecheck & build
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: frontend
+
     steps:
       - uses: actions/checkout@v4
 
@@ -51,13 +130,97 @@ jobs:
         with:
           node-version: "20"
           cache: npm
-          cache-dependency-path: frontend/package.json
+          # The lockfile, not package.json: keying the cache on the manifest
+          # reuses a cache that does not match the installed tree.
+          cache-dependency-path: frontend/package-lock.json
 
+      # `ci` rather than `install`, so the build uses the locked versions and
+      # cannot silently drift from what was tested locally.
       - name: Install
-        run: npm install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
 
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Test
+        run: npm run test
+
       - name: Build
         run: npm run build
+
+  # Builds both production images without pushing anything.
+  #
+  # Without this, a Dockerfile mistake is first discovered by CD — after the
+  # merge, at the moment somebody is trying to deploy. Building here means a
+  # broken image fails the pull request that introduced it. The runtime images
+  # are also where a missing system package shows up, which no amount of
+  # pytest will catch.
+  images:
+    name: Build ${{ matrix.component }} image
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: backend
+            context: ./backend
+          - component: frontend
+            context: ./frontend
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          target: prod
+          push: false
+          load: true
+          tags: ${{ matrix.component }}:ci
+          cache-from: type=gha,scope=${{ matrix.component }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.component }}
+
+      # A built image proves it compiles; running it proves it starts. These
+      # check what a Dockerfile edit is most likely to break — a dependency the
+      # entrypoint needs that never made it into the runtime layer.
+      - name: Smoke-test the backend image
+        if: matrix.component == 'backend'
+        run: |
+          # Settings are validated at import, so the app cannot be imported
+          # without them. These are throwaway values for the check only.
+          run() { docker run --rm \
+            -e DATABASE_URL=postgresql+asyncpg://u:p@localhost:5432/db \
+            -e JWT_SECRET=ci_smoke_secret_at_least_32_characters_long \
+            -e PASSWORD_PEPPER= \
+            backend:ci "$@"; }
+
+          run python -c "import app.main; print('app imports')"
+          # The compiler moved to a discarded stage; these must have survived
+          # with it. pg_dump/pg_restore are what backup.py shells out to, and
+          # curl is what the image's own HEALTHCHECK runs.
+          run pg_dump --version
+          run pg_restore --version
+          run sh -c 'command -v curl >/dev/null && echo "curl present (healthcheck)"'
+          # The image must not run as root.
+          test "$(run whoami)" = "appuser" && echo "runs as appuser"
+
+      - name: Smoke-test the frontend image
+        if: matrix.component == 'frontend'
+        run: |
+          # nginx resolves upstream hostnames when it reads the config, so
+          # `nginx -t` fails with "host not found in upstream" unless `backend`
+          # resolves — the same reason the container will not start without the
+          # backend on its network. Pointing it at localhost lets the config
+          # itself be validated.
+          docker run --rm --add-host backend:127.0.0.1 frontend:ci nginx -t
+          docker run --rm frontend:ci sh -c \
+            'test -f /usr/share/nginx/html/index.html && echo "bundle present"'
+          # The proxy block is the one that would silently 404 every API call
+          # if it were dropped.
+          docker run --rm frontend:ci grep -q "proxy_pass http://backend" \
+            /etc/nginx/conf.d/default.conf && echo "api proxy configured"

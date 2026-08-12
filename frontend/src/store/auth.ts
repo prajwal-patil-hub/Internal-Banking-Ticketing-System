@@ -4,6 +4,20 @@ import { persist } from 'zustand/middleware';
 export type Role =
   | 'branch_user' | 'admin' | 'agent' | 'supervisor' | 'auditor';
 
+export interface OrgUnit {
+  id: string;
+  name: string;
+  code: string;
+  level: string | null;
+}
+
+export interface OrgRole {
+  id: string;
+  name: string;
+  can_manage_unit: boolean;
+  can_manage_subtree: boolean;
+}
+
 export interface AuthUser {
   id: string;
   email: string;
@@ -11,6 +25,11 @@ export interface AuthUser {
   role: Role;
   branch_id: string | null;
   mfa_enabled: boolean;
+  org_unit_id: string | null;
+  org_unit: OrgUnit | null;
+  org_role_id: string | null;
+  org_role: OrgRole | null;
+  is_super_admin: boolean;
 }
 
 interface AuthState {

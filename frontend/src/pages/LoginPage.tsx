@@ -1,13 +1,15 @@
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { z } from 'zod';
 
 import { Logo } from '@/components/Logo';
 import { Button } from '@/components/Button';
+import { CodeInput } from '@/components/CodeInput';
 import { Card } from '@/components/Card';
 import { Badge } from '@/components/Badge';
-import { login } from '@/features/auth/api';
+import { login, verifyMFALogin } from '@/features/auth/api';
 import { extractError } from '@/lib/api';
 import { useAuth } from '@/store/auth';
 
@@ -23,33 +25,55 @@ export function LoginPage() {
   const loc = useLocation();
   const setSession = useAuth((s) => s.setSession);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  /** Set once the password step passes on an MFA-protected account. */
+  const [mfaToken, setMfaToken] = useState<string | null>(null);
+  const [mfaCode, setMfaCode] = useState('');
+  const [verifying, setVerifying] = useState(false);
 
   const {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
+    resolver: zodResolver(schema),
     defaultValues: { email: '', password: '' },
   });
 
+  const finish = (user: Parameters<typeof setSession>[0]['user'], tokens: { access_token: string; refresh_token: string }) => {
+    setSession({
+      user,
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+    });
+    const redirectTo = (loc.state as { from?: string } | null)?.from ?? '/dashboard';
+    nav(redirectTo, { replace: true });
+  };
+
   const onSubmit = async (values: FormValues) => {
     setSubmitError(null);
-    const parsed = schema.safeParse(values);
-    if (!parsed.success) {
-      setSubmitError(parsed.error.issues[0]?.message ?? 'Invalid input.');
-      return;
-    }
     try {
-      const { user, tokens } = await login(parsed.data.email, parsed.data.password);
-      setSession({
-        user,
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token,
-      });
-      const redirectTo = (loc.state as { from?: string } | null)?.from ?? '/dashboard';
-      nav(redirectTo, { replace: true });
+      const result = await login(values.email, values.password);
+      if (result.kind === 'mfa_required') {
+        setMfaToken(result.mfaToken);
+        return;
+      }
+      finish(result.user, result.tokens);
     } catch (e) {
       setSubmitError(extractError(e).message);
+    }
+  };
+
+  const onVerifyMfa = async () => {
+    setSubmitError(null);
+    setVerifying(true);
+    try {
+      const { user, tokens } = await verifyMFALogin(mfaToken!, mfaCode);
+      finish(user, tokens);
+    } catch (e) {
+      setSubmitError(extractError(e).message);
+      setMfaCode('');
+    } finally {
+      setVerifying(false);
     }
   };
 
@@ -70,10 +94,10 @@ export function LoginPage() {
         <span className="text-white/60 text-xs">© SUCCESS Bank — internal use only.</span>
       </div>
 
-      <div className="flex items-center justify-center p-8 bg-surface-muted dark:bg-slate-950">
+      <div className="flex items-center justify-center p-8 bg-[var(--bg)]">
         <Card className="w-full max-w-md">
-          <h2 className="text-xl font-semibold">Sign in</h2>
-          <p className="text-sm text-slate-500 mt-1">Use your corporate credentials.</p>
+          <h2 className="text-xl font-semibold text-[var(--tx)]">Sign in</h2>
+          <p className="text-sm text-[var(--tx-2)] mt-1">Use your corporate credentials.</p>
 
           {submitError && (
             <div className="mt-4">
@@ -81,9 +105,42 @@ export function LoginPage() {
             </div>
           )}
 
+          {/* Second factor — replaces the credential form once the password
+              step passes, so there is no way to skip back past it. */}
+          {mfaToken ? (
+            <div className="mt-6 flex flex-col gap-4">
+              <div>
+                <span className="block mb-1 text-sm font-medium text-[var(--tx-2)]">
+                  Authentication code
+                </span>
+                <p className="text-xs text-[var(--tx-3)] mb-2">
+                  Enter the six-digit code from your authenticator app.
+                </p>
+                <CodeInput
+                  value={mfaCode}
+                  onChange={setMfaCode}
+                  disabled={verifying}
+                  autoFocus
+                  onComplete={onVerifyMfa}
+                />
+              </div>
+
+              <Button onClick={onVerifyMfa} disabled={mfaCode.length !== 6 || verifying}>
+                {verifying ? 'Verifying…' : 'Verify'}
+              </Button>
+
+              <button
+                type="button"
+                className="text-xs text-[var(--tx-3)] hover:text-[var(--tx-2)] underline"
+                onClick={() => { setMfaToken(null); setMfaCode(''); setSubmitError(null); }}
+              >
+                Back to sign in
+              </button>
+            </div>
+          ) : (
           <form className="mt-6 flex flex-col gap-4" onSubmit={handleSubmit(onSubmit)} noValidate>
             <label className="text-sm">
-              <span className="block mb-1 font-medium">Work email</span>
+              <span className="block mb-1 font-medium text-[var(--tx-2)]">Work email</span>
               <input
                 className="input"
                 type="email"
@@ -91,11 +148,11 @@ export function LoginPage() {
                 placeholder="you@successbank.com"
                 {...register('email')}
               />
-              {errors.email && <span className="text-xs text-red-600">{errors.email.message}</span>}
+              {errors.email && <span className="text-xs text-[var(--err)]">{errors.email.message}</span>}
             </label>
 
             <label className="text-sm">
-              <span className="block mb-1 font-medium">Password</span>
+              <span className="block mb-1 font-medium text-[var(--tx-2)]">Password</span>
               <input
                 className="input"
                 type="password"
@@ -104,7 +161,7 @@ export function LoginPage() {
                 {...register('password')}
               />
               {errors.password && (
-                <span className="text-xs text-red-600">{errors.password.message}</span>
+                <span className="text-xs text-[var(--err)]">{errors.password.message}</span>
               )}
             </label>
 
@@ -112,10 +169,11 @@ export function LoginPage() {
               {isSubmitting ? 'Signing in…' : 'Sign in'}
             </Button>
 
-            <p className="text-xs text-slate-500 text-center">
-              MFA prompt appears after first login (P8).
+            <p className="text-xs text-[var(--tx-3)] text-center">
+              Accounts with two-factor authentication will be asked for a code next.
             </p>
           </form>
+          )}
         </Card>
       </div>
     </div>

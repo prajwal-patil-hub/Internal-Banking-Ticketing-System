@@ -41,15 +41,22 @@ class TicketComment(UUIDPKMixin, TimestampMixin, Base):
     body: Mapped[str] = mapped_column(Text, nullable=False)
     is_internal: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     source: Mapped[CommentSource] = mapped_column(
-        Enum(CommentSource, name="commentsource"),
+        Enum(CommentSource, name="commentsource", values_callable=lambda x: [e.value for e in x]),
         default=CommentSource.AGENT,
         nullable=False,
     )
     ai_generated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
-    ticket: Mapped["Ticket"] = relationship(  # type: ignore[name-defined]
+    ticket: Mapped[Ticket] = relationship(  # type: ignore[name-defined]  # noqa: F821
         back_populates="comments", lazy="selectin"
     )
-    author: Mapped["User | None"] = relationship(  # type: ignore[name-defined]
+    author: Mapped[User | None] = relationship(  # type: ignore[name-defined]  # noqa: F821
         foreign_keys=[author_id], lazy="selectin"
+    )
+    #: Files sent with this reply. Eager-loaded because the ticket page renders
+    #: them under every comment — lazy loading here would be a query per reply.
+    attachments: Mapped[list[Attachment]] = relationship(  # type: ignore[name-defined]  # noqa: F821
+        back_populates="comment",
+        lazy="selectin",
+        cascade="all, delete-orphan",
     )

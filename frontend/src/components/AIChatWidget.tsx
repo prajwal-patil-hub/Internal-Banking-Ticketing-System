@@ -1,14 +1,21 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import { cn } from '@/lib/cn';
-import { sendChatMessage } from '@/features/ai/api';
+import { extractError } from '@/lib/api';
+import { sendChatMessage, streamChatMessage, getAIHealth } from '@/features/ai/api';
+import { describePage, ticketIdFromPath } from '@/features/ai/pageContext';
 
 interface DisplayMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  /** Awaiting the first token — show dots. */
   isTyping?: boolean;
+  /** Tokens are arriving — show the caret. */
+  isStreaming?: boolean;
 }
+
+const STREAMING_ID = 'streaming';
 
 export function AIChatWidget() {
   const [open, setOpen] = useState(false);
@@ -19,17 +26,30 @@ export function AIChatWidget() {
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const location = useLocation();
 
-  // Derive ticket context from URL
-  const ticketMatch = location.pathname.match(/^\/tickets\/([^/]+)$/);
-  const ticketId = ticketMatch ? ticketMatch[1] : undefined;
+  // Never leave a stream running behind a closed widget.
+  useEffect(() => () => abortRef.current?.abort(), []);
+
+  // What the user is looking at. The server re-reads any referenced data
+  // under their own permissions, so this only names the screen — it never
+  // carries page contents.
+  const { pathname, search } = location;
+  const ticketId = ticketIdFromPath(pathname);
+  const page = useMemo(() => describePage(pathname, search), [pathname, search]);
+  /** What the assistant was actually grounded on, reported by the server. */
+  const [grounding, setGrounding] = useState<string[]>([]);
 
   useEffect(() => {
     if (open) {
       setTimeout(() => textareaRef.current?.focus(), 50);
     }
   }, [open]);
+
+  // The grounding label describes the last answer; once the user moves to
+  // another screen it is no longer true, so clear it.
+  useEffect(() => { setGrounding([]); }, [pathname]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -48,39 +68,113 @@ export function AIChatWidget() {
       content: text,
     };
 
-    const typingMsg: DisplayMessage = {
-      id: 'typing',
-      role: 'assistant',
-      content: '',
-      isTyping: true,
-    };
-
-    setMessages((prev) => [...prev, userMsg, typingMsg]);
+    setMessages((prev) => [
+      ...prev,
+      userMsg,
+      { id: STREAMING_ID, role: 'assistant', content: '', isTyping: true },
+    ]);
     setSending(true);
 
+    const payload = {
+      message: text,
+      session_id: sessionId,
+      page,
+      ...(ticketId ? { context_type: 'ticket' as const, context_id: ticketId } : {}),
+    };
+
+    const abort = new AbortController();
+    abortRef.current = abort;
+
+    // Tracks whether any token arrived: a stream that dies before the first
+    // token can be retried with the blocking endpoint, but one that dies
+    // halfway must not be, or the user would see the reply start over.
+    let streamed = false;
+
     try {
-      const resp = await sendChatMessage({
-        message: text,
-        session_id: sessionId,
-        ...(ticketId ? { context_type: 'ticket', context_id: ticketId } : {}),
-      });
+      await streamChatMessage(
+        payload,
+        {
+          onMeta: ({ session_id, context_sources, context_denied }) => {
+            setSessionId(session_id);
+            setGrounding(context_sources ?? []);
+            if (context_denied) {
+              setError('You do not have access to the ticket on this page, so the assistant cannot see it.');
+            }
+          },
+          onDelta: (chunk) => {
+            streamed = true;
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === STREAMING_ID
+                  ? { ...m, content: m.content + chunk, isTyping: false, isStreaming: true }
+                  : m,
+              ),
+            );
+          },
+          onDone: ({ message_id }) => {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === STREAMING_ID
+                  ? { ...m, id: message_id ?? `a-${Date.now()}`, isStreaming: false }
+                  : m,
+              ),
+            );
+          },
+          onError: (message) => setError(message),
+        },
+        abort.signal,
+      );
+    } catch (streamErr) {
+      // Held separately from the catch binding: if the blocking fallback also
+      // fails, its error is the one worth reporting — it is the more recent
+      // and more specific failure.
+      let failure: unknown = streamErr;
 
-      setSessionId(resp.session_id);
+      if (abort.signal.aborted) {
+        setMessages((prev) => prev.filter((m) => m.id !== STREAMING_ID));
+        setSending(false);
+        return;
+      }
 
-      const assistantMsg: DisplayMessage = {
-        id: resp.assistant_message.id,
-        role: 'assistant',
-        content: resp.assistant_message.content,
-      };
+      // Streaming can fail for reasons the model is innocent of — a proxy that
+      // buffers SSE, for one. Fall back to the blocking endpoint so the user
+      // still gets an answer, but only if nothing was rendered yet.
+      if (!streamed) {
+        try {
+          const resp = await sendChatMessage(payload);
+          setSessionId(resp.session_id);
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === STREAMING_ID
+                ? {
+                    id: resp.assistant_message.id,
+                    role: 'assistant' as const,
+                    content: resp.assistant_message.content,
+                  }
+                : m,
+            ),
+          );
+          return;
+        } catch (fallbackErr) {
+          failure = fallbackErr;
+        }
+      }
 
-      setMessages((prev) => [...prev.filter((m) => m.id !== 'typing'), assistantMsg]);
-    } catch {
-      setMessages((prev) => prev.filter((m) => m.id !== 'typing'));
-      setError('Failed to get a response. Please try again.');
+      setMessages((prev) => prev.filter((m) => m.id !== STREAMING_ID));
+      // A failed call is usually a local-Ollama setup problem, not a bug in the
+      // app — ask the backend what is actually wrong so the user sees the fix.
+      const base = extractError(failure).message;
+      try {
+        const health = await getAIHealth();
+        setError(health.hint ? `${base} — ${health.hint}` : base);
+      } catch {
+        setError(base);
+      }
     } finally {
+      abortRef.current = null;
       setSending(false);
     }
-  }, [input, sending, sessionId, ticketId]);
+  }, [input, sending, sessionId, ticketId, page]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -94,6 +188,7 @@ export function AIChatWidget() {
   };
 
   const handleNewSession = () => {
+    abortRef.current?.abort();
     setSessionId(undefined);
     setMessages([]);
     setError(null);
@@ -133,7 +228,7 @@ export function AIChatWidget() {
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-sm font-semibold text-white leading-tight">AI Assistant</div>
-              <div className="text-xs text-white/70 leading-tight">Banking AI · Powered by Claude</div>
+              <div className="text-xs text-white/70 leading-tight">Banking AI · Local model</div>
             </div>
             <div className="flex items-center gap-1">
               <button
@@ -157,14 +252,15 @@ export function AIChatWidget() {
             </div>
           </div>
 
-          {/* Context chip */}
-          {ticketId && (
-            <div className="px-4 py-2 bg-brand-50 dark:bg-brand-900/20 border-b border-slate-100 dark:border-slate-800">
-              <span className="text-xs text-brand-700 dark:text-brand-300 font-medium">
-                Context: Ticket #{ticketId.slice(0, 8)}...
-              </span>
-            </div>
-          )}
+          {/* What the assistant can see. Names the real sources the server
+              reported rather than implying access from the URL alone. */}
+          <div className="px-4 py-2 bg-brand-50 dark:bg-brand-900/20 border-b border-slate-100 dark:border-slate-800">
+            <span className="text-xs text-brand-700 dark:text-brand-300 font-medium">
+              {grounding.length
+                ? `Can see: ${grounding.join(' · ')}`
+                : `On: ${page.label.split(' — ')[0]}`}
+            </span>
+          </div>
 
           {/* Messages */}
           <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-3">
@@ -223,18 +319,26 @@ export function AIChatWidget() {
                   {msg.isTyping ? (
                     <TypingIndicator />
                   ) : (
-                    <span className="whitespace-pre-wrap">{msg.content}</span>
+                    <span className="whitespace-pre-wrap">
+                      {msg.content}
+                      {msg.isStreaming && (
+                        <span
+                          className="inline-block w-[2px] h-[1em] -mb-[2px] ml-0.5 bg-current animate-pulse"
+                          aria-hidden="true"
+                        />
+                      )}
+                    </span>
                   )}
                 </div>
               </div>
             ))}
 
             {error && (
-              <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 text-xs">
-                <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <div className="flex items-start gap-2 px-3 py-2 rounded-xl bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 text-xs">
+                <svg className="h-4 w-4 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M12 9v4M12 17h.01M4.93 19h14.14L12 5z" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
-                {error}
+                <span className="whitespace-pre-line">{error}</span>
               </div>
             )}
 
@@ -270,7 +374,9 @@ export function AIChatWidget() {
               </button>
             </div>
             <p className="text-[10px] text-slate-400 mt-1.5 text-center">
-              Shift+Enter for newline · Powered by Claude
+              {sending
+                ? 'Generating… the first token after an idle period can take a while.'
+                : 'Shift+Enter for newline · Powered by a local LLM'}
             </p>
           </div>
         </div>

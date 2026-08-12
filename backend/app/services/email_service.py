@@ -21,9 +21,10 @@ import email
 import imaplib
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from email.header import decode_header as _decode_header
 from email.message import Message
+from email.utils import parseaddr
 from typing import Any
 
 from sqlalchemy import select
@@ -110,8 +111,11 @@ def _parse_raw_email(raw_bytes: bytes) -> dict[str, Any]:
     msg: Message = email.message_from_bytes(raw_bytes)
 
     message_id = msg.get("Message-ID", "").strip()
-    from_header = _decode_mime_header(msg.get("From", ""))
-    to_header = _decode_mime_header(msg.get("To", ""))
+    # `From: Priya Customer <priya@example.com>` — split the two apart. Keeping
+    # them joined breaks anything that treats the field as an address: the
+    # domain check below, a sender lookup, and the To: header of any reply.
+    from_name, from_header = parseaddr(_decode_mime_header(msg.get("From", "")))
+    to_header = parseaddr(_decode_mime_header(msg.get("To", "")))[1]
     subject = _decode_mime_header(msg.get("Subject", ""))
     in_reply_to = msg.get("In-Reply-To", "").strip() or None
     references = msg.get("References", "").strip() or None
@@ -122,9 +126,9 @@ def _parse_raw_email(raw_bytes: bytes) -> dict[str, Any]:
     try:
         import email.utils as _eu
         parsed_date = _eu.parsedate_to_datetime(date_str)
-        received_at: datetime = parsed_date.astimezone(timezone.utc)
+        received_at: datetime = parsed_date.astimezone(UTC)
     except Exception:
-        received_at = datetime.now(timezone.utc)
+        received_at = datetime.now(UTC)
 
     # SPF / DKIM (added by MTA as headers)
     spf_result = msg.get("Received-SPF", "").lower()
@@ -140,7 +144,7 @@ def _parse_raw_email(raw_bytes: bytes) -> dict[str, Any]:
     # Sender domain
     sender_domain: str | None = None
     if "@" in from_header:
-        sender_domain = from_header.split("@")[-1].split(">")[0].strip()
+        sender_domain = from_header.rsplit("@", 1)[-1].strip().lower() or None
 
     text_body, html_body = _extract_body(msg)
     attachments_count = _count_attachments(msg)
@@ -161,6 +165,7 @@ def _parse_raw_email(raw_bytes: bytes) -> dict[str, Any]:
     return {
         "message_id": message_id,
         "from_address": from_header,
+        "from_name": from_name or None,
         "to_address": to_header,
         "cc_addresses": cc_addresses,
         "subject": subject,
@@ -210,12 +215,13 @@ class EmailService:
         record = InboundEmail(
             message_id=message_id or f"no-id-{uuid.uuid4()}",
             from_address=raw_email_data.get("from_address", ""),
+            from_name=raw_email_data.get("from_name"),
             to_address=raw_email_data.get("to_address", ""),
             cc_addresses=raw_email_data.get("cc_addresses"),
             subject=raw_email_data.get("subject") or None,
             body_text=raw_email_data.get("body_text"),
             body_html=raw_email_data.get("body_html"),
-            received_at=raw_email_data.get("received_at", datetime.now(timezone.utc)),
+            received_at=raw_email_data.get("received_at", datetime.now(UTC)),
             status=EmailStatus.PENDING.value,  # type: ignore[assignment]
             is_spam=is_spam,
             spam_score=spam_score,
@@ -241,7 +247,7 @@ class EmailService:
         try:
             await self._route_email(record, raw_email_data)
             record.status = EmailStatus.PROCESSED.value  # type: ignore[assignment]
-            record.processed_at = datetime.now(timezone.utc)
+            record.processed_at = datetime.now(UTC)
         except Exception as exc:
             record.status = EmailStatus.FAILED.value  # type: ignore[assignment]
             record.processing_error = str(exc)[:500]

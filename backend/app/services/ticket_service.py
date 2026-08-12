@@ -13,12 +13,12 @@ Responsibilities:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import ConflictError, NotFoundError, ValidationError
+from app.core.exceptions import NotFoundError, ValidationError
 from app.core.logging import get_logger
 from app.models.audit import AuditAction
 from app.models.comment import CommentSource, TicketComment
@@ -81,6 +81,10 @@ VALID_TRANSITIONS: dict[TicketStatus, list[TicketStatus]] = {
     TicketStatus.REOPENED: [
         TicketStatus.ASSIGNED,
         TicketStatus.IN_PROGRESS,
+        # Every other open state can be closed directly, and a reporter who
+        # reopened by mistake needs the same exit; without this the reporter's
+        # close permission is unreachable from the one state they can create.
+        TicketStatus.CLOSED,
     ],
 }
 
@@ -104,7 +108,7 @@ class TicketService:
 
     async def generate_ticket_number(self) -> str:
         """Generate TKT-YYYYMMDD-NNNNN, sequential within the calendar day."""
-        today = datetime.now(timezone.utc).strftime("%Y%m%d")
+        today = datetime.now(UTC).strftime("%Y%m%d")
         prefix = f"TKT-{today}-"
 
         stmt = (
@@ -242,9 +246,9 @@ class TicketService:
                 f"Allowed: {[s.value for s in allowed]}"
             )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         old_status_value = current_status.value
-        ticket.status = new_status.value
+        ticket.status = new_status
 
         # Update lifecycle timestamps
         if new_status == TicketStatus.RESOLVED:
@@ -298,7 +302,7 @@ class TicketService:
         )
         current_status = TicketStatus(current_status_str)
         if current_status in (TicketStatus.NEW, TicketStatus.ACKNOWLEDGED):
-            ticket.status = TicketStatus.ASSIGNED.value
+            ticket.status = TicketStatus.ASSIGNED
 
         await self.db.flush()
         await self._audit.log(
@@ -393,10 +397,11 @@ class TicketService:
 
         # Record first external response timestamp
         if not data.is_internal and ticket.first_response_at is None and author_id is not None:
-            ticket.first_response_at = datetime.now(timezone.utc)
+            ticket.first_response_at = datetime.now(UTC)
 
             # Update SLATracking
             from sqlalchemy import select as _select
+
             from app.models.sla import SLATracking
             track_stmt = _select(SLATracking).where(SLATracking.ticket_id == ticket_id)
             tracking = (await self.db.execute(track_stmt)).scalar_one_or_none()
@@ -444,8 +449,8 @@ class TicketService:
 
         ticket.duplicate_of_id = original_id
         ticket.is_duplicate = True
-        ticket.status = TicketStatus.CLOSED.value
-        ticket.closed_at = datetime.now(timezone.utc)
+        ticket.status = TicketStatus.CLOSED
+        ticket.closed_at = datetime.now(UTC)
 
         await self.db.flush()
         await self._audit.log(

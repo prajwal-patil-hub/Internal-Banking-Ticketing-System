@@ -31,6 +31,10 @@ pnpm-debug.log*
 frontend/dist/
 frontend/build/
 backend/dist/
+frontend/tsconfig.tsbuildinfo
+frontend/tsconfig.node.tsbuildinfo
+frontend/vite.config.d.ts
+frontend/vite.config.js
 
 # ---- Editors / OS ----
 .vscode/
@@ -53,3 +57,6 @@ infra/data/
 *.key
 *.crt
 secrets/
+
+# SOP capture uses a temporary vite config; the committed screens are enough
+frontend/vite.sop.config.ts

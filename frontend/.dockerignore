@@ -1,0 +1,18 @@
+# `COPY . .` runs after `npm ci`, so without this the host's node_modules —
+# 152 MB, built for a different platform — is copied over the one the image
+# just installed, and is uploaded as build context on every single build.
+node_modules/
+
+# Built by the image itself; copying a stale local build in is how you ship
+# yesterday's bundle.
+dist/
+
+# VITE_* values are inlined into the bundle at build time, so a stray .env
+# here becomes part of the shipped JavaScript.
+.env
+.env.*
+!.env.example
+
+.git/
+.gitignore
+*.log

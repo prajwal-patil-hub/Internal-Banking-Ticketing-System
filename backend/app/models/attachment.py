@@ -18,12 +18,30 @@ from app.db.base import Base, TimestampMixin, UUIDPKMixin
 class Attachment(UUIDPKMixin, TimestampMixin, Base):
     __tablename__ = "attachments"
 
-    __table_args__ = (Index("ix_attachments_ticket_id", "ticket_id"),)
+    __table_args__ = (
+        Index("ix_attachments_ticket_id", "ticket_id"),
+        Index("ix_attachments_comment_id", "comment_id"),
+    )
 
     ticket_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("tickets.id", ondelete="CASCADE"),
         nullable=False,
+    )
+    #: Which reply this file belongs to, if any.
+    #:
+    #: NULL means the file describes the problem — evidence the raiser supplied
+    #: with the ticket itself. A value means it belongs to one specific reply,
+    #: which is how an agent's fix (a corrected statement, a screenshot of the
+    #: working screen) stays attached to the answer that explains it rather
+    #: than floating in a shared pile.
+    #:
+    #: `ticket_id` is kept populated either way, so a file is always reachable
+    #: from the ticket and the visibility rules have one place to look.
+    comment_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("ticket_comments.id", ondelete="CASCADE"),
+        nullable=True,
     )
     uploader_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
@@ -55,9 +73,12 @@ class Attachment(UUIDPKMixin, TimestampMixin, Base):
     document_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     # Relationships
-    ticket: Mapped["Ticket"] = relationship(  # type: ignore[name-defined]
+    ticket: Mapped[Ticket] = relationship(  # type: ignore[name-defined]  # noqa: F821
         back_populates="attachments", lazy="selectin"
     )
-    uploader: Mapped["User | None"] = relationship(  # type: ignore[name-defined]
+    uploader: Mapped[User | None] = relationship(  # type: ignore[name-defined]  # noqa: F821
         foreign_keys=[uploader_id], lazy="selectin"
+    )
+    comment: Mapped[TicketComment | None] = relationship(  # type: ignore[name-defined]  # noqa: F821
+        back_populates="attachments", lazy="selectin"
     )

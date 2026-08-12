@@ -23,7 +23,10 @@ class Settings(BaseSettings):
     APP_ENV: Literal["development", "staging", "production"] = "development"
     APP_NAME: str = "SUCCESS Bank API"
     APP_DEBUG: bool = False
-    APP_HOST: str = "0.0.0.0"
+    # Binds all interfaces because the process runs inside a container and is
+    # reached from outside it; 127.0.0.1 would be unreachable. Exposure is
+    # decided by the compose/ingress port mapping, not here.
+    APP_HOST: str = "0.0.0.0"  # noqa: S104
     APP_PORT: int = 8000
     LOG_LEVEL: str = "INFO"
 
@@ -64,10 +67,39 @@ class Settings(BaseSettings):
     SLA_LOW_MINUTES: int = 4320
 
     # --- AI ---
+    # LLM_PROVIDER: "ollama" (local via Ollama) | "anthropic" (cloud) | "none" (disabled)
+    LLM_PROVIDER: Literal["ollama", "anthropic", "none"] = "ollama"
+    # Ollama base URL — from inside Docker container use host.docker.internal
+    LLM_BASE_URL: str = "http://host.docker.internal:11434"
+    LLM_MODEL: str = "glm4"
+    # Anthropic (only used when LLM_PROVIDER=anthropic)
     ANTHROPIC_API_KEY: str = ""
     AI_ENABLED: bool = True
     AI_MAX_TOKENS: int = 1024
     AI_CONFIDENCE_THRESHOLD: float = 0.7
+
+    # --- AI cost and latency controls ---
+    # Chat replies are capped far below AI_MAX_TOKENS (which still governs the
+    # one-shot extraction calls). An assistant answering a support question
+    # needs a few sentences; left unbounded a local model will happily produce
+    # a thousand-token essay, and the user waits for every one of them.
+    AI_CHAT_MAX_TOKENS: int = 400
+    # Characters of grounding context. A local model re-reads the entire prompt
+    # each turn, so this is a per-message tax, not a one-off.
+    AI_CONTEXT_CHAR_BUDGET: int = 6000
+    # Characters of prior conversation replayed. Bounds a long chat instead of
+    # letting it grow until it crowds out the context block.
+    AI_HISTORY_CHAR_BUDGET: int = 4000
+    # Sampling: low temperature because this assistant reports facts from the
+    # context block rather than writing prose.
+    AI_TEMPERATURE: float = 0.2
+    # Per-user AI calls allowed per minute.
+    AI_RATE_LIMIT_PER_MINUTE: int = 20
+    # Local models are slow on first token (model load + no GPU batching).
+    # GLM-4 on an M2 Mac routinely needs 30-90s for a cold request.
+    AI_TIMEOUT_SECONDS: float = 180.0
+    # Keep the model resident in Ollama between requests to avoid cold starts.
+    AI_KEEP_ALIVE: str = "10m"
 
     # --- Email Ingestion (IMAP) ---
     IMAP_ENABLED: bool = False

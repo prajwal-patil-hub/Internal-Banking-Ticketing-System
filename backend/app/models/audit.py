@@ -45,7 +45,7 @@ class AuditLog(UUIDPKMixin, Base):
     entity_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
 
     action: Mapped[AuditAction] = mapped_column(
-        Enum(AuditAction, name="auditaction"), nullable=False
+        Enum(AuditAction, name="auditaction", values_callable=lambda x: [e.value for e in x]), nullable=False
     )
 
     actor_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -74,6 +74,6 @@ class AuditLog(UUIDPKMixin, Base):
         nullable=False,
     )
 
-    actor: Mapped["User | None"] = relationship(  # type: ignore[name-defined]
+    actor: Mapped[User | None] = relationship(  # type: ignore[name-defined]  # noqa: F821
         foreign_keys=[actor_id], lazy="selectin"
     )

@@ -18,7 +18,7 @@ from app.core.logging import get_logger
 log = get_logger(__name__)
 
 
-class AppException(Exception):
+class AppException(Exception):  # noqa: N818 - base class, not itself raised
     """Base for all application-defined errors."""
 
     status_code: int = 500
@@ -72,10 +72,38 @@ class ConflictError(AppException):
     message = "Resource conflict."
 
 
+class MFARequiredError(AppException):
+    """Password accepted, second factor still owed.
+
+    Carries the challenge token in `details` so the client can complete the
+    login without re-sending the password. Deliberately not a 401: the
+    credentials were correct, so the frontend's refresh-and-retry interceptor
+    must not treat this as an expired session.
+    """
+
+    status_code = 403
+    code = "MFA_REQUIRED"
+    message = "Multi-factor authentication code required."
+
+
 class RateLimitError(AppException):
     status_code = 429
     code = "RATE_LIMITED"
     message = "Too many requests."
+
+
+class StorageUnavailableError(AppException):
+    """Object storage could not be reached.
+
+    503 rather than 500: nothing is wrong with the request, the file store is
+    simply down, and retrying later is the correct response. Saying so also
+    saves whoever is on call from reading a stack trace to learn that MinIO
+    is not running.
+    """
+
+    status_code = 503
+    code = "STORAGE_UNAVAILABLE"
+    message = "File storage is temporarily unavailable. Please try again shortly."
 
 
 def _envelope(

@@ -39,8 +39,11 @@ class InboundEmail(UUIDPKMixin, TimestampMixin, Base):
     # RFC 2822 Message-ID — unique per email
     message_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
 
-    # Headers
+    # Headers. `from_address` is the bare address; the display name, when the
+    # sender supplied one, is kept separately so neither field has to be
+    # unpicked from the other later.
     from_address: Mapped[str] = mapped_column(String(255), nullable=False)
+    from_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     to_address: Mapped[str] = mapped_column(String(255), nullable=False)
     cc_addresses: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
     subject: Mapped[str | None] = mapped_column(String(500), nullable=True)
