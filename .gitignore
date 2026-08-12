@@ -57,3 +57,6 @@ infra/data/
 *.key
 *.crt
 secrets/
+
+# SOP capture uses a temporary vite config; the committed screens are enough
+frontend/vite.sop.config.ts
