@@ -4,7 +4,7 @@ import { Button } from '@/components/Button';
 import { cn } from '@/lib/cn';
 import { extractError } from '@/lib/api';
 import {
-  listUsers, createUser, updateUser, deactivateUser,
+  listUsers, createUser, updateUser, deactivateUser, setUserLeave,
   getLevels, listOrgUnits, listOrgRoles,
   type OrgUser,
 } from '@/features/org/api';
@@ -169,6 +169,85 @@ function UserFormModal({
   );
 }
 
+/**
+ * Record when somebody is away.
+ *
+ * Deliberately a date range rather than an availability toggle. A toggle has
+ * to be switched back on by hand when the person returns, and in practice
+ * nobody does — they quietly stop receiving work for weeks. A window expires
+ * on its own.
+ *
+ * This never touches `is_active`: that flag gates login, so using it to cover
+ * leave would lock the person out of the system entirely.
+ */
+function LeaveModal({ user, onClose }: { user: OrgUser; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [from, setFrom] = useState(user.leave_from ?? '');
+  const [to, setTo] = useState(user.leave_to ?? '');
+  const [note, setNote] = useState(user.leave_note ?? '');
+  const [error, setError] = useState<string | null>(null);
+
+  const save = useMutation({
+    mutationFn: (clear: boolean) =>
+      setUserLeave(user.id, clear
+        ? { leave_from: null, leave_to: null, leave_note: null }
+        : { leave_from: from || null, leave_to: to || null, leave_note: note || null }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); onClose(); },
+    onError: (e) => setError(extractError(e).message),
+  });
+
+  const invalid = Boolean(from && to && to < from);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="card-sm w-full max-w-md">
+        <h2 className="text-base font-semibold text-[var(--tx)]">Leave — {user.full_name}</h2>
+        <p className="mt-1 text-xs text-[var(--tx-3)]">
+          While away, auto-assignment skips them. They can still sign in, and a
+          supervisor can still assign to them deliberately.
+        </p>
+
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          <label className="text-xs text-[var(--tx-2)]">
+            From
+            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)}
+                   className="input mt-1 w-full" />
+          </label>
+          <label className="text-xs text-[var(--tx-2)]">
+            To
+            <input type="date" value={to} onChange={(e) => setTo(e.target.value)}
+                   className="input mt-1 w-full" />
+          </label>
+        </div>
+        <label className="mt-3 block text-xs text-[var(--tx-2)]">
+          Note (optional)
+          <input value={note} onChange={(e) => setNote(e.target.value)} maxLength={200}
+                 placeholder="Annual leave" className="input mt-1 w-full" />
+        </label>
+
+        <p className="mt-2 text-[11px] text-[var(--tx-3)]">
+          Leave the end date empty for indefinite leave. Both dates are inclusive.
+        </p>
+        {invalid && <p className="mt-2 text-xs text-[var(--err)]">The end date is before the start date.</p>}
+        {error && <p className="mt-2 text-xs text-[var(--err)]">{error}</p>}
+
+        <div className="mt-4 flex items-center justify-between">
+          <button onClick={() => save.mutate(true)} disabled={save.isPending}
+                  className="btn-ghost !py-1 !px-2 text-xs text-[var(--err)] disabled:opacity-40">
+            Clear leave
+          </button>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="btn-ghost !py-1 !px-3 text-xs">Cancel</button>
+            <Button onClick={() => save.mutate(false)} disabled={save.isPending || invalid}>
+              {save.isPending ? 'Saving…' : 'Save'}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function UsersPage() {
   const qc = useQueryClient();
   const [search, setSearch] = useState('');
@@ -176,6 +255,7 @@ export function UsersPage() {
   const [page, setPage] = useState(1);
   const [editing, setEditing] = useState<OrgUser | null>(null);
   const [creating, setCreating] = useState(false);
+  const [leaveFor, setLeaveFor] = useState<OrgUser | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['users', search, roleFilter, page],
@@ -219,12 +299,13 @@ export function UsersPage() {
               <th>Org Unit</th>
               <th>Org Role</th>
               <th>Status</th>
+              <th>Availability</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {isLoading && (
-              <tr><td colSpan={7} className="text-center py-8">
+              <tr><td colSpan={8} className="text-center py-8">
                 <div className="flex justify-center">
                   <div className="h-5 w-5 rounded-full border-2 border-[var(--brand)] border-t-transparent animate-spin" />
                 </div>
@@ -259,7 +340,21 @@ export function UsersPage() {
                     {user.is_active ? 'Active' : 'Inactive'}
                   </span>
                 </td>
+                <td>
+                  {user.on_leave ? (
+                    <span className="pill pill-warn text-xs" title={user.leave_note ?? undefined}>
+                      On leave{user.leave_to ? ` · to ${user.leave_to}` : ''}
+                    </span>
+                  ) : user.leave_from ? (
+                    <span className="text-xs text-[var(--tx-3)]" title={user.leave_note ?? undefined}>
+                      Leave from {user.leave_from}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-[var(--tx-3)]">Available</span>
+                  )}
+                </td>
                 <td className="text-right">
+                  <button onClick={() => setLeaveFor(user)} className="btn-ghost !py-1 !px-2 text-xs mr-1">Leave</button>
                   <button onClick={() => setEditing(user)} className="btn-ghost !py-1 !px-2 text-xs mr-1">Edit</button>
                   {user.is_active && (
                     <button onClick={() => { if (confirm(`Deactivate ${user.full_name}?`)) deactivateMut.mutate(user.id); }} className="btn-ghost !py-1 !px-2 text-xs text-[var(--err)]">
@@ -270,7 +365,7 @@ export function UsersPage() {
               </tr>
             ))}
             {!isLoading && users.length === 0 && (
-              <tr><td colSpan={7} className="text-center text-sm text-[var(--tx-3)] py-8">No users found</td></tr>
+              <tr><td colSpan={8} className="text-center text-sm text-[var(--tx-3)] py-8">No users found</td></tr>
             )}
           </tbody>
         </table>
@@ -290,6 +385,8 @@ export function UsersPage() {
           onClose={() => { setEditing(null); setCreating(false); }}
         />
       )}
+
+      {leaveFor && <LeaveModal user={leaveFor} onClose={() => setLeaveFor(null)} />}
     </div>
   );
 }

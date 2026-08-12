@@ -1,6 +1,7 @@
 """Aggregate model imports — Alembic introspects this package for metadata."""
 
 from app.models.ai_interaction import AIInteractionLog, ChatMessage, ChatSession  # noqa: F401
+from app.models.assignment import AssignmentRule, SystemSetting  # noqa: F401
 from app.models.attachment import Attachment  # noqa: F401
 from app.models.audit import AuditLog  # noqa: F401
 from app.models.auth import LoginAttempt, RefreshToken  # noqa: F401

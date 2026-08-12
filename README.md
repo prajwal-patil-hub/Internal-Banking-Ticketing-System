@@ -74,14 +74,41 @@ re-seeding will shift.
 
 ## Ticket intake
 
-A ticket raised through the API gets its SLA deadlines stamped and is
-auto-assigned to the agent with the lightest open queue. Agents are preferred
-over supervisors — ranking on workload alone sends everything to whoever is
-idlest, which is reliably a supervisor, and frontline work would skip the
-agents entirely. Auditors and branch users are never candidates.
+A ticket raised through the API gets its SLA deadlines stamped and arrives
+**unassigned**. Deciding who works it is a supervisor's call, not something the
+system does silently at 2am.
 
-Pass `auto_assign: false` when creating a ticket to leave it unassigned for
-manual triage.
+From the ticket page an agent or above can assign anyone directly; the list
+shows each person's open-ticket count and marks anyone on leave. A supervisor
+or admin can instead press **Auto-assign** and let the router choose.
+
+The router picks, in order:
+
+1. **A category rule**, if one names an owner for that category. Optional, and
+   skipped when the named person is away rather than obeyed blindly.
+2. **Someone in the ticket's own branch**, by lightest open queue.
+3. **Anyone assignable**, by lightest open queue.
+
+Agents are preferred over supervisors at every step — ranking on workload alone
+sends everything to whoever is idlest, which is reliably a supervisor, and
+frontline work would skip the agents entirely. Auditors and branch users are
+never candidates, and neither is anyone inside a leave window.
+
+**The safety net.** A ticket that nobody has assigned within a configurable
+window is routed automatically, so one raised overnight cannot burn its whole
+SLA and then escalate to nobody. Admins set the window under
+`PUT /assignment/settings` (default two hours, range 15 minutes to a week).
+
+Pass `auto_assign: true` when creating a ticket to route it immediately —
+the email intake path does this, having no supervisor watching.
+
+### Leave
+
+Supervisors and admins record leave as a date range on a user. Routing skips
+them for that window and resumes on its own, so nobody has to remember to
+switch availability back on. This is separate from `is_active`, which gates
+login: deactivating an account to cover a week off would lock the person out
+of the system.
 
 ### By email
 
@@ -287,10 +314,12 @@ AI panel. Each opens a ticket list filtered to exactly the number on the card.
 That equality is the point: a card that opens a list with a different total
 reads as a broken filter, so it is verified on every build.
 
-**3. Raise a ticket and watch it route itself.** *New Ticket* → save. It comes
-back already `assigned`, with an owner and both SLA deadlines stamped. The
-assignee is the agent with the lightest open queue, never a supervisor or an
-auditor.
+**3. Raise a ticket, then decide who works it.** *New Ticket* → save. It comes
+back with both SLA deadlines stamped and **no owner** — that is deliberate.
+Open it as `priya.sharma@successbank.local` (a supervisor) and use *Assign* to
+pick someone, or *Auto-assign* to take the lightest queue. Put that person on
+leave from the Users page and auto-assign again: the router skips them, and
+their account still works.
 
 **4. Attach files, both ways.** Raise a second ticket as
 `sunita.desai@successbank.local` (a branch user) and drag a screenshot and a PDF

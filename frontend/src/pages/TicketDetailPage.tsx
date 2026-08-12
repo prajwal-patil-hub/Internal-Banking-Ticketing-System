@@ -11,6 +11,7 @@ import { PriorityBadge } from '@/components/PriorityBadge';
 import { SLABadge } from '@/components/SLABadge';
 import { AIBadge } from '@/components/AIBadge';
 import { useAuth } from '@/store/auth';
+import { AssigneeControl } from '@/components/AssigneeControl';
 import { cn } from '@/lib/cn';
 import { extractError } from '@/lib/api';
 import { formatSize, fileGlyph } from '@/lib/files';
@@ -650,7 +651,16 @@ export function TicketDetailPage() {
             <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Ticket Info</h2>
             <div className="flex flex-col">
               <MetaRow label="Reporter"   value={ticket.reporter?.full_name ?? ticket.reporter_id} />
-              <MetaRow label="Assignee"   value={ticket.assignee?.full_name ?? 'Unassigned'} />
+              <MetaRow
+                label="Assignee"
+                value={
+                  <AssigneeControl
+                    ticket={ticket}
+                    canAssign={canWrite}
+                    canAutoAssign={['supervisor', 'admin'].includes(user?.role ?? '')}
+                  />
+                }
+              />
               <MetaRow label="Department" value={ticket.department} />
               <MetaRow label="Source"     value={<span className="capitalize">{ticket.source}</span>} />
               <MetaRow label="Category"   value={ticket.category?.name ?? ticket.category_id ?? null} />

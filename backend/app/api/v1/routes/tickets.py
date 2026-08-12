@@ -467,11 +467,16 @@ async def create_ticket(
     # appeared in the SLA monitor, and could never breach.
     await SLAService(db).apply_to_ticket(ticket)
 
-    # Auto-assign by current workload. The routing service existed but nothing
-    # called it, so every ticket arrived unassigned and waited for someone to
-    # notice. Callers can opt out with auto_assign=false to triage by hand.
+    # Deliberately NOT auto-assigned here. Deciding who works a ticket is a
+    # supervisor's call, made from the triage queue or with the Auto-assign
+    # button. A ticket left unassigned is not forgotten: the safety-net worker
+    # routes anything still unowned after the configured delay, so a ticket
+    # raised overnight cannot burn its whole SLA waiting for someone to arrive.
+    #
+    # A caller can still ask for it explicitly — the intake worker does this
+    # for tickets arriving by email, which have no supervisor watching.
     routing_reason: str | None = None
-    if payload.get("auto_assign", True):
+    if payload.get("auto_assign") is True:
         assignee, routing_reason = await RoutingService(db).auto_route_ticket(ticket)
         if assignee is not None:
             ticket.ai_routing_reason = routing_reason[:500]
@@ -740,6 +745,60 @@ async def assign_ticket(
     await db.commit()
     await db.refresh(ticket)
     log.info("ticket_assigned", ticket_id=str(ticket.id), assignee_id=str(assignee_id))
+    return ok(_serialize_ticket(ticket))
+
+
+@router.post(
+    "/{ticket_id}/auto-assign",
+    summary="Route this ticket automatically, now",
+    # Supervisor and above only. Auto-assignment decides who carries the work,
+    # which is a shift-management decision — an agent choosing to hand a
+    # ticket to whoever the algorithm picks is how work quietly moves off the
+    # person who was given it.
+    dependencies=[Depends(require_roles("supervisor", "admin"))],
+)
+async def auto_assign_ticket(
+    ticket_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    ticket = await _get_ticket_or_404(ticket_id, db, current_user)
+    old_assignee = str(ticket.assignee_id) if ticket.assignee_id else None
+
+    assignee, reason = await RoutingService(db).auto_route_ticket(ticket)
+    if assignee is None:
+        # Not an error: there genuinely may be nobody available, and the caller
+        # needs to know that rather than see a generic failure.
+        await db.rollback()
+        raise ValidationError(
+            "No available assignee found. Everyone who can take this ticket is "
+            "either on leave or inactive."
+        )
+
+    ticket.ai_routing_reason = reason[:500]
+    await _record_audit(
+        db,
+        action=AuditAction.ASSIGNMENT,
+        entity_id=str(ticket.id),
+        user=current_user,
+        request=request,
+        old_values={"assignee_id": old_assignee},
+        new_values={
+            "assignee_id": str(assignee.id),
+            "assignee_email": assignee.email,
+            "auto": True,
+            "reason": reason,
+        },
+    )
+    await db.commit()
+    await db.refresh(ticket)
+    log.info(
+        "ticket_auto_assigned",
+        ticket_id=str(ticket.id),
+        assignee_id=str(assignee.id),
+        actor_id=str(current_user.id),
+    )
     return ok(_serialize_ticket(ticket))
 
 

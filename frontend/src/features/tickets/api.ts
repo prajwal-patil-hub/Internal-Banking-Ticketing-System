@@ -181,6 +181,33 @@ export async function assignTicket(id: string, assignee_id: string): Promise<Tic
   return data.data;
 }
 
+/** One candidate for a ticket, with the two facts needed to choose between them. */
+export interface WorkloadEntry {
+  user_id: string;
+  email: string;
+  full_name: string;
+  role: string;
+  open_count: number;
+  on_leave: boolean;
+  leave_from: string | null;
+  leave_to: string | null;
+  leave_note: string | null;
+}
+
+export async function getWorkload(): Promise<WorkloadEntry[]> {
+  const { data } = await api.get('/assignment/workload');
+  return data.data;
+}
+
+/**
+ * Let the router choose. Supervisor and above only — the server enforces it,
+ * this is just where the button lives.
+ */
+export async function autoAssignTicket(id: string): Promise<Ticket> {
+  const { data } = await api.post(`/tickets/${id}/auto-assign`);
+  return data.data;
+}
+
 export async function getComments(ticketId: string, includeInternal = true): Promise<Comment[]> {
   const { data } = await api.get(`/tickets/${ticketId}/comments`, {
     params: { include_internal: includeInternal },
