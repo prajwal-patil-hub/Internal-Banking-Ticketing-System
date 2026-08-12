@@ -115,6 +115,37 @@ def wrapped_lines(text: str, width_in: float, pt: float, bold: bool = False) -> 
     return n
 
 
+_TARGET_DPI = 200        # comfortably past what print or a screen resolves
+
+
+def _fit_image(path: Path, display_w_emu: int):
+    """Embed a screenshot at the size it is actually shown, not at capture size.
+
+    Captures are 2880x1800 (a 1440x900 viewport at 2x) but they are displayed
+    about 8.5in wide, so the full-resolution copy is roughly double what even
+    print needs. Twenty-four of them made the file large enough that phone
+    preview apps mis-composited it — showing one slide's picture on another,
+    and leaving shapes behind between slides. Downscaling to 200dpi keeps the
+    screenshots legible at 100% zoom and cuts the file several-fold.
+    """
+    import io
+    target_px = int(display_w_emu / 914400 * _TARGET_DPI)
+    im = Image.open(path)
+    if im.width <= target_px:
+        return str(path)
+    im = im.convert("RGB").resize(
+        (target_px, round(im.height * target_px / im.width)), Image.LANCZOS)
+    # A UI screenshot is mostly flat fills and anti-aliased text, so a 256
+    # colour palette is visually indistinguishable from truecolour here and
+    # about a third of the size. Checked against the smallest type in the
+    # captures before adopting.
+    im = im.quantize(colors=256, dither=Image.FLOYDSTEINBERG)
+    buf = io.BytesIO()
+    im.save(buf, format="PNG", optimize=True)
+    buf.seek(0)
+    return buf
+
+
 def marker(slide, cx, cy, n, diameter, fill, fontsize):
     """A numbered circle whose digit is actually centred.
 
@@ -171,7 +202,16 @@ def _rect(slide, x, y, w, h, fill, line=None, shape=MSO_SHAPE.RECTANGLE):
 
 
 def _bg(slide, color=WHITE):
-    _rect(slide, 0, 0, W, H, color)
+    """Paint the slide's own background rather than laying a shape over it.
+
+    This used to add a full-bleed rectangle to every slide — 58 extra shapes
+    sitting underneath everything else. A real background is what the format
+    provides for this, and it gives weaker viewers one less large overlapping
+    shape to composite.
+    """
+    fill = slide.background.fill
+    fill.solid()
+    fill.fore_color.rgb = color
 
 
 def footer(slide, label):
@@ -279,7 +319,7 @@ def workflow(shot, title, action, result, nxt, role_tag, extra_note=None):
     if path.exists():
         _rect(s, img_x - Inches(0.025), img_y - Inches(0.025),
               img_w + Inches(0.05), img_h + Inches(0.05), LINE)
-        s.shapes.add_picture(str(path), img_x, img_y, width=img_w)
+        s.shapes.add_picture(_fit_image(path, img_w), img_x, img_y, width=img_w)
     else:
         _rect(s, img_x, img_y, img_w, img_h, CREAM, LINE)
         _tb(s, img_x, img_y + img_h / 2, img_w, Inches(0.4),
@@ -741,7 +781,7 @@ for i, (t, d, col) in enumerate([
                     "keeps counting toward your queue.", WARN),
 ]):
     y = Inches(1.4) + i * Inches(1.55)
-    _rect(s, Inches(0.6), y, Inches(12.1), Inches(1.32), CREAM if i % 2 == 0 else WHITE, LINE)
+    _rect(s, Inches(0.6), y, Inches(12.1), Inches(1.32), CREAM, LINE)
     _rect(s, Inches(0.6), y, Inches(0.06), Inches(1.32), col)
     _tb(s, Inches(0.95), y + Inches(0.2), Inches(11.4), Inches(0.3), t, size=15, bold=True, color=col)
     _tb(s, Inches(0.95), y + Inches(0.58), Inches(11.4), Inches(0.68), d, size=12, color=INK, spacing=1.28)
@@ -887,7 +927,7 @@ for i, (t, d, who) in enumerate([
      "The file index for the whole ticket; files from replies are marked as such.", "Anyone who can write"),
 ]):
     y = Inches(1.4) + i * Inches(1.28)
-    _rect(s, Inches(0.6), y, Inches(12.1), Inches(1.08), CREAM if i % 2 == 0 else WHITE, LINE)
+    _rect(s, Inches(0.6), y, Inches(12.1), Inches(1.08), CREAM, LINE)
     _tb(s, Inches(0.95), y + Inches(0.16), Inches(6.4), Inches(0.3), t, size=13.5, bold=True, color=TEAL)
     _tb(s, Inches(0.95), y + Inches(0.52), Inches(6.4), Inches(0.45), d, size=11.5, color=INK, spacing=1.2)
     _tb(s, Inches(7.7), y + Inches(0.16), Inches(4.7), Inches(0.3), "WHO", size=9.5, bold=True, color=ACCENT)
@@ -941,7 +981,7 @@ for i, (t, d, col) in enumerate([
      "Everything it produces is for you to act on.", ACCENT),
 ]):
     y = Inches(1.4) + i * Inches(1.55)
-    _rect(s, Inches(0.6), y, Inches(12.1), Inches(1.32), CREAM if i % 2 == 0 else WHITE, LINE)
+    _rect(s, Inches(0.6), y, Inches(12.1), Inches(1.32), CREAM, LINE)
     _rect(s, Inches(0.6), y, Inches(0.06), Inches(1.32), col)
     _tb(s, Inches(0.95), y + Inches(0.18), Inches(11.4), Inches(0.3), t, size=14, bold=True, color=col)
     _tb(s, Inches(0.95), y + Inches(0.56), Inches(11.4), Inches(0.7), d, size=12, color=INK, spacing=1.25)
@@ -991,7 +1031,7 @@ for title, kicker, rows in [
         col = TEAL if who not in ("System",) else MUTE
         _rect(s, Inches(0.6), y, Inches(2.25), Inches(0.86), col)
         _tb(s, Inches(0.78), y + Inches(0.28), Inches(2.0), Inches(0.3), who, size=12, bold=True, color=WHITE)
-        _rect(s, Inches(2.95), y, Inches(9.78), Inches(0.86), CREAM if i % 2 == 0 else WHITE, LINE)
+        _rect(s, Inches(2.95), y, Inches(9.78), Inches(0.86), CREAM, LINE)
         _tb(s, Inches(3.25), y + Inches(0.2), Inches(9.2), Inches(0.6), what, size=12, color=INK, spacing=1.2)
     footer(s, "Scenarios")
 
@@ -1040,7 +1080,7 @@ for i, (t, d) in enumerate([
     ("No per-user permissions", "One role per user. Anything finer is expressed through the org tree."),
 ]):
     y = Inches(1.35) + i * Inches(1.0)
-    _rect(s, Inches(0.6), y, Inches(12.1), Inches(0.84), CREAM if i % 2 == 0 else WHITE, LINE)
+    _rect(s, Inches(0.6), y, Inches(12.1), Inches(0.84), CREAM, LINE)
     _tb(s, Inches(0.95), y + Inches(0.14), Inches(4.0), Inches(0.3), t, size=12.5, bold=True, color=ACCENT)
     _tb(s, Inches(5.1), y + Inches(0.14), Inches(7.4), Inches(0.6), d, size=11.5, color=INK, spacing=1.2)
 _tb(s, Inches(0.6), Inches(6.5), Inches(12.1), Inches(0.4),
