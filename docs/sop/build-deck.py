@@ -679,20 +679,23 @@ workflow("16-branch-ticket-comments.png", "Reply, and read the resolution",  "An
    "appear here together.",
    "If it is fixed, the ticket is closed. If not, it can be reopened.", "Branch User")
 
-s = content("What a branch user cannot see", "Two rules worth knowing before you ask where something went")
+s = content("What a branch user cannot see", "Three rules worth knowing before you ask where something went")
 for i, (t, d, col) in enumerate([
     ("Internal notes — and their attachments",
      "Agents can mark a note internal. You will not see the note, and you will not see any "
      "file attached to it. It is not hidden in the page; the server refuses to send it.", ACCENT),
     ("Other people's tickets",
      "You see only tickets you raised. Opening someone else's by its link returns nothing.", TEAL),
+    ("Team-wide numbers",
+     "SLA health, category and department breakdowns and AI metrics are for agents and above. "
+     "Your dashboard shows your own three counts instead.", TEAL),
 ]):
-    y = Inches(1.45) + i * Inches(1.75)
-    _rect(s, Inches(0.6), y, Inches(12.1), Inches(1.5), CREAM)
-    _rect(s, Inches(0.6), y, Inches(0.06), Inches(1.5), col)
-    _tb(s, Inches(0.95), y + Inches(0.22), Inches(11.5), Inches(0.32), t, size=15, bold=True, color=col)
-    _tb(s, Inches(0.95), y + Inches(0.63), Inches(11.5), Inches(0.75), d, size=12.5, color=INK, spacing=1.3)
-_tb(s, Inches(0.6), Inches(5.1), Inches(12.1), Inches(1.2),
+    y = Inches(1.35) + i * Inches(1.42)
+    _rect(s, Inches(0.6), y, Inches(12.1), Inches(1.24), CREAM)
+    _rect(s, Inches(0.6), y, Inches(0.06), Inches(1.24), col)
+    _tb(s, Inches(0.95), y + Inches(0.18), Inches(11.5), Inches(0.32), t, size=15, bold=True, color=col)
+    _tb(s, Inches(0.95), y + Inches(0.58), Inches(11.5), Inches(0.75), d, size=12.5, color=INK, spacing=1.3)
+_tb(s, Inches(0.6), Inches(5.85), Inches(12.1), Inches(1.2),
     "If you believe a ticket of yours is missing, it is far more likely that it was raised by a "
     "colleague than that it was deleted — tickets are never deleted, and every change is recorded "
     "in the audit trail.", size=12.5, color=MUTE, spacing=1.3)
