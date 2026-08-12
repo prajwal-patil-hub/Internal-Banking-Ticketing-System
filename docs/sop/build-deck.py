@@ -6,8 +6,11 @@ every workflow slide (step, action, result, next).
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
+
+from PIL import Image, ImageDraw, ImageFont
 
 from pptx import Presentation
 from pptx.dml.color import RGBColor
@@ -17,6 +20,26 @@ from pptx.util import Emu, Inches, Pt
 
 SHOTS = Path(sys.argv[1])
 OUT = Path(sys.argv[2])
+
+
+def _commit() -> str:
+    """The commit the screenshots were taken from, read rather than typed.
+
+    It was hand-written before and went stale the first time the app changed,
+    which is exactly the claim the closing slide asks the reader to trust.
+    """
+    if len(sys.argv) > 3:
+        return sys.argv[3]
+    try:
+        import subprocess
+        return subprocess.run(["git", "rev-parse", "--short", "HEAD"],
+                              capture_output=True, text=True, check=True,
+                              cwd=Path(__file__).resolve().parent).stdout.strip() or "unknown"
+    except Exception:
+        return "unknown"
+
+
+COMMIT = _commit()
 
 # --- palette, taken from the application's own theme ------------------------
 TEAL = RGBColor(0x0E, 0x4F, 0x4A)
@@ -36,6 +59,81 @@ prs.slide_width, prs.slide_height = W, H
 BLANK = prs.slide_layouts[6]
 
 step_no = 0
+
+# Callout coordinates come from the browser, not from guesses.
+MANIFEST = json.loads((SHOTS / "manifest.json").read_text()) if (SHOTS / "manifest.json").exists() else {}
+
+_FONT_CACHE: dict[tuple[float, bool], object] = {}
+
+
+def _pil_font(pt: float, bold: bool):
+    """Real font metrics, so wrapped text can be measured rather than guessed."""
+    key = (round(pt, 1), bold)
+    if key not in _FONT_CACHE:
+        paths = (["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"] if bold
+                 else ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"])
+        f = None
+        for pth in paths:
+            if Path(pth).exists():
+                try:
+                    f = ImageFont.truetype(pth, max(6, int(pt * 1.333)))
+                except Exception:
+                    f = None
+        _FONT_CACHE[key] = f or ImageFont.load_default()
+    return _FONT_CACHE[key]
+
+
+_MEASURE_SS = 8   # supersample factor for text measurement
+
+
+def wrapped_lines(text: str, width_in: float, pt: float, bold: bool = False) -> int:
+    """How many lines `text` needs at `pt` inside `width_in` inches.
+
+    Measured at 8x and scaled back. At 1x the font size is truncated to whole
+    pixels — int(10.5 * 1.333) is 13px, ~7% under the true size — which made
+    two-line legend labels report as one and let the next item overlap them.
+
+    A 4% margin on the available width covers the difference between DejaVu
+    (measured here) and Calibri (what PowerPoint will actually lay out). The
+    error direction that matters is under-counting, since that overlaps text;
+    over-counting only leaves a little extra space.
+    """
+    f = _pil_font(pt * _MEASURE_SS, bold)
+    avail_px = width_in * 96.0 * _MEASURE_SS * 0.96
+    d = ImageDraw.Draw(Image.new("RGB", (10, 10)))
+    n = 0
+    for para in text.split("\n"):
+        n += 1
+        line = ""
+        for word in para.split():
+            trial = (line + " " + word).strip()
+            if d.textlength(trial, font=f) <= avail_px or not line:
+                line = trial
+            else:
+                n += 1
+                line = word
+    return n
+
+
+def marker(slide, cx, cy, n, diameter, fill, fontsize):
+    """A numbered circle whose digit is actually centred.
+
+    The default text insets are 0.1in each side. On a 0.29in circle that leaves
+    0.09in for the glyph, so the number is squeezed out of position — which is
+    exactly how the first version of this deck shipped.
+    """
+    sh = _rect(slide, cx - diameter / 2, cy - diameter / 2, diameter, diameter,
+               fill, shape=MSO_SHAPE.OVAL)
+    tf = sh.text_frame
+    tf.margin_left = tf.margin_right = tf.margin_top = tf.margin_bottom = 0
+    tf.word_wrap = False
+    tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+    tf.text = str(n)
+    p = tf.paragraphs[0]
+    p.alignment = PP_ALIGN.CENTER
+    r = p.runs[0]
+    r.font.size, r.font.bold, r.font.color.rgb, r.font.name = Pt(fontsize), True, WHITE, "Calibri"
+    return sh
 
 
 def _tb(slide, x, y, w, h, text, size=14, bold=False, color=INK,
@@ -89,12 +187,15 @@ def footer(slide, label):
 def title_slide():
     s = prs.slides.add_slide(BLANK)
     _bg(s, TEAL)
-    _rect(s, 0, Inches(2.55), W, Inches(0.06), ACCENT)
-    _tb(s, Inches(1.0), Inches(1.35), Inches(11), Inches(0.5),
+    _rect(s, 0, Inches(3.28), W, Inches(0.06), ACCENT)
+    _tb(s, Inches(1.0), Inches(1.30), Inches(11), Inches(0.5),
         "STANDARD OPERATING PROCEDURE", size=15, bold=True, color=CREAM)
-    _tb(s, Inches(1.0), Inches(1.75), Inches(11), Inches(1.0),
-        "SUCCESS Bank — Internal Ticketing", size=40, bold=True, color=WHITE)
-    _tb(s, Inches(1.0), Inches(2.95), Inches(10), Inches(1.4),
+    # Broken across two lines on purpose. On one line it fits in Calibri and
+    # nowhere else — Keynote and Google Slides substitute a wider face and the
+    # title runs into the rule below it.
+    _tb(s, Inches(1.0), Inches(1.70), Inches(11.6), Inches(1.45),
+        "SUCCESS Bank\nInternal Ticketing", size=38, bold=True, color=WHITE, spacing=1.12)
+    _tb(s, Inches(1.0), Inches(3.55), Inches(10), Inches(1.1),
         "A role-by-role operational guide.\n"
         "Every screen in this deck was captured from the running application.",
         size=17, color=CREAM, spacing=1.35)
@@ -112,7 +213,7 @@ def title_slide():
         _tb(s, x + Inches(0.18), Inches(5.28), Inches(1.72), Inches(0.55),
             who, size=9.5, color=CREAM, spacing=1.1)
     _tb(s, Inches(1.0), Inches(6.35), Inches(11), Inches(0.3),
-        "Version 1.0  ·  Built at commit c554e3c", size=10, color=CREAM)
+        f"Version 1.0  \u00b7  Built at commit {COMMIT}", size=10, color=CREAM)
 
 
 # -------------------------------------------------------------- section -----
@@ -143,8 +244,14 @@ def content(title, kicker=""):
 
 
 # ------------------------------------------------------- workflow slide -----
-def workflow(shot, title, callouts, action, result, nxt, role_tag):
-    """One screen, one slide. `callouts` = [(x%, y%, label), …]."""
+def workflow(shot, title, action, result, nxt, role_tag, extra_note=None):
+    """One screen, one slide.
+
+    Callout positions and labels come from `manifest.json`, which the capture
+    script produced by asking the browser where each element actually is. The
+    first version guessed percentages and put markers beside controls rather
+    than on them.
+    """
     global step_no
     step_no += 1
     s = prs.slides.add_slide(BLANK)
@@ -159,58 +266,81 @@ def workflow(shot, title, callouts, action, result, nxt, role_tag):
     _tb(s, W - Inches(3.3), Inches(0.35), Inches(2.75), Inches(0.3),
         role_tag.upper(), size=11, bold=True, color=CREAM, align=PP_ALIGN.RIGHT)
 
-    # screenshot — left 8.3", preserving the 1440x900 aspect
-    img_x, img_y, img_w = Inches(0.45), Inches(1.25), Inches(8.35)
+    entry = MANIFEST.get(shot.replace(".png", ""), {})
+    callouts = entry.get("callouts", [])
+    # Number in reading order, not in the order the capture script happened to
+    # list them. y is banded first so two callouts at roughly the same height
+    # run left-to-right instead of being ordered by a few stray pixels.
+    callouts = sorted(callouts, key=lambda c: (round(c.get("y", 0.5) / 0.06), c.get("x0", c.get("x", 0))))
+
+    img_x, img_y, img_w = Inches(0.45), Inches(1.3), Inches(8.5)
     img_h = img_w * 900 / 1440
     path = SHOTS / shot
     if path.exists():
-        _rect(s, img_x - Inches(0.03), img_y - Inches(0.03),
-              img_w + Inches(0.06), img_h + Inches(0.06), LINE)
+        _rect(s, img_x - Inches(0.025), img_y - Inches(0.025),
+              img_w + Inches(0.05), img_h + Inches(0.05), LINE)
         s.shapes.add_picture(str(path), img_x, img_y, width=img_w)
     else:
         _rect(s, img_x, img_y, img_w, img_h, CREAM, LINE)
         _tb(s, img_x, img_y + img_h / 2, img_w, Inches(0.4),
-            f"[ screen not captured: {shot} ]", size=13, color=ACCENT,
-            align=PP_ALIGN.CENTER)
+            f"[ screen not captured: {shot} ]", size=13, color=ACCENT, align=PP_ALIGN.CENTER)
 
-    # numbered callout markers over the screenshot
-    for i, (px, py, _) in enumerate(callouts, start=1):
-        cx = img_x + Emu(int(img_w * px))
-        cy = img_y + Emu(int(img_h * py))
-        d = Inches(0.29)
-        m = _rect(s, cx - d / 2, cy - d / 2, d, d, ACCENT, shape=MSO_SHAPE.OVAL)
-        tf = m.text_frame
-        tf.text = str(i)
-        tf.paragraphs[0].alignment = PP_ALIGN.CENTER
-        r = tf.paragraphs[0].runs[0]
-        r.font.size, r.font.bold, r.font.color.rgb = Pt(12), True, WHITE
+    # Markers sit just outside the element's left edge, vertically centred on
+    # it. Centred on the element they cover the value the reader is meant to
+    # read — the account number, the file name.
+    D = Inches(0.30)
+    for i, c in enumerate(callouts, start=1):
+        # A callout on a whole panel ('main', 'nav') gets anchored near the top
+        # of the region, not its centre. The centre of a full-height region is
+        # usually empty space, so the marker ends up pointing at nothing.
+        if c.get("h", 0) > 0.45:
+            cy = img_y + Emu(int(img_h * (c.get("y0", 0) + 0.045)))
+        else:
+            cy = img_y + Emu(int(img_h * c.get("y", 0.5)))
+        x0 = c.get("x0")
+        if x0 is None:                      # older manifest: fall back to centre
+            cx = img_x + Emu(int(img_w * c["x"]))
+        else:
+            left_edge = img_x + Emu(int(img_w * x0))
+            cx = left_edge - D * 0.72       # outside, overlapping the border a little
+            if cx < img_x + D * 0.5:        # no room on the left — sit inside it
+                cx = img_x + Emu(int(img_w * x0)) + D * 0.62
+        marker(s, cx, cy, i, D, ACCENT, 13)
 
-    # right column
-    rx, rw = Inches(9.15), Inches(3.7)
-    y = Inches(1.25)
+    # ---- right column -----------------------------------------------------
+    rx, rw = Inches(9.25), Inches(3.6)
+    y = Inches(1.3)
+    label_w = rw - Inches(0.36)
+
     if callouts:
-        _tb(s, rx, y, rw, Inches(0.25), "ON THIS SCREEN", size=10, bold=True, color=ACCENT)
-        y += Inches(0.34)
-        for i, (_, _, label) in enumerate(callouts, start=1):
-            d = Inches(0.24)
-            m = _rect(s, rx, y + Inches(0.02), d, d, TEAL, shape=MSO_SHAPE.OVAL)
-            tf = m.text_frame
-            tf.text = str(i)
-            tf.paragraphs[0].alignment = PP_ALIGN.CENTER
-            r = tf.paragraphs[0].runs[0]
-            r.font.size, r.font.bold, r.font.color.rgb = Pt(10), True, WHITE
-            box = _tb(s, rx + Inches(0.34), y, rw - Inches(0.34), Inches(0.5),
-                      label, size=10.5, color=INK, spacing=1.1)
-            y += Emu(max(Inches(0.36), box.text_frame.paragraphs[0].line_spacing and Inches(0.36)))
-        y += Inches(0.12)
+        _tb(s, rx, y, rw, Inches(0.24), "ON THIS SCREEN", size=10, bold=True, color=ACCENT)
+        y += Inches(0.32)
+        for i, c in enumerate(callouts, start=1):
+            lines = wrapped_lines(c["label"], label_w / 914400, 10.5)
+            block_h = Inches(0.185) * lines
+            # Same colour as the marker on the screenshot — the reader is
+            # matching ① to ①, and a colour change breaks that thread.
+            marker(s, rx + Inches(0.115), y + Inches(0.095), i, Inches(0.23), ACCENT, 10)
+            _tb(s, rx + Inches(0.36), y, label_w, block_h,
+                c["label"], size=10.5, color=INK, spacing=1.05)
+            y += block_h + Inches(0.10)
+        y += Inches(0.14)
 
     for lab, txt, col in (("ACTION", action, TEAL), ("RESULT", result, OK), ("NEXT", nxt, MUTE)):
-        _rect(s, rx, y, Inches(0.05), Inches(0.62), col)
-        _tb(s, rx + Inches(0.16), y, rw - Inches(0.16), Inches(0.2),
+        lines = wrapped_lines(txt, (rw - Inches(0.18)) / 914400, 11)
+        body_h = Inches(0.175) * lines
+        bar_h = Inches(0.2) + body_h
+        _rect(s, rx, y, Inches(0.05), bar_h, col)
+        _tb(s, rx + Inches(0.18), y, rw - Inches(0.18), Inches(0.18),
             lab, size=9.5, bold=True, color=col)
-        _tb(s, rx + Inches(0.16), y + Inches(0.2), rw - Inches(0.16), Inches(0.55),
-            txt, size=11, color=INK, spacing=1.15)
-        y += Inches(0.86)
+        _tb(s, rx + Inches(0.18), y + Inches(0.21), rw - Inches(0.18), body_h,
+            txt, size=11, color=INK, spacing=1.08)
+        y += bar_h + Inches(0.22)
+
+    if extra_note:
+        _rect(s, img_x, img_y + img_h + Inches(0.13), img_w, Inches(0.5), CREAM)
+        _tb(s, img_x + Inches(0.18), img_y + img_h + Inches(0.24), img_w - Inches(0.36),
+            Inches(0.3), extra_note, size=10.5, color=INK)
 
     footer(s, f"Step {step_no:02d}")
     return s
@@ -243,19 +373,41 @@ def table(slide, x, y, w, headers, rows, col_w=None, head_fill=TEAL, size=10.5):
 
 
 def chip(slide, x, y, w, h, text, fill, tcol=WHITE, size=11, bold=True):
+    """A rounded label box.
+
+    Every paragraph must be styled, not just the first. `tf.text = "a\\nb"`
+    splits into two paragraphs, and styling only paragraphs[0] leaves the
+    second line at the 18pt black default — which overflowed every two-line
+    chip on the swimlane slide.
+    """
     sh = _rect(slide, x, y, w, h, fill, shape=MSO_SHAPE.ROUNDED_RECTANGLE)
     tf = sh.text_frame
     tf.word_wrap = True
-    tf.text = text
-    tf.paragraphs[0].alignment = PP_ALIGN.CENTER
-    for r in tf.paragraphs[0].runs:
-        r.font.size, r.font.bold, r.font.color.rgb = Pt(size), bold, tcol
+    tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+    tf.margin_left = tf.margin_right = Inches(0.04)
+    tf.margin_top = tf.margin_bottom = 0
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+        p.text = line
+        p.alignment = PP_ALIGN.CENTER
+        p.line_spacing = 1.1
+        for r in p.runs:
+            r.font.size, r.font.bold, r.font.color.rgb = Pt(size), bold, tcol
     return sh
 
 
 def arrow(slide, x, y, w, h=Inches(0.16), color=MUTE):
     a = _rect(slide, x, y, w, h, color, shape=MSO_SHAPE.RIGHT_ARROW)
     return a
+
+
+def arrow_left(slide, x, y, w, h=Inches(0.16), color=MUTE):
+    return _rect(slide, x, y, w, h, color, shape=MSO_SHAPE.LEFT_ARROW)
+
+
+def arrow_up(slide, x, y, w, h=Inches(0.22), color=MUTE):
+    return _rect(slide, x, y, w, h, color, shape=MSO_SHAPE.UP_ARROW)
 
 
 # ===========================================================================
@@ -358,34 +510,79 @@ footer(s, "Roles")
 # ===========================================================================
 section("04", "The ticket lifecycle", "Nine statuses. The API enforces which moves are legal — an illegal jump is refused, not merely discouraged.")
 
-s = content("Status flow", "Reproduced from VALID_TRANSITIONS in ticket_service.py")
-row1 = [("new", TEAL), ("acknowledged", TEAL), ("assigned", TEAL), ("in_progress", TEAL), ("resolved", OK), ("closed", MUTE)]
-x = Inches(0.55)
-for i, (t, c) in enumerate(row1):
-    chip(s, x, Inches(1.55), Inches(1.72), Inches(0.62), t, c, size=11)
-    if i < len(row1) - 1:
-        arrow(s, x + Inches(1.76), Inches(1.78), Inches(0.28))
-    x += Inches(2.04)
-for i, (t, c, xx, yy) in enumerate([
-    ("on_hold", WARN, Inches(4.65), Inches(2.75)),
-    ("escalated", ACCENT, Inches(6.7), Inches(2.75)),
-    ("reopened", WARN, Inches(8.75), Inches(2.75)),
-]):
-    chip(s, xx, yy, Inches(1.72), Inches(0.62), t, c, size=11)
-_tb(s, Inches(0.55), Inches(3.6), Inches(12.2), Inches(0.3), "TWO RULES PEOPLE GET WRONG", size=11, bold=True, color=ACCENT)
-for i, (t, d) in enumerate([
+s = content("Status flow", "Reproduced from VALID_TRANSITIONS in ticket_service.py — these are the only legal moves")
+
+# --- main line -------------------------------------------------------------
+main = [("new", TEAL), ("acknowledged", TEAL), ("assigned", TEAL),
+        ("in_progress", TEAL), ("resolved", OK), ("closed", MUTE)]
+cw, gap = Inches(1.72), Inches(0.32)
+x0, ymain = Inches(0.62), Inches(1.5)
+xs = []
+for i, (label, col) in enumerate(main):
+    x = x0 + i * (cw + gap)
+    xs.append(x)
+    chip(s, x, ymain, cw, Inches(0.6), label, col, size=11)
+    if i < len(main) - 1:
+        arrow(s, x + cw + Inches(0.03), ymain + Inches(0.22), gap - Inches(0.06))
+
+# --- branch states: both hang off in_progress and both return to it --------
+ip_cx = xs[3] + cw / 2
+brow = Inches(2.62)
+_rect(s, ip_cx - Inches(0.02), ymain + Inches(0.6), Inches(0.04), Inches(0.22), LINE)
+
+pair = [("on_hold", WARN, ip_cx - cw - Inches(0.16)),
+        ("escalated", ACCENT, ip_cx + Inches(0.16))]
+left_cx = pair[0][2] + cw / 2
+right_cx = pair[1][2] + cw / 2
+_rect(s, left_cx, ymain + Inches(0.78), right_cx - left_cx, Inches(0.04), LINE)
+for label, col, bx in pair:
+    _rect(s, bx + cw / 2 - Inches(0.02), ymain + Inches(0.78), Inches(0.04),
+          brow - (ymain + Inches(0.78)), LINE)
+    chip(s, bx, brow, cw, Inches(0.52), label, col, size=10.5)
+
+_tb(s, Inches(0.62), brow + Inches(0.08), Inches(3.4), Inches(0.5),
+    "Both pause the ticket and\nboth return to in_progress.", size=9.5, color=MUTE, spacing=1.15)
+
+# --- reopened: closed goes back to assigned, via its own row ---------------
+rrow = Inches(3.72)
+rh = Inches(0.52)
+rmid = rrow + rh / 2
+closed_cx = xs[5] + cw / 2
+assigned_cx = xs[2] + cw / 2
+chip(s, xs[2], rrow, cw, rh, "reopened", WARN, size=10.5)
+
+# closed drops to the reopened row and runs *left* into reopened. The arrowhead
+# has to point at reopened; a right-pointing head here reads reopened→closed,
+# which is the opposite of what the state machine allows.
+_rect(s, closed_cx - Inches(0.02), ymain + Inches(0.6), Inches(0.04),
+      rmid - (ymain + Inches(0.6)), LINE)
+bar_x0 = xs[2] + cw + Inches(0.30)
+_rect(s, bar_x0, rmid - Inches(0.02), closed_cx - bar_x0 + Inches(0.02),
+      Inches(0.04), LINE)
+arrow_left(s, xs[2] + cw + Inches(0.04), rmid - Inches(0.08), Inches(0.26),
+           Inches(0.16), LINE)
+
+# reopened rises back into assigned, in its own column so nothing is crossed
+_rect(s, assigned_cx - Inches(0.02), ymain + Inches(0.82), Inches(0.04),
+      rrow - (ymain + Inches(0.82)), LINE)
+arrow_up(s, assigned_cx - Inches(0.09), ymain + Inches(0.60), Inches(0.18),
+         Inches(0.24), LINE)
+_tb(s, Inches(0.62), rrow + Inches(0.06), Inches(3.4), Inches(0.5),
+    "closed can be reopened; it\nreturns to assigned.", size=9.5, color=MUTE, spacing=1.15)
+
+# --- the two rules ---------------------------------------------------------
+_tb(s, Inches(0.62), Inches(4.6), Inches(12.1), Inches(0.26),
+    "TWO RULES PEOPLE GET WRONG", size=10.5, bold=True, color=ACCENT)
+for i, (ttl, d) in enumerate([
     ("closed is reachable from any open state",
      "Closing early is a withdrawal — the problem went away, or it was raised in error."),
     ("resolved is NOT reachable from assigned",
-     "A ticket must have been worked (in_progress or escalated) first, so 'resolved' means something."),
+     "The ticket must have been worked first, so 'resolved' means something."),
 ]):
-    y = Inches(3.98) + i * Inches(0.95)
-    _rect(s, Inches(0.55), y, Inches(12.2), Inches(0.82), CREAM)
-    _tb(s, Inches(0.85), y + Inches(0.12), Inches(11.6), Inches(0.28), t, size=12.5, bold=True, color=TEAL)
-    _tb(s, Inches(0.85), y + Inches(0.42), Inches(11.6), Inches(0.32), d, size=11, color=MUTE)
-_tb(s, Inches(0.55), Inches(5.95), Inches(12.2), Inches(0.5),
-    "on_hold, escalated and reopened re-enter the flow: on_hold and escalated return to in_progress, "
-    "and reopened goes back to assigned.", size=11, color=MUTE, spacing=1.25)
+    y = Inches(4.95) + i * Inches(0.78)
+    _rect(s, Inches(0.62), y, Inches(12.1), Inches(0.66), CREAM)
+    _tb(s, Inches(0.9), y + Inches(0.09), Inches(11.6), Inches(0.24), ttl, size=12, bold=True, color=TEAL)
+    _tb(s, Inches(0.9), y + Inches(0.35), Inches(11.6), Inches(0.26), d, size=10.5, color=MUTE)
 footer(s, "Lifecycle")
 
 # ===========================================================================
@@ -411,10 +608,37 @@ steps = [
     (1, 6, "Resolve"),
     (0, 7, "See resolution,\nclose or reopen"),
 ]
+sw_w, sw_pitch, sw_h = Inches(1.06), Inches(1.29), Inches(0.76)
+sw_x0 = Inches(2.58)
+
+
+def _sw_box(lane, col_i):
+    x = sw_x0 + col_i * sw_pitch
+    y = lane_y0 + lane * lane_h + Inches(0.16)
+    return x, y, x + sw_w, y + sw_h
+
+
+# Connectors first, so the chips sit on top of them rather than under.
+for (la, ca, _), (lb, cb, _) in zip(steps, steps[1:]):
+    _, ya, xa1, ya1 = _sw_box(la, ca)
+    xb, yb, _, yb1 = _sw_box(lb, cb)
+    mid_a, mid_b = (ya + ya1) / 2, (yb + yb1) / 2
+    gx = xa1 + (xb - xa1) / 2          # centre of the gutter between the two
+    _rect(s, xa1, mid_a - Inches(0.015), gx - xa1, Inches(0.03), LINE)
+    top, bot = min(mid_a, mid_b), max(mid_a, mid_b)
+    _rect(s, gx - Inches(0.015), top, Inches(0.03), bot - top, LINE)
+    _rect(s, gx, mid_b - Inches(0.015), xb - gx - Inches(0.12), Inches(0.03), LINE)
+    arrow(s, xb - Inches(0.14), mid_b - Inches(0.06), Inches(0.14), Inches(0.12), LINE)
+
 for lane, col_i, label in steps:
-    x = Inches(2.55) + col_i * Inches(1.29)
-    y = lane_y0 + lane * lane_h + Inches(0.18)
-    chip(s, x, y, Inches(1.19), Inches(0.72), label, lanes[lane][1], size=8.5)
+    x, y, _, _ = _sw_box(lane, col_i)
+    chip(s, x, y, sw_w, sw_h, label, lanes[lane][1], size=8)
+
+_tb(s, Inches(0.5), Inches(6.0), Inches(12.3), Inches(0.9),
+    "The connectors are the handoffs. Only two of them are a person deciding to pass the ticket on — "
+    "the agent escalating, and the branch user reopening. The rest happen because the system moved it, "
+    "or because the next role was already watching.",
+    size=11.5, color=MUTE, spacing=1.3)
 footer(s, "End to end")
 
 # ===========================================================================
@@ -422,62 +646,35 @@ footer(s, "End to end")
 # ===========================================================================
 section("06", "Branch user workflow", "You raise the problem, supply the evidence, answer questions, and see the resolution.")
 
-workflow("00-login.png", "Sign in", [
-    (0.50, 0.42, "Your bank email address"),
-    (0.50, 0.53, "Your password"),
-    (0.50, 0.64, "Sign in"),
-], "Enter your bank email and password, then select Sign in.",
+workflow("00-login.png", "Sign in",  "Enter your bank email and password, then select Sign in.",
    "You land on your dashboard. If your account has a second factor enabled, "
    "you are asked for a 6-digit code first.",
    "Step 02 — read your dashboard.", "Branch User")
 
-workflow("10-branch-dashboard.png", "Read your dashboard", [
-    (0.09, 0.14, "Dashboard, Tickets and Security — the whole menu for this role"),
-    (0.55, 0.30, "Your ticket counts"),
-    (0.95, 0.93, "The assistant, if you need help"),
-], "Check the tiles for anything of yours that is breaching or still open.",
+workflow("10-branch-dashboard.png", "Read your dashboard",  "Check the tiles for anything of yours that is breaching or still open.",
    "Each tile opens the exact list it counts — a tile reading 3 opens three tickets.",
    "Step 03 — open the ticket list.", "Branch User")
 
-workflow("11-branch-tickets.png", "See only your own tickets", [
-    (0.50, 0.22, "Filters — status, priority, search"),
-    (0.50, 0.50, "Your tickets, newest first"),
-], "Scan the list, or filter to what you are looking for.",
+workflow("11-branch-tickets.png", "See only your own tickets",  "Scan the list, or filter to what you are looking for.",
    "You see only tickets you raised. This is enforced by the server, not hidden by the page.",
    "Step 04 — raise a new ticket.", "Branch User")
 
-workflow("12-branch-create-empty.png", "Open the new ticket form", [
-    (0.45, 0.26, "Title — one line naming the problem"),
-    (0.45, 0.45, "Description — what happened, and for whom"),
-    (0.45, 0.75, "Priority and category"),
-], "Select New Ticket from the ticket list.",
+workflow("12-branch-create-empty.png", "Open the new ticket form",  "Select New Ticket from the ticket list.",
    "An empty form opens. Nothing is submitted until you choose Create Ticket.",
    "Step 05 — fill it in and attach evidence.", "Branch User")
 
-workflow("13-branch-create-filled.png", "Describe it, and attach the evidence", [
-    (0.45, 0.26, "Be specific: account, amount, date"),
-    (0.45, 0.50, "What happened, and what the customer expects"),
-    (0.45, 0.83, "Drag files here, or choose them"),
-], "Complete the form and attach a screenshot, statement or spreadsheet. "
+workflow("13-branch-create-filled.png", "Describe it, and attach the evidence",  "Complete the form and attach a screenshot, statement or spreadsheet. "
    "Up to 15 MB per file; images, PDF, Word, Excel, text and CSV.",
    "Files are held in the browser and uploaded the moment the ticket is created — "
    "so evidence arrives with the report, not after it.",
    "Step 06 — submit and follow it.", "Branch User")
 
-workflow("15-branch-ticket-detail.png", "Follow your ticket", [
-    (0.30, 0.13, "Number, status, SLA countdown"),
-    (0.86, 0.35, "Your attachments"),
-    (0.86, 0.62, "Who owns it now"),
-    (0.44, 0.80, "Add more detail for the agent"),
-], "Open the ticket from your list to see where it stands.",
+workflow("15-branch-ticket-detail.png", "Follow your ticket",  "Open the ticket from your list to see where it stands.",
    "The ticket was numbered, given SLA deadlines and assigned automatically — "
    "no one had to triage it by hand.",
    "Step 07 — answer questions and read the resolution.", "Branch User")
 
-workflow("16-branch-ticket-comments.png", "Reply, and read the resolution", [
-    (0.44, 0.35, "The agent's replies appear here"),
-    (0.44, 0.62, "Your reply — you can attach files too"),
-], "Answer any question the agent asks, attaching more evidence if needed.",
+workflow("16-branch-ticket-comments.png", "Reply, and read the resolution",  "Answer any question the agent asks, attaching more evidence if needed.",
    "When the agent resolves it, their explanation and any file they attached "
    "appear here together.",
    "If it is fixed, the ticket is closed. If not, it can be reopened.", "Branch User")
@@ -506,45 +703,25 @@ footer(s, "Branch User")
 # ===========================================================================
 section("07", "Agent workflow", "You pick the ticket up, investigate, keep the requester informed, and resolve it.")
 
-workflow("20-agent-dashboard.png", "Start from the dashboard", [
-    (0.30, 0.20, "SLA Breached — deal with these first"),
-    (0.62, 0.20, "Critical open"),
-    (0.85, 0.55, "AI panel: what the model sorted and scored"),
-], "Sign in and read the KPI strip before opening anything.",
+workflow("20-agent-dashboard.png", "Start from the dashboard",  "Sign in and read the KPI strip before opening anything.",
    "Every tile is a live count and opens the exact list behind it.",
    "Step 09 — open the queue.", "Agent")
 
-workflow("21-agent-tickets.png", "Work the queue", [
-    (0.50, 0.22, "Filter by status, priority or assignee"),
-    (0.50, 0.55, "Every ticket in your scope"),
-], "Filter to unassigned or to your own, and choose what to work on.",
+workflow("21-agent-tickets.png", "Work the queue",  "Filter to unassigned or to your own, and choose what to work on.",
    "Agents see every ticket in their org scope, not just their own.",
    "Step 10 — start with what is breaching.", "Agent")
 
-workflow("22-agent-breached.png", "Deal with breaches first", [
-    (0.50, 0.16, "The filter the SLA Breached tile applied"),
-    (0.50, 0.50, "Open tickets already past their deadline"),
-], "Select the SLA Breached tile on the dashboard.",
+workflow("22-agent-breached.png", "Deal with breaches first",  "Select the SLA Breached tile on the dashboard.",
    "The list is filtered to exactly the tickets the tile counted — the number "
    "on the card and the length of this list always agree.",
    "Step 11 — open one and investigate.", "Agent")
 
-workflow("23-agent-ticket-detail.png", "Investigate the ticket", [
-    (0.30, 0.13, "Status, SLA countdown, AI category and risk"),
-    (0.44, 0.42, "AI Insights — summarise, or suggest next steps"),
-    (0.86, 0.32, "Evidence the requester attached"),
-    (0.86, 0.62, "Reporter, assignee, category, source"),
-], "Read the description and the attached evidence, then move the ticket to In Progress.",
+workflow("23-agent-ticket-detail.png", "Investigate the ticket",  "Read the description and the attached evidence, then move the ticket to In Progress.",
    "The status change is recorded in the audit trail with your name, and the "
    "first-response clock stops.",
    "Step 12 — reply, and attach the fix.", "Agent")
 
-workflow("24-agent-ticket-comments.png", "Reply — and attach the fix to your reply", [
-    (0.44, 0.30, "The conversation so far"),
-    (0.44, 0.62, "Your reply"),
-    (0.44, 0.78, "Attach files to this reply"),
-    (0.28, 0.88, "Internal note — hidden from the requester"),
-], "Write what you found and attach the corrected statement or screenshot.",
+workflow("24-agent-ticket-comments.png", "Reply — and attach the fix to your reply",  "Write what you found and attach the corrected statement or screenshot.",
    "Files attached here belong to this reply, so the requester sees your fix "
    "beside the answer that explains it.",
    "Step 13 — resolve, or escalate.", "Agent")
@@ -575,25 +752,16 @@ footer(s, "Agent")
 # ===========================================================================
 section("08", "Supervisor workflow", "You watch the deadlines and the escalations, and step in before a breach becomes a complaint.")
 
-workflow("30-supervisor-dashboard.png", "Watch the team's position", [
-    (0.30, 0.20, "Breached — the number that matters most"),
-    (0.85, 0.55, "AI panel"),
-], "Read the strip; anything breaching needs an owner today.",
+workflow("30-supervisor-dashboard.png", "Watch the team's position",  "Read the strip; anything breaching needs an owner today.",
    "Supervisors see the same tiles as agents, plus the SLA monitor and escalation queue in the menu.",
    "Step 15 — open the SLA monitor.", "Supervisor")
 
-workflow("31-supervisor-sla.png", "Read the SLA monitor", [
-    (0.50, 0.25, "On time, at risk, breached"),
-    (0.50, 0.60, "Tickets closest to their deadline"),
-], "Work down from the tickets nearest their deadline.",
+workflow("31-supervisor-sla.png", "Read the SLA monitor",  "Work down from the tickets nearest their deadline.",
    "At risk means due within the hour. Breached means the deadline has already passed "
    "and, if a rule matched, escalation has already fired.",
    "Step 16 — review escalations.", "Supervisor")
 
-workflow("32-supervisor-escalations.png", "Review the escalation queue", [
-    (0.50, 0.25, "Escalation events, newest first"),
-    (0.50, 0.60, "What triggered each, and who it went to"),
-], "Check what escalated and whether the target is acting on it.",
+workflow("32-supervisor-escalations.png", "Review the escalation queue",  "Check what escalated and whether the target is acting on it.",
    "Escalations arrive here whether raised by hand or fired automatically by the "
    "SLA worker — both run the same engine, so the evidence is identical.",
    "Reassign if the target is wrong; otherwise the agent resolves it.", "Supervisor")
@@ -624,43 +792,26 @@ footer(s, "Supervisor")
 # ===========================================================================
 section("09", "Admin workflow", "You decide who exists, what they may do, and how the organisation is shaped.")
 
-workflow("41-admin-users.png", "Manage users", [
-    (0.50, 0.20, "Everyone with an account"),
-    (0.50, 0.42, "Role — one per user, the whole permission model"),
-    (0.88, 0.20, "Add a user"),
-], "Create a user, set their role, and place them in an org unit.",
+workflow("41-admin-users.png", "Manage users",  "Create a user, set their role, and place them in an org unit.",
    "The role decides what they may do. There are no per-user permission overrides.",
    "Step 18 — shape the organisation.", "Admin")
 
-workflow("42-admin-org.png", "Shape the organisation", [
-    (0.50, 0.30, "Hierarchy levels and org units"),
-    (0.50, 0.62, "The tree that decides who sees which tickets"),
-], "Define hierarchy levels, then units within them.",
+workflow("42-admin-org.png", "Shape the organisation",  "Define hierarchy levels, then units within them.",
    "The org tree drives ticket visibility: a user sees their unit's subtree, "
    "plus anything assigned to them personally.",
    "Step 19 — maintain the branch network.", "Admin")
 
-workflow("43-admin-branches.png", "Maintain the branch network", [
-    (0.50, 0.22, "Branches, with live ticket load"),
-    (0.50, 0.55, "Status is separate from active"),
-], "Add branches, set managers and capacity, and mark degraded ones.",
+workflow("43-admin-branches.png", "Maintain the branch network",  "Add branches, set managers and capacity, and mark degraded ones.",
    "Ticket counts are computed per request, never stored — a counter that "
    "drifts is wrong forever with nothing to reveal it.",
    "Step 20 — pull reports.", "Admin")
 
-workflow("44-admin-reports.png", "Pull reports", [
-    (0.50, 0.25, "Filter the period and the scope"),
-    (0.50, 0.62, "The charts you can export"),
-    (0.85, 0.20, "Export as CSV, PDF or Excel"),
-], "Choose a period, then export.",
+workflow("44-admin-reports.png", "Pull reports",  "Choose a period, then export.",
    "The export is generated from what is on screen, so it matches the filters "
    "you applied rather than silently re-running an unfiltered query.",
    "Step 21 — protect your own account.", "Admin")
 
-workflow("45-admin-security.png", "Turn on your second factor", [
-    (0.45, 0.35, "Scan this with an authenticator app"),
-    (0.45, 0.66, "Confirm one code to switch it on"),
-], "Open Security, scan the QR code, and enter one code to confirm.",
+workflow("45-admin-security.png", "Turn on your second factor",  "Open Security, scan the QR code, and enter one code to confirm.",
    "MFA is only switched on once a correct code proves the app is working — "
    "so a failed scan cannot lock you out. Ten single-use recovery codes are "
    "shown once, and never again.",
@@ -689,25 +840,17 @@ footer(s, "Admin")
 # ===========================================================================
 section("10", "Auditor workflow", "You can open everything and change nothing. Every write is refused by the server.")
 
-workflow("50-auditor-dashboard.png", "See the whole picture", [
-    (0.50, 0.20, "The same tiles everyone else sees"),
-], "Sign in and read the dashboard.",
+workflow("50-auditor-dashboard.png", "See the whole picture",  "Sign in and read the dashboard.",
    "Auditors have full visibility. What they do not have is any way to change "
    "what they are looking at.",
    "Step 23 — open the audit trail.", "Auditor")
 
-workflow("51-auditor-audit-log.png", "Read the audit trail", [
-    (0.50, 0.25, "Filter by entity, action or actor"),
-    (0.50, 0.58, "Who changed what, when, and from where"),
-], "Filter to the entity or person you are reviewing.",
+workflow("51-auditor-audit-log.png", "Read the audit trail",  "Filter to the entity or person you are reviewing.",
    "Every state change writes a row: actor, role, IP, request id, and the "
    "values before and after.",
    "Step 24 — inspect any ticket.", "Auditor")
 
-workflow("52-auditor-tickets.png", "Inspect any ticket", [
-    (0.50, 0.22, "No scope limit — every ticket is visible"),
-    (0.50, 0.55, "Open any of them, read the full history"),
-], "Open any ticket and read its comments, attachments and timeline.",
+workflow("52-auditor-tickets.png", "Inspect any ticket",  "Open any ticket and read its comments, attachments and timeline.",
    "Internal notes are visible to an auditor. Write controls are not offered, "
    "and would be refused if called directly.",
    "This is the end of the auditor's workflow — there is nothing to submit.", "Auditor")
@@ -905,11 +1048,11 @@ footer(s, "Reference")
 # ---- close -----------------------------------------------------------------
 s = prs.slides.add_slide(BLANK)
 _bg(s, TEAL)
-_tb(s, Inches(1.0), Inches(2.7), Inches(11), Inches(0.7),
-    "Questions, or something here that does not match what you see?",
-    size=26, bold=True, color=WHITE)
-_tb(s, Inches(1.0), Inches(3.6), Inches(11), Inches(1.4),
-    "This deck describes the application at commit c554e3c. If a screen has changed, the deck is "
+_tb(s, Inches(1.0), Inches(2.6), Inches(11.6), Inches(1.05),
+    "Questions, or something here that does not\nmatch what you see?",
+    size=26, bold=True, color=WHITE, spacing=1.2)
+_tb(s, Inches(1.0), Inches(3.85), Inches(11), Inches(1.4),
+    f"This deck describes the application at commit {COMMIT}. If a screen has changed, the deck is "
     "wrong and not the application — raise it so this can be recaptured.\n\n"
     "Operational procedures — deploying, restoring, what to do at 3am — are in docs/runbook.md.",
     size=15, color=CREAM, spacing=1.4)

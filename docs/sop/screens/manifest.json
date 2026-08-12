@@ -1,0 +1,536 @@
+{
+  "00-login": {
+    "file": "00-login.png",
+    "callouts": [
+      {
+        "label": "Your bank email address",
+        "x0": 0.6083,
+        "y0": 0.4344,
+        "w": 0.2833,
+        "h": 0.0422,
+        "x": 0.75,
+        "y": 0.4556
+      },
+      {
+        "label": "Your password",
+        "x0": 0.6083,
+        "y0": 0.5211,
+        "w": 0.2833,
+        "h": 0.0422,
+        "x": 0.75,
+        "y": 0.5422
+      },
+      {
+        "label": "Sign in",
+        "x0": 0.6083,
+        "y0": 0.5811,
+        "w": 0.2833,
+        "h": 0.0422,
+        "x": 0.75,
+        "y": 0.6022
+      }
+    ]
+  },
+  "10-branch-dashboard": {
+    "file": "10-branch-dashboard.png",
+    "callouts": [
+      {
+        "label": "Dashboard, Tickets and Security \u2014 the whole menu for this role",
+        "x0": 0.0,
+        "y0": 0.0,
+        "w": 0.1583,
+        "h": 1.0,
+        "x": 0.0792,
+        "y": 0.5
+      },
+      {
+        "label": "Your ticket counts",
+        "x0": 0.1583,
+        "y0": 0.0622,
+        "w": 0.8417,
+        "h": 0.9378,
+        "x": 0.5792,
+        "y": 0.5311
+      }
+    ]
+  },
+  "11-branch-tickets": {
+    "file": "11-branch-tickets.png",
+    "callouts": [
+      {
+        "label": "Search and filters",
+        "x0": 0.7225,
+        "y0": 0.0133,
+        "w": 0.1556,
+        "h": 0.0356,
+        "x": 0.8003,
+        "y": 0.0311
+      },
+      {
+        "label": "New Ticket",
+        "x0": 0.8814,
+        "y0": 0.0933,
+        "w": 0.1019,
+        "h": 0.0422,
+        "x": 0.9324,
+        "y": 0.1144
+      }
+    ]
+  },
+  "12-branch-create-empty": {
+    "file": "12-branch-create-empty.png",
+    "callouts": [
+      {
+        "label": "Title \u2014 one line naming the problem",
+        "x0": 0.1889,
+        "y0": 0.2111,
+        "w": 0.4389,
+        "h": 0.0433,
+        "x": 0.4083,
+        "y": 0.2328
+      },
+      {
+        "label": "Description \u2014 what happened, and for whom",
+        "x0": 0.1889,
+        "y0": 0.3011,
+        "w": 0.4389,
+        "h": 0.1367,
+        "x": 0.4083,
+        "y": 0.3694
+      },
+      {
+        "label": "Priority",
+        "x0": 0.1889,
+        "y0": 0.6222,
+        "w": 0.2139,
+        "h": 0.04,
+        "x": 0.2958,
+        "y": 0.6422
+      }
+    ]
+  },
+  "13-branch-create-filled": {
+    "file": "13-branch-create-filled.png",
+    "callouts": [
+      {
+        "label": "Be specific: account, amount, date",
+        "x0": 0.1889,
+        "y0": 0.2111,
+        "w": 0.4389,
+        "h": 0.0433,
+        "x": 0.4083,
+        "y": 0.2328
+      },
+      {
+        "label": "What happened, and what the customer expects",
+        "x0": 0.1889,
+        "y0": 0.3011,
+        "w": 0.4389,
+        "h": 0.1367,
+        "x": 0.4083,
+        "y": 0.3694
+      },
+      {
+        "label": "Attach evidence \u2014 drag files here, or choose them",
+        "x0": 0.1889,
+        "y0": 0.8322,
+        "w": 0.4389,
+        "h": 0.0222,
+        "x": 0.4083,
+        "y": 0.8433
+      },
+      {
+        "label": "Priority and category",
+        "x0": 0.1889,
+        "y0": 0.6222,
+        "w": 0.2139,
+        "h": 0.04,
+        "x": 0.2958,
+        "y": 0.6422
+      }
+    ]
+  },
+  "15-branch-ticket-detail": {
+    "file": "15-branch-ticket-detail.png",
+    "callouts": [
+      {
+        "label": "Number, status and SLA countdown",
+        "x0": 0.3488,
+        "y0": 0.1244,
+        "w": 0.1279,
+        "h": 0.0222,
+        "x": 0.4128,
+        "y": 0.1356
+      },
+      {
+        "label": "Your attachments",
+        "x0": 0.7324,
+        "y0": 0.6178,
+        "w": 0.0873,
+        "h": 0.0222,
+        "x": 0.7761,
+        "y": 0.6289
+      },
+      {
+        "label": "Who owns it now",
+        "x0": 0.7324,
+        "y0": 0.9472,
+        "w": 0.04,
+        "h": 0.0183,
+        "x": 0.7524,
+        "y": 0.9564
+      },
+      {
+        "label": "Add more detail for the agent",
+        "x0": 0.1861,
+        "y0": 0.6092,
+        "w": 0.513,
+        "h": 0.0867,
+        "x": 0.4426,
+        "y": 0.6525
+      }
+    ]
+  },
+  "16-branch-ticket-comments": {
+    "file": "16-branch-ticket-comments.png",
+    "callouts": [
+      {
+        "label": "Replies appear here",
+        "x0": 0.1861,
+        "y0": 0.1014,
+        "w": 0.513,
+        "h": 0.0222,
+        "x": 0.4426,
+        "y": 0.1125
+      },
+      {
+        "label": "Attach a file to your reply",
+        "x0": 0.3781,
+        "y0": 0.2981,
+        "w": 0.0502,
+        "h": 0.0178,
+        "x": 0.4032,
+        "y": 0.3069
+      }
+    ]
+  },
+  "20-agent-dashboard": {
+    "file": "20-agent-dashboard.png",
+    "callouts": [
+      {
+        "label": "SLA Breached \u2014 deal with these first",
+        "x0": 0.2882,
+        "y0": 0.1864,
+        "w": 0.0521,
+        "h": 0.0183,
+        "x": 0.3142,
+        "y": 0.1956
+      },
+      {
+        "label": "Critical open",
+        "x0": 0.4924,
+        "y0": 0.1864,
+        "w": 0.0504,
+        "h": 0.0183,
+        "x": 0.5176,
+        "y": 0.1956
+      },
+      {
+        "label": "AI panel",
+        "x0": 0.7546,
+        "y0": 0.3367,
+        "w": 0.0551,
+        "h": 0.0222,
+        "x": 0.7822,
+        "y": 0.3478
+      }
+    ]
+  },
+  "21-agent-tickets": {
+    "file": "21-agent-tickets.png",
+    "callouts": [
+      {
+        "label": "Filter by status, priority or owner",
+        "x0": 0.1868,
+        "y0": 0.2556,
+        "w": 0.1111,
+        "h": 0.0356,
+        "x": 0.2424,
+        "y": 0.2733
+      },
+      {
+        "label": "Every ticket in your scope",
+        "x0": 0.1583,
+        "y0": 0.0622,
+        "w": 0.8417,
+        "h": 1.8294,
+        "x": 0.5792,
+        "y": 0.9769
+      }
+    ]
+  },
+  "22-agent-breached": {
+    "file": "22-agent-breached.png",
+    "callouts": [
+      {
+        "label": "The filter the tile applied",
+        "x0": 0.7285,
+        "y0": 0.0133,
+        "w": 0.1556,
+        "h": 0.0356,
+        "x": 0.8062,
+        "y": 0.0311
+      }
+    ]
+  },
+  "23-agent-ticket-detail": {
+    "file": "23-agent-ticket-detail.png",
+    "callouts": [
+      {
+        "label": "Status, SLA countdown, AI category and risk",
+        "x0": 0.7324,
+        "y0": 0.2186,
+        "w": 0.2398,
+        "h": 0.0183,
+        "x": 0.8523,
+        "y": 0.2278
+      },
+      {
+        "label": "The problem as reported",
+        "x0": 0.1861,
+        "y0": 0.2186,
+        "w": 0.513,
+        "h": 0.0222,
+        "x": 0.4426,
+        "y": 0.2297
+      },
+      {
+        "label": "AI Insights \u2014 summarise or suggest",
+        "x0": 0.2167,
+        "y0": 0.4044,
+        "w": 0.2634,
+        "h": 0.0222,
+        "x": 0.3484,
+        "y": 0.4156
+      },
+      {
+        "label": "Evidence the requester attached",
+        "x0": 0.7324,
+        "y0": 0.8289,
+        "w": 0.0873,
+        "h": 0.0222,
+        "x": 0.7761,
+        "y": 0.84
+      }
+    ]
+  },
+  "24-agent-ticket-comments": {
+    "file": "24-agent-ticket-comments.png",
+    "callouts": [
+      {
+        "label": "Your reply",
+        "x0": 0.1861,
+        "y0": 0.4094,
+        "w": 0.513,
+        "h": 0.0867,
+        "x": 0.4426,
+        "y": 0.4528
+      },
+      {
+        "label": "Attach files to this reply",
+        "x0": 0.3781,
+        "y0": 0.5206,
+        "w": 0.0502,
+        "h": 0.0178,
+        "x": 0.4032,
+        "y": 0.5294
+      }
+    ]
+  },
+  "30-supervisor-dashboard": {
+    "file": "30-supervisor-dashboard.png",
+    "callouts": [
+      {
+        "label": "Breached \u2014 the number that matters most",
+        "x0": 0.2882,
+        "y0": 0.1864,
+        "w": 0.0521,
+        "h": 0.0183,
+        "x": 0.3142,
+        "y": 0.1956
+      },
+      {
+        "label": "SLA Monitor and Escalations in the menu",
+        "x0": 0.0,
+        "y0": 0.0,
+        "w": 0.1583,
+        "h": 1.0044,
+        "x": 0.0792,
+        "y": 0.5022
+      }
+    ]
+  },
+  "31-supervisor-sla": {
+    "file": "31-supervisor-sla.png",
+    "callouts": [
+      {
+        "label": "On time, at risk, breached",
+        "x0": 0.1583,
+        "y0": 0.0622,
+        "w": 0.8417,
+        "h": 1.2706,
+        "x": 0.5792,
+        "y": 0.6975
+      }
+    ]
+  },
+  "32-supervisor-escalations": {
+    "file": "32-supervisor-escalations.png",
+    "callouts": [
+      {
+        "label": "Escalation events, newest first",
+        "x0": 0.1583,
+        "y0": 0.0622,
+        "w": 0.8417,
+        "h": 0.9378,
+        "x": 0.5792,
+        "y": 0.5311
+      }
+    ]
+  },
+  "40-admin-dashboard": {
+    "file": "40-admin-dashboard.png",
+    "callouts": [
+      {
+        "label": "The full menu",
+        "x0": 0.0,
+        "y0": 0.0,
+        "w": 0.1583,
+        "h": 1.0044,
+        "x": 0.0792,
+        "y": 0.5022
+      }
+    ]
+  },
+  "41-admin-users": {
+    "file": "41-admin-users.png",
+    "callouts": [
+      {
+        "label": "Everyone with an account",
+        "x0": 0.1583,
+        "y0": 0.0622,
+        "w": 0.8417,
+        "h": 0.9378,
+        "x": 0.5792,
+        "y": 0.5311
+      },
+      {
+        "label": "Add a user",
+        "x0": 0.9029,
+        "y0": 0.0967,
+        "w": 0.0804,
+        "h": 0.0356,
+        "x": 0.9431,
+        "y": 0.1144
+      }
+    ]
+  },
+  "42-admin-org": {
+    "file": "42-admin-org.png",
+    "callouts": [
+      {
+        "label": "Hierarchy levels and org units",
+        "x0": 0.1583,
+        "y0": 0.0622,
+        "w": 0.8417,
+        "h": 0.9378,
+        "x": 0.5792,
+        "y": 0.5311
+      }
+    ]
+  },
+  "43-admin-branches": {
+    "file": "43-admin-branches.png",
+    "callouts": [
+      {
+        "label": "Branches, with live ticket load",
+        "x0": 0.1583,
+        "y0": 0.0622,
+        "w": 0.8417,
+        "h": 1.2956,
+        "x": 0.5792,
+        "y": 0.71
+      }
+    ]
+  },
+  "44-admin-reports": {
+    "file": "44-admin-reports.png",
+    "callouts": [
+      {
+        "label": "Filter the period and scope",
+        "x0": 0.1583,
+        "y0": 0.0622,
+        "w": 0.8417,
+        "h": 1.2667,
+        "x": 0.5792,
+        "y": 0.6956
+      }
+    ]
+  },
+  "45-admin-security": {
+    "file": "45-admin-security.png",
+    "callouts": [
+      {
+        "label": "Enrol a second factor",
+        "x0": 0.1583,
+        "y0": 0.0622,
+        "w": 0.8417,
+        "h": 0.9378,
+        "x": 0.5792,
+        "y": 0.5311
+      }
+    ]
+  },
+  "50-auditor-dashboard": {
+    "file": "50-auditor-dashboard.png",
+    "callouts": [
+      {
+        "label": "The same tiles everyone else sees",
+        "x0": 0.1583,
+        "y0": 0.0622,
+        "w": 0.8417,
+        "h": 0.9422,
+        "x": 0.5792,
+        "y": 0.5333
+      }
+    ]
+  },
+  "51-auditor-audit-log": {
+    "file": "51-auditor-audit-log.png",
+    "callouts": [
+      {
+        "label": "Who changed what, when, from where",
+        "x0": 0.1583,
+        "y0": 0.0622,
+        "w": 0.8417,
+        "h": 1.6889,
+        "x": 0.5792,
+        "y": 0.9067
+      }
+    ]
+  },
+  "52-auditor-tickets": {
+    "file": "52-auditor-tickets.png",
+    "callouts": [
+      {
+        "label": "No scope limit \u2014 every ticket",
+        "x0": 0.1583,
+        "y0": 0.0622,
+        "w": 0.8417,
+        "h": 1.8294,
+        "x": 0.5792,
+        "y": 0.9769
+      }
+    ]
+  }
+}
