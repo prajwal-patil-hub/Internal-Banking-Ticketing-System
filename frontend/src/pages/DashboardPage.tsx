@@ -13,6 +13,7 @@ import {
   getAIMetrics,
 } from '@/features/dashboard/api';
 import type { KPIData, SLAStatus, AIMetrics } from '@/features/dashboard/api';
+import { listTickets } from '@/features/tickets/api';
 
 const STALE = 30_000;
 
@@ -374,12 +375,40 @@ export function DashboardPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
 
-  const kpiQuery      = useQuery({ queryKey: ['dashboard', 'kpis'],        queryFn: getDashboardKPIs,       staleTime: STALE, refetchInterval: STALE });
-  const slaQuery      = useQuery({ queryKey: ['dashboard', 'sla'],         queryFn: getSLAStatus,           staleTime: STALE, refetchInterval: STALE });
-  const categoryQuery = useQuery({ queryKey: ['dashboard', 'categories'],  queryFn: getCategoryDistribution, staleTime: STALE, refetchInterval: STALE });
-  const deptQuery     = useQuery({ queryKey: ['dashboard', 'departments'], queryFn: getDepartmentLoad,      staleTime: STALE, refetchInterval: STALE });
+  // Every analytics endpoint below is agent-and-above server-side. Asking for
+  // them as a branch user returns 403, and the page then rendered four red
+  // "failed to load" cards — so the landing screen of the role that uses the
+  // system most looked broken. Don't ask for what this role may not have.
+  const orgMetrics = !!user && user.role !== 'branch_user';
+
+  const kpiQuery      = useQuery({ queryKey: ['dashboard', 'kpis'],        queryFn: getDashboardKPIs,       staleTime: STALE, refetchInterval: STALE, enabled: orgMetrics });
+  const slaQuery      = useQuery({ queryKey: ['dashboard', 'sla'],         queryFn: getSLAStatus,           staleTime: STALE, refetchInterval: STALE, enabled: orgMetrics });
+  const categoryQuery = useQuery({ queryKey: ['dashboard', 'categories'],  queryFn: getCategoryDistribution, staleTime: STALE, refetchInterval: STALE, enabled: orgMetrics });
+  const deptQuery     = useQuery({ queryKey: ['dashboard', 'departments'], queryFn: getDepartmentLoad,      staleTime: STALE, refetchInterval: STALE, enabled: orgMetrics });
   const recentQuery   = useQuery({ queryKey: ['dashboard', 'recent'],      queryFn: getRecentTickets,       staleTime: STALE, refetchInterval: STALE });
-  const aiQuery       = useQuery({ queryKey: ['dashboard', 'ai-metrics'],  queryFn: getAIMetrics,           staleTime: STALE, refetchInterval: STALE });
+  const aiQuery       = useQuery({ queryKey: ['dashboard', 'ai-metrics'],  queryFn: getAIMetrics,           staleTime: STALE, refetchInterval: STALE, enabled: orgMetrics });
+
+  // What a branch user gets instead: counts of their own tickets. The list
+  // endpoint already scopes them to what they raised, so these are their
+  // numbers and nobody else's.
+  const mineQuery = useQuery({
+    queryKey: ['dashboard', 'mine'],
+    queryFn: () => listTickets({ page_size: 1 }),
+    staleTime: STALE,
+    enabled: !orgMetrics && !!user,
+  });
+  const mineOpenQuery = useQuery({
+    queryKey: ['dashboard', 'mine', 'open'],
+    queryFn: () => listTickets({ page_size: 1, status_group: 'open' }),
+    staleTime: STALE,
+    enabled: !orgMetrics && !!user,
+  });
+  const mineBreachedQuery = useQuery({
+    queryKey: ['dashboard', 'mine', 'breached'],
+    queryFn: () => listTickets({ page_size: 1, status_group: 'open', sla_breached: true }),
+    staleTime: STALE,
+    enabled: !orgMetrics && !!user,
+  });
 
   const kpis: KPIData | undefined = kpiQuery.data;
   const recentTickets = recentQuery.data ?? [];
@@ -412,8 +441,25 @@ export function DashboardPage() {
         </div>
       </div>
 
+      {/* ── Branch user: their own three numbers ─────────────────────── */}
+      {!orgMetrics && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <KPICard label="Your Tickets" value={mineQuery.data?.total ?? '—'} tone="default"
+                   to="/tickets" hint="Show every ticket you have raised"
+                   icon="M9 12h6M9 16h6M13 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-5-5z" />
+          <KPICard label="Still Open" value={mineOpenQuery.data?.total ?? '—'} tone="default"
+                   to="/tickets?status_group=open" hint="Show your tickets that are still open"
+                   icon="M12 8v4l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" />
+          <KPICard label="Past Deadline" value={mineBreachedQuery.data?.total ?? '—'}
+                   tone={(mineBreachedQuery.data?.total ?? 0) > 0 ? 'danger' : 'default'}
+                   to="/tickets?status_group=open&sla_breached=1"
+                   hint="Show your open tickets that are past their SLA"
+                   icon="M12 9v4M12 17h.01M4.93 19h14.14L12 5z" />
+        </div>
+      )}
+
       {/* ── 8-column KPI strip ───────────────────────────────────────── */}
-      {kpiQuery.isLoading ? (
+      {!orgMetrics ? null : kpiQuery.isLoading ? (
         <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-3">
           {Array.from({ length: 8 }).map((_, i) => (
             <div key={i} className="card-sm flex flex-col gap-2">
@@ -448,6 +494,7 @@ export function DashboardPage() {
       ) : null}
 
       {/* ── Middle row: SLA + Categories + AI ───────────────────────── */}
+      {orgMetrics && (
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* SLA */}
         <div>
@@ -482,10 +529,12 @@ export function DashboardPage() {
           ) : null}
         </div>
       </div>
+      )}
 
       {/* ── Bottom row: dept table + recent tickets ──────────────────── */}
-      <div className="grid grid-cols-1 xl:grid-cols-5 gap-4">
+      <div className={cn('grid grid-cols-1 gap-4', orgMetrics && 'xl:grid-cols-5')}>
         {/* Dept table — takes 2 of 5 cols */}
+        {orgMetrics && (
         <div className="xl:col-span-2">
           {deptQuery.isLoading ? (
             <div className="card-sm"><Sk className="h-40" /></div>
@@ -495,9 +544,10 @@ export function DashboardPage() {
             <DeptTable rows={deptQuery.data} />
           ) : null}
         </div>
+        )}
 
-        {/* Recent tickets — takes 3 of 5 cols */}
-        <div className="xl:col-span-3">
+        {/* Recent tickets — takes 3 of 5 cols for agents, full width otherwise */}
+        <div className={orgMetrics ? 'xl:col-span-3' : ''}>
           <div className="flex items-center justify-between mb-3">
             <span className="text-sm font-semibold text-[var(--tx)]">Recent Tickets</span>
             <button
