@@ -15,7 +15,7 @@ from PIL import Image, ImageDraw, ImageFont
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE
-from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+from pptx.enum.text import MSO_ANCHOR, MSO_AUTO_SIZE, PP_ALIGN
 from pptx.util import Emu, Inches, Pt
 
 SHOTS = Path(sys.argv[1])
@@ -159,9 +159,15 @@ def marker(slide, cx, cy, n, diameter, fill, fontsize):
     tf.margin_left = tf.margin_right = tf.margin_top = tf.margin_bottom = 0
     tf.word_wrap = False
     tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+    # Autofit off: with it on, a renderer may rescale the glyph and shift it
+    # off centre. Line spacing pinned to 1.0 for the same reason — inherited
+    # leading is added above the line, which pushes a vertically-centred
+    # single character downward.
+    tf.auto_size = MSO_AUTO_SIZE.NONE
     tf.text = str(n)
     p = tf.paragraphs[0]
     p.alignment = PP_ALIGN.CENTER
+    p.line_spacing = 1.0
     r = p.runs[0]
     r.font.size, r.font.bold, r.font.color.rgb, r.font.name = Pt(fontsize), True, WHITE, "Calibri"
     return sh
@@ -314,6 +320,20 @@ def workflow(shot, title, action, result, nxt, role_tag, extra_note=None):
 
     entry = MANIFEST.get(shot.replace(".png", ""), {})
     callouts = entry.get("callouts", [])
+    # A callout has to mark a *thing*. Twelve of them targeted the entire page
+    # — one at 154%, a whole scrolling container — which put a numbered dot on
+    # the sidebar with a label describing the screen as a whole. That is not an
+    # annotation, it is decoration, and it was the bulk of the loose dots. Each
+    # one's statement is already carried by the slide's Action/Result prose,
+    # which is where a statement about the whole screen belongs.
+    #
+    # The threshold cleanly separates them: real targets here run under 16%
+    # (the navigation menu is the largest), the discarded ones start at 78%.
+    dropped = [c for c in callouts if c.get("w", 0) * c.get("h", 0) > 0.45]
+    callouts = [c for c in callouts if c.get("w", 0) * c.get("h", 0) <= 0.45]
+    for c in dropped:
+        print(f"    dropped whole-screen callout on {shot}: {c['label'][:52]}")
+
     def _marker_y(c: dict) -> float:
         """Where the marker will actually be drawn, as a fraction of the image.
 
@@ -328,7 +348,28 @@ def workflow(shot, title, action, result, nxt, role_tag, extra_note=None):
     # Number in reading order, not in the order the capture script happened to
     # list them. y is banded first so two callouts at roughly the same height
     # run left-to-right instead of being ordered by a few stray pixels.
-    callouts = sorted(callouts, key=lambda c: (round(_marker_y(c) / 0.06), c.get("x0", c.get("x", 0))))
+    # Rows are clustered, not banded. Any fixed grid has a knife edge: two
+    # controls a third of an inch apart can straddle a boundary and count as
+    # different rows, which numbered a button at the top-right before a search
+    # box six inches to its left and barely lower. To a reader those are one
+    # row, and the numbering ran backwards.
+    #
+    # Walking in y order and starting a new row only when the gap from the
+    # row's first item exceeds ~0.5in has no boundary to straddle. Within a
+    # row, left to right; the trailing y keeps a stacked column of form fields
+    # in top-to-bottom order when they share an x.
+    ROW_GAP = 0.10                      # fraction of image height, ~0.5in
+    rows: list[list[dict]] = []
+    for c in sorted(callouts, key=_marker_y):
+        if rows and _marker_y(c) - _marker_y(rows[-1][0]) <= ROW_GAP:
+            rows[-1].append(c)
+        else:
+            rows.append([c])
+    callouts = [
+        c
+        for row in rows
+        for c in sorted(row, key=lambda c: (c.get("x0", c.get("x", 0)), _marker_y(c)))
+    ]
 
     img_x, img_y, img_w = Inches(0.45), Inches(1.3), Inches(8.5)
     img_h = img_w * 900 / 1440
@@ -1012,7 +1053,8 @@ workflow("51-auditor-audit-log.png", "Read the audit trail",  "Filter to the ent
    "{next} — inspect any ticket.", "Auditor")
 
 workflow("52-auditor-tickets.png", "Inspect any ticket",  "Open any ticket and read its comments, attachments and timeline.",
-   "Internal notes are visible to an auditor. Write controls are not offered, "
+   "There is no scope limit — an auditor sees every ticket, not a subset. "
+   "Internal notes are visible to them too. Write controls are not offered, "
    "and would be refused if called directly.",
    "This is the end of the auditor's workflow — there is nothing to submit.", "Auditor")
 

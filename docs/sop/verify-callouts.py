@@ -105,8 +105,19 @@ for idx, slide in enumerate(prs.slides, start=1):
                 add("INFO", idx, f"markers {n1} and {n2} touch")
 
     # --- numbering must follow reading order --------------------------------
+    # Rows are clustered exactly as the builder clusters them. Checking with a
+    # fixed grid while the builder clusters would be two implementations of
+    # one rule, which is the defect this file exists to catch.
     if len(on_image) > 1:
-        ordered = sorted(on_image, key=lambda m: (round((m[1][1] + m[1][3] / 2) / 0.45), m[1][0]))
+        ROW_GAP = 0.55                      # inches on the slide
+        rows: list[list] = []
+        for m in sorted(on_image, key=lambda m: m[1][1] + m[1][3] / 2):
+            cy = m[1][1] + m[1][3] / 2
+            if rows and cy - (rows[-1][0][1][1] + rows[-1][0][1][3] / 2) <= ROW_GAP:
+                rows[-1].append(m)
+            else:
+                rows.append([m])
+        ordered = [m for row in rows for m in sorted(row, key=lambda m: m[1][0])]
         if [n for n, _ in ordered] != sorted(n for n, _ in on_image):
             add("WARN", idx,
                 "markers are not numbered in reading order: reading order is "
