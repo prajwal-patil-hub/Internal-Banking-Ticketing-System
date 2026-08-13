@@ -314,10 +314,21 @@ def workflow(shot, title, action, result, nxt, role_tag, extra_note=None):
 
     entry = MANIFEST.get(shot.replace(".png", ""), {})
     callouts = entry.get("callouts", [])
+    def _marker_y(c: dict) -> float:
+        """Where the marker will actually be drawn, as a fraction of the image.
+
+        A callout on a whole panel ('main', 'nav') is anchored near the top of
+        the region — the centre of a full-height panel is empty space. The
+        numbering has to sort on the same value, or a marker drawn at the top
+        of the screen is numbered as though it sat in the middle. That is what
+        put ② above ① on three slides.
+        """
+        return c.get("y0", 0.0) + 0.045 if c.get("h", 0) > 0.45 else c.get("y", 0.5)
+
     # Number in reading order, not in the order the capture script happened to
     # list them. y is banded first so two callouts at roughly the same height
     # run left-to-right instead of being ordered by a few stray pixels.
-    callouts = sorted(callouts, key=lambda c: (round(c.get("y", 0.5) / 0.06), c.get("x0", c.get("x", 0))))
+    callouts = sorted(callouts, key=lambda c: (round(_marker_y(c) / 0.06), c.get("x0", c.get("x", 0))))
 
     img_x, img_y, img_w = Inches(0.45), Inches(1.3), Inches(8.5)
     img_h = img_w * 900 / 1440
@@ -336,13 +347,8 @@ def workflow(shot, title, action, result, nxt, role_tag, extra_note=None):
     # read — the account number, the file name.
     D = Inches(0.30)
     for i, c in enumerate(callouts, start=1):
-        # A callout on a whole panel ('main', 'nav') gets anchored near the top
-        # of the region, not its centre. The centre of a full-height region is
-        # usually empty space, so the marker ends up pointing at nothing.
-        if c.get("h", 0) > 0.45:
-            cy = img_y + Emu(int(img_h * (c.get("y0", 0) + 0.045)))
-        else:
-            cy = img_y + Emu(int(img_h * c.get("y", 0.5)))
+        # Same function the numbering sorted on, so the two cannot diverge.
+        cy = img_y + Emu(int(img_h * _marker_y(c)))
         x0 = c.get("x0")
         if x0 is None:                      # older manifest: fall back to centre
             cx = img_x + Emu(int(img_w * c["x"]))
@@ -1139,13 +1145,21 @@ for title, kicker, rows in [
       ("Agent", "Resolves again — the whole history stays on the one ticket")]),
 ]:
     s = content(title, kicker)
+    # The row pitch is derived from how many rows there are, not fixed. Adding
+    # the supervisor step to Scenario A made it six rows, and at the old fixed
+    # 1.02in pitch the last one ran underneath the footer bar.
+    top, bottom = Inches(1.32), H - Inches(0.62)
+    pitch = min(Inches(1.02), (bottom - top) // max(1, len(rows)))
+    row_h = pitch - Inches(0.16)
     for i, (who, what) in enumerate(rows):
-        y = Inches(1.35) + i * Inches(1.02)
+        y = top + i * pitch
         col = TEAL if who not in ("System",) else MUTE
-        _rect(s, Inches(0.6), y, Inches(2.25), Inches(0.86), col)
-        _tb(s, Inches(0.78), y + Inches(0.28), Inches(2.0), Inches(0.3), who, size=12, bold=True, color=WHITE)
-        _rect(s, Inches(2.95), y, Inches(9.78), Inches(0.86), CREAM, LINE)
-        _tb(s, Inches(3.25), y + Inches(0.2), Inches(9.2), Inches(0.6), what, size=12, color=INK, spacing=1.2)
+        _rect(s, Inches(0.6), y, Inches(2.25), row_h, col)
+        _tb(s, Inches(0.78), y, Inches(2.0), row_h, who, size=12, bold=True, color=WHITE,
+            anchor=MSO_ANCHOR.MIDDLE)
+        _rect(s, Inches(2.95), y, Inches(9.78), row_h, CREAM, LINE)
+        _tb(s, Inches(3.25), y, Inches(9.2), row_h, what, size=12, color=INK, spacing=1.2,
+            anchor=MSO_ANCHOR.MIDDLE)
     footer(s, "Scenarios")
 
 # ===========================================================================

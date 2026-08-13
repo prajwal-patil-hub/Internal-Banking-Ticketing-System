@@ -148,7 +148,9 @@ with sync_playwright() as pw:
 
     page.goto(f"{BASE}/tickets", wait_until="networkidle")
     shot(page, "11-branch-tickets", [
-        ("Search and filters", CSS('input[placeholder*="earch"]')),
+        # Not input[placeholder*="earch"]: that matches the global header search
+        # in the top bar, not this page's own box.
+        ("Search and filters", PH("Search by title")),
         ("New Ticket", ROLE("button", "New Ticket")),
     ])
 
@@ -199,12 +201,12 @@ with sync_playwright() as pw:
     ])
     page.goto(f"{BASE}/tickets", wait_until="networkidle")
     shot(page, "21-agent-tickets", [
-        ("Filter by status, priority or owner", CSS('select')),
+        ("Filter by status, priority or owner", ROLE("button", "Filters")),
         ("Every ticket in your scope", CSS('main')),
     ])
     page.goto(f"{BASE}/tickets?status_group=open&sla_breached=true", wait_until="networkidle")
     shot(page, "22-agent-breached", [
-        ("The filter the tile applied", CSS('input[placeholder*="earch"]')),
+        ("The filter the tile applied", ROLE("button", "Filters")),
     ])
 
     at = Path("/tmp/rich_ticket.txt").read_text().strip()
