@@ -642,5 +642,46 @@
         "y": 0.9769
       }
     ]
+  },
+  "60-ai-assistant": {
+    "file": "60-ai-assistant.png",
+    "callouts": [
+      {
+        "label": "The context it is working from",
+        "x0": 0.7174,
+        "y0": 0.3872,
+        "w": 0.0625,
+        "h": 0.0156,
+        "x": 0.7486,
+        "y": 0.395
+      },
+      {
+        "label": "Starter prompts \u2014 click one to fill the box",
+        "x0": 0.7174,
+        "y0": 0.6558,
+        "w": 0.2542,
+        "h": 0.0356,
+        "x": 0.8444,
+        "y": 0.6736
+      },
+      {
+        "label": "Ask in plain English; Enter sends",
+        "x0": 0.7174,
+        "y0": 0.8911,
+        "w": 0.2208,
+        "h": 0.0444,
+        "x": 0.8278,
+        "y": 0.9133
+      },
+      {
+        "label": "Start a fresh conversation",
+        "x0": 0.9299,
+        "y0": 0.3236,
+        "w": 0.0194,
+        "h": 0.0311,
+        "x": 0.9396,
+        "y": 0.3392
+      }
+    ]
   }
 }
