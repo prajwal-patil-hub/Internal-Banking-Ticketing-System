@@ -155,30 +155,30 @@
     "callouts": [
       {
         "label": "Number, status and SLA countdown",
-        "x0": 0.3488,
+        "x0": 0.338,
         "y0": 0.1244,
         "w": 0.1279,
         "h": 0.0222,
-        "x": 0.4128,
+        "x": 0.402,
         "y": 0.1356
       },
       {
         "label": "Your attachments",
         "x0": 0.7324,
-        "y0": 0.6178,
+        "y0": 0.3694,
         "w": 0.0873,
         "h": 0.0222,
         "x": 0.7761,
-        "y": 0.6289
+        "y": 0.3806
       },
       {
         "label": "Who owns it now",
         "x0": 0.7324,
-        "y0": 0.9472,
+        "y0": 0.6989,
         "w": 0.04,
         "h": 0.0183,
         "x": 0.7524,
-        "y": 0.9564
+        "y": 0.7081
       },
       {
         "label": "Add more detail for the agent",
@@ -197,20 +197,20 @@
       {
         "label": "Replies appear here",
         "x0": 0.1861,
-        "y0": 0.1014,
+        "y0": 0.1825,
         "w": 0.513,
         "h": 0.0222,
         "x": 0.4426,
-        "y": 0.1125
+        "y": 0.1936
       },
       {
         "label": "Attach a file to your reply",
         "x0": 0.3781,
-        "y0": 0.2981,
+        "y0": 0.3792,
         "w": 0.0502,
         "h": 0.0178,
         "x": 0.4032,
-        "y": 0.3069
+        "y": 0.3881
       }
     ]
   },
@@ -263,9 +263,9 @@
         "x0": 0.1583,
         "y0": 0.0622,
         "w": 0.8417,
-        "h": 1.8294,
+        "h": 1.7628,
         "x": 0.5792,
-        "y": 0.9769
+        "y": 0.9436
       }
     ]
   },
@@ -316,11 +316,11 @@
       {
         "label": "Evidence the requester attached",
         "x0": 0.7324,
-        "y0": 0.8289,
+        "y0": 0.6633,
         "w": 0.0873,
         "h": 0.0222,
         "x": 0.7761,
-        "y": 0.84
+        "y": 0.6744
       }
     ]
   },
@@ -378,9 +378,9 @@
         "x0": 0.1583,
         "y0": 0.0622,
         "w": 0.8417,
-        "h": 1.2706,
+        "h": 1.4706,
         "x": 0.5792,
-        "y": 0.6975
+        "y": 0.7975
       }
     ]
   },
@@ -395,6 +395,61 @@
         "h": 0.9378,
         "x": 0.5792,
         "y": 0.5311
+      }
+    ]
+  },
+  "33-supervisor-unassigned": {
+    "file": "33-supervisor-unassigned.png",
+    "callouts": [
+      {
+        "label": "No owner yet \u2014 raising a ticket does not choose one",
+        "x0": 0.8909,
+        "y0": 0.7278,
+        "w": 0.0485,
+        "h": 0.0178,
+        "x": 0.9151,
+        "y": 0.7367
+      },
+      {
+        "label": "Open the assign list",
+        "x0": 0.9449,
+        "y0": 0.7278,
+        "w": 0.0273,
+        "h": 0.0178,
+        "x": 0.9586,
+        "y": 0.7367
+      }
+    ]
+  },
+  "34-supervisor-assign-list": {
+    "file": "34-supervisor-assign-list.png",
+    "callouts": [
+      {
+        "label": "Hand the choice to the router",
+        "x0": 0.8007,
+        "y0": 0.6644,
+        "w": 0.1653,
+        "h": 0.0311,
+        "x": 0.8833,
+        "y": 0.68
+      },
+      {
+        "label": "Each candidate's open queue \u2014 what the router ranks on",
+        "x0": 0.9254,
+        "y0": 0.7089,
+        "w": 0.035,
+        "h": 0.0222,
+        "x": 0.9429,
+        "y": 0.72
+      },
+      {
+        "label": "Anyone on leave is marked, and sorted to the bottom",
+        "x0": 0.8063,
+        "y0": 0.8667,
+        "w": 0.0899,
+        "h": 0.0178,
+        "x": 0.8512,
+        "y": 0.8756
       }
     ]
   },
@@ -420,9 +475,9 @@
         "x0": 0.1583,
         "y0": 0.0622,
         "w": 0.8417,
-        "h": 0.9378,
+        "h": 1.0773,
         "x": 0.5792,
-        "y": 0.5311
+        "y": 0.6009
       },
       {
         "label": "Add a user",
@@ -432,6 +487,61 @@
         "h": 0.0356,
         "x": 0.9431,
         "y": 0.1144
+      }
+    ]
+  },
+  "46-admin-users-availability": {
+    "file": "46-admin-users-availability.png",
+    "callouts": [
+      {
+        "label": "Availability is separate from Active \u2014 one gates login, the other routing",
+        "x0": 0.7376,
+        "y0": 0.22,
+        "w": 0.1211,
+        "h": 0.0446,
+        "x": 0.7982,
+        "y": 0.2423
+      },
+      {
+        "label": "Record a leave window",
+        "x0": 0.8983,
+        "y0": 0.2796,
+        "w": 0.0388,
+        "h": 0.0267,
+        "x": 0.9177,
+        "y": 0.2929
+      }
+    ]
+  },
+  "47-admin-leave-dialog": {
+    "file": "47-admin-leave-dialog.png",
+    "callouts": [
+      {
+        "label": "First and last day, both inclusive",
+        "x0": 0.3556,
+        "y0": 0.4308,
+        "w": 0.1403,
+        "h": 0.0622,
+        "x": 0.4257,
+        "y": 0.4619
+      },
+      {
+        "label": "Leave the end date empty for indefinite leave",
+        "x0": 0.5042,
+        "y0": 0.4308,
+        "w": 0.1403,
+        "h": 0.0622,
+        "x": 0.5743,
+        "y": 0.4619
+      },
+      {
+        "label": "Clears the window and makes them available again",
+        "x0": 0.3556,
+        "y0": 0.6192,
+        "w": 0.0636,
+        "h": 0.0267,
+        "x": 0.3873,
+        "y": 0.6325
       }
     ]
   },
@@ -513,9 +623,9 @@
         "x0": 0.1583,
         "y0": 0.0622,
         "w": 0.8417,
-        "h": 1.6889,
+        "h": 0.9378,
         "x": 0.5792,
-        "y": 0.9067
+        "y": 0.5311
       }
     ]
   },
@@ -527,9 +637,9 @@
         "x0": 0.1583,
         "y0": 0.0622,
         "w": 0.8417,
-        "h": 1.8294,
+        "h": 1.7628,
         "x": 0.5792,
-        "y": 0.9769
+        "y": 0.9436
       }
     ]
   }

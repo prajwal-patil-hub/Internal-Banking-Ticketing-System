@@ -83,6 +83,11 @@ export function AssigneeControl({ ticket, canAssign, canAutoAssign }: Props) {
           type="button"
           onClick={() => { setOpen((v) => !v); setError(null); }}
           disabled={busy}
+          // The status-transition row also has a button labelled "Assign" —
+          // that one moves the ticket to the Assigned state, this one chooses
+          // a person. Identical accessible names made them indistinguishable
+          // to a screen reader, and to anything driving the page by role.
+          aria-label={current ? 'Change who this ticket is assigned to' : 'Choose who to assign this ticket to'}
           className="text-xs text-[var(--brand)] hover:underline font-medium disabled:opacity-50"
         >
           {open ? 'Cancel' : current ? 'Reassign' : 'Assign'}

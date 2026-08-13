@@ -294,6 +294,12 @@ def workflow(shot, title, action, result, nxt, role_tag, extra_note=None):
     """
     global step_no
     step_no += 1
+
+    # Callers write "{next}" instead of a hard-coded "Step 14". Hand-written
+    # numbers went stale the moment a slide was inserted anywhere earlier —
+    # three were already wrong before this deck was regenerated, all pointing
+    # a reader at the slide after the one they meant.
+    nxt = nxt.replace("{next}", f"Step {step_no + 1:02d}")
     s = prs.slides.add_slide(BLANK)
     _bg(s)
     _rect(s, 0, 0, W, Inches(0.95), TEAL)
@@ -378,9 +384,15 @@ def workflow(shot, title, action, result, nxt, role_tag, extra_note=None):
         y += bar_h + Inches(0.22)
 
     if extra_note:
-        _rect(s, img_x, img_y + img_h + Inches(0.13), img_w, Inches(0.5), CREAM)
-        _tb(s, img_x + Inches(0.18), img_y + img_h + Inches(0.24), img_w - Inches(0.36),
-            Inches(0.3), extra_note, size=10.5, color=INK)
+        # Fills the gap between the screenshot and the footer exactly. It used
+        # to be a fixed 0.5in box that started below the image and finished
+        # underneath the footer bar, clipping the last line mid-word.
+        gap_top = img_y + img_h + Inches(0.08)
+        gap_h = (H - Inches(0.42)) - gap_top - Inches(0.04)
+        _rect(s, img_x, gap_top, img_w, gap_h, CREAM)
+        _tb(s, img_x + Inches(0.18), gap_top + Inches(0.07), img_w - Inches(0.36),
+            gap_h - Inches(0.12), extra_note, size=10, color=INK,
+            anchor=MSO_ANCHOR.MIDDLE)
 
     footer(s, f"Step {step_no:02d}")
     return s
@@ -526,13 +538,13 @@ section("03", "Roles and permissions", "Five roles, one per user. This is the wh
 
 s = content("Who can do what", "Enforced server-side in core/authz.py — the interface only hides what the API would refuse anyway")
 table(s, Inches(0.5), Inches(1.3), Inches(12.3),
-      ["Role", "Tickets", "Users & org", "Audit log", "Escalation queue"],
-      [["Branch User", "Own only — raise, comment, attach", "—", "—", "—"],
-       ["Agent", "Any in scope — assign, progress, resolve", "—", "—", "—"],
-       ["Supervisor", "As agent", "Read directory", "—", "Yes"],
-       ["Admin", "As agent", "Full control", "Yes", "Yes"],
-       ["Auditor", "Read only — no writes at all", "—", "Yes", "—"]],
-      col_w=[Inches(1.9), Inches(4.0), Inches(2.4), Inches(1.7), Inches(2.3)])
+      ["Role", "Tickets", "Assignment", "Users & org", "Audit", "Escalations"],
+      [["Branch User", "Own only — raise, comment, attach", "—", "—", "—", "—"],
+       ["Agent", "Any in scope — progress, resolve", "Assign to a person", "—", "—", "—"],
+       ["Supervisor", "As agent", "Also auto-assign, rules, leave", "Read directory", "—", "Yes"],
+       ["Admin", "As agent", "As supervisor, plus the delay", "Full control", "Yes", "Yes"],
+       ["Auditor", "Read only — no writes at all", "—", "—", "Yes", "—"]],
+      col_w=[Inches(1.75), Inches(3.35), Inches(2.85), Inches(1.95), Inches(1.05), Inches(1.35)])
 _rect(s, Inches(0.5), Inches(4.25), Inches(12.3), Inches(1.15), CREAM)
 _rect(s, Inches(0.5), Inches(4.25), Inches(0.06), Inches(1.15), ACCENT)
 _tb(s, Inches(0.8), Inches(4.45), Inches(11.8), Inches(0.8),
@@ -638,18 +650,24 @@ for i, (name, col) in enumerate(lanes):
     _rect(s, Inches(0.5), y, Inches(1.85), lane_h - Inches(0.06), col)
     _tb(s, Inches(0.62), y + Inches(0.36), Inches(1.65), Inches(0.3), name, size=10.5, bold=True, color=WHITE)
     _rect(s, Inches(2.4), y, Inches(10.4), lane_h - Inches(0.06), CREAM if i % 2 == 0 else WHITE, LINE)
+# Nine steps, not eight. The old diagram had the system auto-assigning at
+# creation, which is no longer true and was the single most misleading thing
+# in the deck: it showed a machine making the decision a supervisor makes.
 steps = [
     (0, 0, "Raise ticket\n+ attach evidence"),
-    (3, 1, "Auto-assign\n+ stamp SLA"),
-    (1, 2, "Take it,\ninvestigate"),
-    (1, 3, "Reply\n+ attach fix"),
-    (3, 4, "SLA breach?\nescalate"),
-    (2, 5, "Review,\nreassign"),
-    (1, 6, "Resolve"),
-    (0, 7, "See resolution,\nclose or reopen"),
+    (3, 1, "Number it,\nstamp SLA"),
+    (2, 2, "Assign, or\nauto-assign"),
+    (1, 3, "Take it,\ninvestigate"),
+    (1, 4, "Reply\n+ attach fix"),
+    (3, 5, "SLA breach?\nescalate"),
+    (2, 6, "Review,\nreassign"),
+    (1, 7, "Resolve"),
+    (0, 8, "See resolution,\nclose or reopen"),
 ]
-sw_w, sw_pitch, sw_h = Inches(1.06), Inches(1.29), Inches(0.76)
-sw_x0 = Inches(2.58)
+# Nine columns across the same 10.4in band: the pitch shrinks rather than the
+# band growing, so the lanes still line up with the role labels.
+sw_w, sw_pitch, sw_h = Inches(0.98), Inches(1.145), Inches(0.76)
+sw_x0 = Inches(2.52)
 
 
 def _sw_box(lane, col_i):
@@ -675,9 +693,10 @@ for lane, col_i, label in steps:
     chip(s, x, y, sw_w, sw_h, label, lanes[lane][1], size=8)
 
 _tb(s, Inches(0.5), Inches(6.0), Inches(12.3), Inches(0.9),
-    "The connectors are the handoffs. Only two of them are a person deciding to pass the ticket on — "
-    "the agent escalating, and the branch user reopening. The rest happen because the system moved it, "
-    "or because the next role was already watching.",
+    "The connectors are the handoffs. Two of them are a person deciding: the supervisor choosing an "
+    "owner, and the branch user closing or reopening. The rest happen because the system moved the "
+    "ticket, or because the next role was already watching. Note what the system does not do — it "
+    "numbers the ticket and starts the clock, but it does not choose who works it.",
     size=11.5, color=MUTE, spacing=1.3)
 footer(s, "End to end")
 
@@ -689,30 +708,30 @@ section("06", "Branch user workflow", "You raise the problem, supply the evidenc
 workflow("00-login.png", "Sign in",  "Enter your bank email and password, then select Sign in.",
    "You land on your dashboard. If your account has a second factor enabled, "
    "you are asked for a 6-digit code first.",
-   "Step 02 — read your dashboard.", "Branch User")
+   "{next} — read your dashboard.", "Branch User")
 
 workflow("10-branch-dashboard.png", "Read your dashboard",  "Check the tiles for anything of yours that is breaching or still open.",
    "Each tile opens the exact list it counts — a tile reading 3 opens three tickets.",
-   "Step 03 — open the ticket list.", "Branch User")
+   "{next} — open the ticket list.", "Branch User")
 
 workflow("11-branch-tickets.png", "See only your own tickets",  "Scan the list, or filter to what you are looking for.",
    "You see only tickets you raised. This is enforced by the server, not hidden by the page.",
-   "Step 04 — raise a new ticket.", "Branch User")
+   "{next} — raise a new ticket.", "Branch User")
 
 workflow("12-branch-create-empty.png", "Open the new ticket form",  "Select New Ticket from the ticket list.",
    "An empty form opens. Nothing is submitted until you choose Create Ticket.",
-   "Step 05 — fill it in and attach evidence.", "Branch User")
+   "{next} — fill it in and attach evidence.", "Branch User")
 
 workflow("13-branch-create-filled.png", "Describe it, and attach the evidence",  "Complete the form and attach a screenshot, statement or spreadsheet. "
    "Up to 15 MB per file; images, PDF, Word, Excel, text and CSV.",
    "Files are held in the browser and uploaded the moment the ticket is created — "
    "so evidence arrives with the report, not after it.",
-   "Step 06 — submit and follow it.", "Branch User")
+   "{next} — submit and follow it.", "Branch User")
 
 workflow("15-branch-ticket-detail.png", "Follow your ticket",  "Open the ticket from your list to see where it stands.",
    "The ticket was numbered, given SLA deadlines and assigned automatically — "
    "no one had to triage it by hand.",
-   "Step 07 — answer questions and read the resolution.", "Branch User")
+   "{next} — answer questions and read the resolution.", "Branch User")
 
 workflow("16-branch-ticket-comments.png", "Reply, and read the resolution",  "Answer any question the agent asks, attaching more evidence if needed.",
    "When the agent resolves it, their explanation and any file they attached "
@@ -748,26 +767,26 @@ section("07", "Agent workflow", "You pick the ticket up, investigate, keep the r
 
 workflow("20-agent-dashboard.png", "Start from the dashboard",  "Sign in and read the KPI strip before opening anything.",
    "Every tile is a live count and opens the exact list behind it.",
-   "Step 09 — open the queue.", "Agent")
+   "{next} — open the queue.", "Agent")
 
 workflow("21-agent-tickets.png", "Work the queue",  "Filter to unassigned or to your own, and choose what to work on.",
    "Agents see every ticket in their org scope, not just their own.",
-   "Step 10 — start with what is breaching.", "Agent")
+   "{next} — start with what is breaching.", "Agent")
 
 workflow("22-agent-breached.png", "Deal with breaches first",  "Select the SLA Breached tile on the dashboard.",
    "The list is filtered to exactly the tickets the tile counted — the number "
    "on the card and the length of this list always agree.",
-   "Step 11 — open one and investigate.", "Agent")
+   "{next} — open one and investigate.", "Agent")
 
 workflow("23-agent-ticket-detail.png", "Investigate the ticket",  "Read the description and the attached evidence, then move the ticket to In Progress.",
    "The status change is recorded in the audit trail with your name, and the "
    "first-response clock stops.",
-   "Step 12 — reply, and attach the fix.", "Agent")
+   "{next} — reply, and attach the fix.", "Agent")
 
 workflow("24-agent-ticket-comments.png", "Reply — and attach the fix to your reply",  "Write what you found and attach the corrected statement or screenshot.",
    "Files attached here belong to this reply, so the requester sees your fix "
    "beside the answer that explains it.",
-   "Step 13 — resolve, or escalate.", "Agent")
+   "{next} — resolve, or escalate.", "Agent")
 
 s = content("Resolve, or escalate — and what each means", "Both are one action on the ticket page")
 for i, (t, d, col) in enumerate([
@@ -797,17 +816,93 @@ section("08", "Supervisor workflow", "You watch the deadlines and the escalation
 
 workflow("30-supervisor-dashboard.png", "Watch the team's position",  "Read the strip; anything breaching needs an owner today.",
    "Supervisors see the same tiles as agents, plus the SLA monitor and escalation queue in the menu.",
-   "Step 15 — open the SLA monitor.", "Supervisor")
+   "{next} — open the SLA monitor.", "Supervisor")
 
 workflow("31-supervisor-sla.png", "Read the SLA monitor",  "Work down from the tickets nearest their deadline.",
    "At risk means due within the hour. Breached means the deadline has already passed "
    "and, if a rule matched, escalation has already fired.",
-   "Step 16 — review escalations.", "Supervisor")
+   "{next} — review escalations.", "Supervisor")
 
 workflow("32-supervisor-escalations.png", "Review the escalation queue",  "Check what escalated and whether the target is acting on it.",
    "Escalations arrive here whether raised by hand or fired automatically by the "
    "SLA worker — both run the same engine, so the evidence is identical.",
    "Reassign if the target is wrong; otherwise the agent resolves it.", "Supervisor")
+
+workflow("33-supervisor-unassigned.png", "Decide who works it",
+   "Open a ticket with no owner and select Assign.",
+   "Raising a ticket stamps its SLA deadlines but does not choose an owner. That is "
+   "deliberate: who carries the work is a shift decision, and a machine making it at "
+   "2am is how tickets end up with whoever happens to be idlest rather than whoever "
+   "should have them.",
+   "{next} — pick a person, or let the router pick.", "Supervisor")
+
+workflow("34-supervisor-assign-list.png", "Pick a person, or let the router pick",
+   "Choose a name, or select Auto-assign to take the lightest queue.",
+   "Each name shows the number of open tickets that person is already carrying — the "
+   "same number the router ranks on, so you can see what you are overriding. Anyone on "
+   "leave is labelled with their return date and sorted to the bottom. You can still "
+   "assign to them knowingly; auto-assign will not.",
+   "The agent picks it up from their queue.", "Supervisor",
+   extra_note="Auto-assign is supervisor and above; an agent may assign a specific ticket.")
+
+s = content("What the router actually does", "Three steps, and it stops at the first that yields somebody")
+_tb(s, Inches(0.62), Inches(1.3), Inches(12.1), Inches(0.5),
+    "Auto-assign is not a black box. It runs the same search every time, and each step "
+    "falls through to the next rather than failing.", size=12.5, color=INK, spacing=1.25)
+for i, (t, d) in enumerate([
+    ("1 — A category rule",
+     "If a rule names an owner for this category, they get it. Optional: most categories have none."),
+    ("2 — Someone in the ticket's branch",
+     "Of the people left, whoever in that branch is carrying the fewest open tickets."),
+    ("3 — Anyone assignable",
+     "Failing both, the lightest open queue anywhere."),
+]):
+    y = Inches(2.0) + i * Inches(0.92)
+    _rect(s, Inches(0.62), y, Inches(12.1), Inches(0.8), CREAM)
+    _tb(s, Inches(0.95), y + Inches(0.12), Inches(3.6), Inches(0.3), t, size=12.5, bold=True, color=TEAL)
+    _tb(s, Inches(4.6), y + Inches(0.12), Inches(7.9), Inches(0.6), d, size=11.5, color=INK, spacing=1.2)
+
+_tb(s, Inches(0.62), Inches(4.9), Inches(12.1), Inches(0.28),
+    "TWO RULES THAT HOLD AT EVERY STEP", size=10.5, bold=True, color=ACCENT)
+for i, (ttl, d) in enumerate([
+    ("Agents before supervisors",
+     "Ranking on workload alone sends everything to whoever is idlest, which is reliably a "
+     "supervisor — they carry no queue of their own — and frontline work would skip the agents entirely."),
+    ("Nobody on leave, ever",
+     "A category rule naming someone who is away is skipped rather than obeyed. Parking tickets "
+     "on an absent person is worse than having no rule."),
+]):
+    y = Inches(5.22) + i * Inches(0.86)
+    _rect(s, Inches(0.62), y, Inches(12.1), Inches(0.74), CREAM)
+    _tb(s, Inches(0.9), y + Inches(0.08), Inches(11.6), Inches(0.24), ttl, size=12, bold=True, color=TEAL)
+    _tb(s, Inches(0.9), y + Inches(0.34), Inches(11.6), Inches(0.36), d, size=10.5, color=MUTE, spacing=1.15)
+footer(s, "Supervisor")
+
+s = content("The ticket nobody picked up", "Why moving assignment to a person does not risk the SLA")
+_rect(s, Inches(0.6), Inches(1.35), Inches(12.1), Inches(1.3), CREAM)
+_rect(s, Inches(0.6), Inches(1.35), Inches(0.06), Inches(1.3), ACCENT)
+_tb(s, Inches(0.95), Inches(1.58), Inches(11.4), Inches(0.9),
+    "SLA deadlines are stamped when the ticket is raised, and the clock runs from that "
+    "moment. If assignment waited for a person and nobody was on shift, a ticket raised "
+    "overnight could breach — and then escalate — without ever having had an owner.",
+    size=13, color=INK, spacing=1.3)
+for i, (t, d) in enumerate([
+    ("The safety net",
+     "A background worker assigns anything still unassigned after a set delay, using the same router."),
+    ("You set the delay",
+     "An admin sets it while the system is running — two hours by default, anywhere from fifteen minutes to a week."),
+    ("It never overrides you",
+     "It only touches tickets with no owner. It never reassigns one somebody has already given out."),
+]):
+    y = Inches(3.0) + i * Inches(0.92)
+    _rect(s, Inches(0.6), y, Inches(12.1), Inches(0.8), WHITE, LINE)
+    _tb(s, Inches(0.9), y + Inches(0.12), Inches(3.0), Inches(0.3), t, size=12.5, bold=True, color=TEAL)
+    _tb(s, Inches(3.9), y + Inches(0.12), Inches(8.6), Inches(0.6), d, size=11.5, color=INK, spacing=1.2)
+_tb(s, Inches(0.6), Inches(5.95), Inches(12.1), Inches(0.6),
+    "So the window is yours to triage in, not a gap. Shorten it if tickets sit too long; "
+    "lengthen it if the system is assigning work your supervisors wanted to place themselves.",
+    size=11.5, color=MUTE, spacing=1.25)
+footer(s, "Supervisor")
 
 s = content("How escalation actually fires", "Nobody has to be watching for this to happen")
 _rect(s, Inches(0.6), Inches(1.35), Inches(12.1), Inches(1.15), CREAM)
@@ -837,22 +932,39 @@ section("09", "Admin workflow", "You decide who exists, what they may do, and ho
 
 workflow("41-admin-users.png", "Manage users",  "Create a user, set their role, and place them in an org unit.",
    "The role decides what they may do. There are no per-user permission overrides.",
-   "Step 18 — shape the organisation.", "Admin")
+   "{next} — shape the organisation.", "Admin")
+
+workflow("46-admin-users-availability.png", "See who is available",
+   "Read the Availability column before wondering why work is not reaching someone.",
+   "Availability and Active are different columns because they mean different things. "
+   "Active is whether the account works at all; availability is whether the router "
+   "sends new tickets there. Someone on leave can still sign in and finish what they "
+   "already hold.",
+   "Record a leave window with the Leave button.", "Admin")
+
+workflow("47-admin-leave-dialog.png", "Record a leave window",
+   "Enter the first and last day away, then save.",
+   "Auto-assign skips them for that window and starts including them again the day "
+   "after it ends — nobody has to remember to switch them back on. A supervisor can "
+   "still assign to them deliberately, which is why they stay in the list rather than "
+   "disappearing from it.",
+   "{next} — shape the organisation.", "Admin",
+   extra_note="Supervisors can set leave too — rota changes should not wait for an admin.")
 
 workflow("42-admin-org.png", "Shape the organisation",  "Define hierarchy levels, then units within them.",
    "The org tree drives ticket visibility: a user sees their unit's subtree, "
    "plus anything assigned to them personally.",
-   "Step 19 — maintain the branch network.", "Admin")
+   "{next} — maintain the branch network.", "Admin")
 
 workflow("43-admin-branches.png", "Maintain the branch network",  "Add branches, set managers and capacity, and mark degraded ones.",
    "Ticket counts are computed per request, never stored — a counter that "
    "drifts is wrong forever with nothing to reveal it.",
-   "Step 20 — pull reports.", "Admin")
+   "{next} — pull reports.", "Admin")
 
 workflow("44-admin-reports.png", "Pull reports",  "Choose a period, then export.",
    "The export is generated from what is on screen, so it matches the filters "
    "you applied rather than silently re-running an unfiltered query.",
-   "Step 21 — protect your own account.", "Admin")
+   "{next} — protect your own account.", "Admin")
 
 workflow("45-admin-security.png", "Turn on your second factor",  "Open Security, scan the QR code, and enter one code to confirm.",
    "MFA is only switched on once a correct code proves the app is working — "
@@ -886,12 +998,12 @@ section("10", "Auditor workflow", "You can open everything and change nothing. E
 workflow("50-auditor-dashboard.png", "See the whole picture",  "Sign in and read the dashboard.",
    "Auditors have full visibility. What they do not have is any way to change "
    "what they are looking at.",
-   "Step 23 — open the audit trail.", "Auditor")
+   "{next} — open the audit trail.", "Auditor")
 
 workflow("51-auditor-audit-log.png", "Read the audit trail",  "Filter to the entity or person you are reviewing.",
    "Every state change writes a row: actor, role, IP, request id, and the "
    "values before and after.",
-   "Step 24 — inspect any ticket.", "Auditor")
+   "{next} — inspect any ticket.", "Auditor")
 
 workflow("52-auditor-tickets.png", "Inspect any ticket",  "Open any ticket and read its comments, attachments and timeline.",
    "Internal notes are visible to an auditor. Write controls are not offered, "
@@ -999,7 +1111,8 @@ for title, kicker, rows in [
     ("Scenario A — a duplicated debit",
      "The everyday case: raised with evidence, worked, resolved",
      [("Branch user", "Raises the ticket with a screenshot, the statement and a CSV of the transactions"),
-      ("System", "Numbers it, stamps SLA deadlines, assigns the agent with the lightest queue"),
+      ("System", "Numbers it and stamps both SLA deadlines. It does not pick an owner"),
+      ("Supervisor", "Assigns it — by hand, or with Auto-assign to take the lightest queue"),
       ("Agent", "Moves it to In Progress, checks the evidence, confirms the duplicate"),
       ("Agent", "Replies with the corrected statement attached to that reply, then resolves"),
       ("Branch user", "Sees the explanation and the corrected file together, and the ticket closes")]),
@@ -1045,7 +1158,7 @@ table(s, Inches(0.5), Inches(1.25), Inches(12.3),
       ["Status", "Means", "Set by"],
       [["new", "Raised, not yet looked at", "System, on creation"],
        ["acknowledged", "Seen, not yet owned", "Agent"],
-       ["assigned", "Has an owner", "System or agent"],
+       ["assigned", "Has an owner", "Supervisor, or agent; system after the delay"],
        ["in_progress", "Actively being worked", "Agent"],
        ["on_hold", "Waiting on someone outside the team", "Agent"],
        ["escalated", "Handed up — by hand or by SLA breach", "Agent, or the SLA worker"],
@@ -1061,6 +1174,9 @@ table(s, Inches(0.5), Inches(1.25), Inches(12.3),
       [["Raise a problem", "Tickets → New Ticket", "Everyone"],
        ["Follow my ticket", "Tickets → open it", "Everyone (own only, for branch users)"],
        ["Find what is breaching", "Dashboard → SLA Breached tile", "Agent and above"],
+       ["Give a ticket an owner", "Ticket → Assignee → Assign", "Agent and above"],
+       ["Let the router choose", "Ticket → Assignee → Auto-assign", "Supervisor, admin"],
+       ["Say someone is away", "Users → Leave", "Supervisor, admin"],
        ["See what escalated", "Escalations", "Supervisor, admin"],
        ["Check deadlines", "SLA Monitor", "Supervisor, admin"],
        ["Add or change a user", "Users", "Admin"],
