@@ -37,7 +37,9 @@ from app.api.v1.routes import (
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
+from app.middleware.body_limit import BodySizeLimitMiddleware
 from app.middleware.request_context import RequestContextMiddleware
+from app.services import storage_service
 from app.workers.assignment_worker import (
     setup_assignment_worker,
     shutdown_assignment_worker,
@@ -86,6 +88,20 @@ def create_app() -> FastAPI:
         expose_headers=["X-Request-ID"],
     )
     app.add_middleware(RequestContextMiddleware)
+
+    # Outermost of the two, so an oversized body is refused before request
+    # context, routing, or dependency resolution runs — FastAPI parses a
+    # multipart body before it solves dependencies, so the auth check is not
+    # early enough to be the gate here.
+    app.add_middleware(
+        BodySizeLimitMiddleware,
+        default_limit=storage_service.MAX_UPLOAD_BYTES,
+        limits={
+            # The knowledge base legitimately takes larger files than ticket
+            # attachments; the wider cap stays scoped to it.
+            "/api/v1/kb/": settings.KB_MAX_UPLOAD_BYTES,
+        },
+    )
 
     register_exception_handlers(app)
 

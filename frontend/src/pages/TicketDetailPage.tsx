@@ -367,7 +367,12 @@ export function TicketDetailPage() {
             <PriorityBadge priority={ticket.priority} />
             <SLABadge breached={ticket.sla_breached} dueAt={ticket.resolution_due_at} />
             {(ticket.ai_category || ticket.ai_risk_score !== null) && (
-              <AIBadge category={ticket.ai_category} confidence={ticket.ai_confidence} riskScore={ticket.ai_risk_score} />
+              <AIBadge
+                category={ticket.ai_category}
+                confidence={ticket.ai_confidence}
+                riskScore={ticket.ai_risk_score}
+                riskBand={ticket.ai_risk_band}
+              />
             )}
           </div>
           <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-100 leading-snug">

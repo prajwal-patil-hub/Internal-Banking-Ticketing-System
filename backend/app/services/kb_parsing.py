@@ -34,6 +34,18 @@ log = get_logger(__name__)
 #: upload time rather than stored and found unparseable later.
 SUPPORTED_EXTENSIONS: frozenset[str] = frozenset({"pdf", "docx", "txt", "md", "csv"})
 
+#: Largest total text a single document may expand to.
+#:
+#: DOCX is a zip, and deflate reaches roughly 1000:1 on repetitive XML, so a
+#: 40 MB upload that passes the size check can expand to tens of gigabytes
+#: while python-docx reads each part fully into memory. The upload limit
+#: bounds what arrives; this bounds what it becomes.
+MAX_EXPANDED_CHARS = 20 * 1024 * 1024
+
+#: Pages read from one PDF. Text extraction is synchronous and in-request, so
+#: an unbounded page count is a slow-loris that needs no malformed input.
+MAX_PDF_PAGES = 2000
+
 
 @dataclass
 class Block:
@@ -166,8 +178,17 @@ def _parse_pdf(data: bytes) -> ParsedDocument:
                 "Upload an unprotected copy."
             ) from exc
 
+    page_count = len(reader.pages)
+    if page_count > MAX_PDF_PAGES:
+        raise ValidationError(
+            f"This PDF has {page_count:,} pages, over the {MAX_PDF_PAGES:,} "
+            "limit. Text extraction runs inside the request, so a document "
+            "this long would stall the API. Split it into parts."
+        )
+
     blocks: list[Block] = []
     empty_pages = 0
+    extracted_chars = 0
 
     for page_no, page in enumerate(reader.pages, start=1):
         try:
@@ -179,6 +200,14 @@ def _parse_pdf(data: bytes) -> ParsedDocument:
         if not text.strip():
             empty_pages += 1
             continue
+
+        extracted_chars += len(text)
+        if extracted_chars > MAX_EXPANDED_CHARS:
+            raise ValidationError(
+                f"This PDF expands to more than "
+                f"{MAX_EXPANDED_CHARS // 1_048_576} MB of text, which is more "
+                "than the knowledge base will index from one document."
+            )
 
         for raw in text.splitlines():
             line = raw.strip()
@@ -198,8 +227,6 @@ def _parse_pdf(data: bytes) -> ParsedDocument:
             else:
                 blocks.append(Block(kind="text", text=line, page=page_no))
 
-    page_count = len(reader.pages)
-
     # Every page empty means a scan (or a broken text layer). Indexing that
     # produces a document that exists, retrieves nothing, and looks like a bug
     # in retrieval rather than a bad upload.
@@ -216,11 +243,46 @@ def _parse_pdf(data: bytes) -> ParsedDocument:
 # DOCX
 # ---------------------------------------------------------------------------
 
+def _reject_zip_bomb(data: bytes) -> None:
+    """Refuse an archive whose declared expansion is absurd.
+
+    Reads only the central directory: `file_size` is metadata, so nothing is
+    decompressed to make this decision. Both an absolute cap and a ratio cap
+    apply — a small file with a huge ratio and a large file with a modest one
+    are both ways to arrive at the same out-of-memory.
+    """
+    import zipfile
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            total = sum(info.file_size for info in archive.infolist())
+    except zipfile.BadZipFile as exc:
+        raise ValidationError(
+            "This file is not a readable Word document."
+        ) from exc
+
+    if total > MAX_EXPANDED_CHARS:
+        raise ValidationError(
+            f"This document expands to {total / 1_048_576:.0f} MB, over the "
+            f"{MAX_EXPANDED_CHARS // 1_048_576} MB limit. Split it into parts."
+        )
+    if data and total / len(data) > 200:
+        raise ValidationError(
+            "This document's compression ratio is implausible for a Word file "
+            "and it has been refused as a safety measure."
+        )
+
+
 def _parse_docx(data: bytes) -> ParsedDocument:
     try:
         import docx  # type: ignore[import-untyped]
     except ImportError as exc:  # pragma: no cover - dependency is pinned
         raise ValidationError("DOCX support requires the `python-docx` package.") from exc
+
+    # Inspect the zip directory before handing the bytes to python-docx, which
+    # reads each part fully into memory. The directory declares uncompressed
+    # sizes, so the bomb is detectable without decompressing anything.
+    _reject_zip_bomb(data)
 
     try:
         document = docx.Document(io.BytesIO(data))

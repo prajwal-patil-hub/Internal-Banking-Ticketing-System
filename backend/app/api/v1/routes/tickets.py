@@ -22,6 +22,7 @@ from app.models.escalation import EscalationEvent, EscalationTrigger
 from app.models.ticket import (
     AI_RISK_HIGH_THRESHOLD,
     AI_RISK_MEDIUM_THRESHOLD,
+    risk_band,
     Ticket,
     TicketSource,
     TicketStatus,
@@ -206,6 +207,9 @@ def _serialize_ticket(ticket: Ticket) -> dict:
         "ai_confidence": ticket.ai_confidence,
         "ai_summary": ticket.ai_summary,
         "ai_risk_score": ticket.ai_risk_score,
+        # Banded server-side; see `risk_band` for why the client must not
+        # compute this from the score itself.
+        "ai_risk_band": risk_band(ticket.ai_risk_score),
         "ai_sentiment": ticket.ai_sentiment,
         "sla_policy_id": str(ticket.sla_policy_id) if ticket.sla_policy_id else None,
         "response_due_at": ticket.response_due_at.isoformat() if ticket.response_due_at else None,

@@ -40,6 +40,8 @@ export interface Ticket {
   ai_confidence: number | null;
   ai_summary: string | null;
   ai_risk_score: number | null;
+  /** Banded by the server so the client never re-derives it. */
+  ai_risk_band: 'high' | 'medium' | 'low' | null;
   ai_sentiment: string | null;
   email_from: string | null;
   sla_breached: boolean;
@@ -64,6 +66,8 @@ export interface TicketSummary {
   assignee_id: string | null;
   sla_breached: boolean;
   ai_risk_score: number | null;
+  /** Banded by the server so the client never re-derives it. */
+  ai_risk_band: 'high' | 'medium' | 'low' | null;
   created_at: string;
 }
 
