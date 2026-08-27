@@ -9,6 +9,15 @@ from app.models.branch import Branch  # noqa: F401
 from app.models.comment import TicketComment  # noqa: F401
 from app.models.email_intake import InboundEmail  # noqa: F401
 from app.models.escalation import EscalationEvent, EscalationRule  # noqa: F401
+from app.models.knowledge import (  # noqa: F401
+    KBChunk,
+    KBCollection,
+    KBCollectionGrant,
+    KBDocument,
+    KBDocumentVersion,
+    KBQueryLog,
+    KBVersionStatus,
+)
 from app.models.mfa import MFABackupCode  # noqa: F401
 from app.models.org import HierarchyLevel, OrgRole, OrgUnit, TicketSequence  # noqa: F401
 from app.models.role import Permission, Role, RolePermission  # noqa: F401
