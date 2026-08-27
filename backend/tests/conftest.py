@@ -45,3 +45,44 @@ async def db_session() -> AsyncSession:
         await transaction.rollback()
         await connection.close()
         await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def committing_session() -> AsyncSession:
+    """A session that really commits, for code that rolls back internally.
+
+    `db_session` wraps every test in an outer transaction it rolls back at the
+    end. That is the right default, but it cannot be used to test a service
+    that calls `rollback()` itself — the service's rollback unwinds the
+    fixture's transaction too, taking the test's own fixtures with it and
+    leaving detached objects behind.
+
+    So this one commits for real and cleans up afterwards by deleting the
+    knowledge-base collections created during the test, which cascades to
+    documents, versions and chunks. Slower and less isolated; used only where
+    the rollback behaviour *is* the thing under test.
+    """
+    if not DATABASE_URL:
+        pytest.skip("DATABASE_URL is not set; database-backed tests need one.")
+
+    engine = create_async_engine(DATABASE_URL, poolclass=None)
+    session = async_sessionmaker(engine, expire_on_commit=False)()
+
+    from sqlalchemy import delete, select
+
+    from app.models.knowledge import KBCollection
+
+    before = set((await session.execute(select(KBCollection.id))).scalars().all())
+    try:
+        yield session
+    finally:
+        try:
+            await session.rollback()
+            after = set((await session.execute(select(KBCollection.id))).scalars().all())
+            new = after - before
+            if new:
+                await session.execute(delete(KBCollection).where(KBCollection.id.in_(new)))
+                await session.commit()
+        finally:
+            await session.close()
+            await engine.dispose()

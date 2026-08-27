@@ -22,10 +22,10 @@ from app.models.escalation import EscalationEvent, EscalationTrigger
 from app.models.ticket import (
     AI_RISK_HIGH_THRESHOLD,
     AI_RISK_MEDIUM_THRESHOLD,
-    risk_band,
     Ticket,
     TicketSource,
     TicketStatus,
+    risk_band,
 )
 from app.models.ticket import OPEN_STATUSES as _OPEN_STATUSES
 from app.models.user import User

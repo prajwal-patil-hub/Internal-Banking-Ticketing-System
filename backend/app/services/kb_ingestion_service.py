@@ -289,11 +289,21 @@ class KBIngestionService:
             return version
 
         except Exception as exc:
+            # Read the identifiers BEFORE rolling back. `rollback()` expires
+            # every object in the session, so touching `version.id` afterwards
+            # triggers a synchronous lazy load and raises MissingGreenlet from
+            # inside the error handler — the failure path would then crash
+            # instead of marking the version FAILED, and the document would sit
+            # in PROCESSING for ever. A mocked session never expires anything,
+            # which is why only a real database surfaced this.
+            version_id = version.id
+            document_id = document.id
+
             # Discard the half-written chunk rows, then record the failure on a
             # clean session. The previous active version is untouched, so the
             # collection keeps answering from the last good copy.
             await self.db.rollback()
-            failed = await self.db.get(KBDocumentVersion, version.id)
+            failed = await self.db.get(KBDocumentVersion, version_id)
             if failed is not None:
                 failed.status = KBVersionStatus.FAILED.value
                 failed.error_message = str(exc)[:2000]
@@ -301,8 +311,9 @@ class KBIngestionService:
                 await self.db.refresh(failed)
             log.warning(
                 "kb.ingestion_failed",
-                document_id=str(document.id),
-                version_id=str(version.id),
+                # Captured ids, not the expired ORM objects — see above.
+                document_id=str(document_id),
+                version_id=str(version_id),
                 error=str(exc),
             )
             raise
