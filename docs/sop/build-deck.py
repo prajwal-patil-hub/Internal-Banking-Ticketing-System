@@ -371,9 +371,27 @@ def workflow(shot, title, action, result, nxt, role_tag, extra_note=None):
         for c in sorted(row, key=lambda c: (c.get("x0", c.get("x", 0)), _marker_y(c)))
     ]
 
-    img_x, img_y, img_w = Inches(0.45), Inches(1.3), Inches(8.5)
-    img_h = img_w * 900 / 1440
+    img_x, img_y = Inches(0.45), Inches(1.3)
     path = SHOTS / shot
+    # The image is fitted inside a box rather than pinned to one width, and its
+    # height is read off the file rather than assumed to be 1440x900.
+    #
+    # The constant was correct for every screen captured at that viewport and
+    # silently wrong for anything else. `add_picture` honours the real aspect,
+    # so a taller screenshot drew past the height the markers were positioned
+    # against — every marker landed high by a margin that grew down the slide.
+    # Capping the height as well as the width keeps a tall screen inside the
+    # slide and preserves the gap the note strip sits in.
+    MAX_W, MAX_H = Inches(8.5), Inches(5.25)
+    if path.exists():
+        with Image.open(path) as _probe:
+            ratio = _probe.height / _probe.width
+    else:
+        ratio = 900 / 1440
+    img_w, img_h = MAX_W, Emu(int(MAX_W * ratio))
+    if img_h > MAX_H:
+        img_h = MAX_H
+        img_w = Emu(int(MAX_H / ratio))
     if path.exists():
         _rect(s, img_x - Inches(0.025), img_y - Inches(0.025),
               img_w + Inches(0.05), img_h + Inches(0.05), LINE)
@@ -1150,10 +1168,91 @@ _tb(s, Inches(0.6), Inches(6.15), Inches(12.1), Inches(0.7),
     "application. The message it shows includes the specific fix.", size=11.5, color=MUTE, spacing=1.25)
 footer(s, "Assistant")
 
+
 # ===========================================================================
-# 13 — Scenarios
+# 13 — Knowledge base
 # ===========================================================================
-section("13", "Common scenarios", "Four situations, start to finish, naming who does what at each hop.")
+section("13", "The knowledge base",
+        "Ask a question, get an answer with the passage it came from. "
+        "Administrators decide which documents exist and who may search them.")
+
+s = content("Why this is not just a search box", "Three properties the server enforces, not the prompt")
+for i, (t, d, col) in enumerate([
+    ("It can only quote what you may already read",
+     "Access is applied to the search itself, before anything is generated. A passage your role "
+     "has not been granted is never retrieved, so it cannot appear in an answer — you get the same "
+     "response as if the document did not exist.", OK),
+    ("Every claim carries its source",
+     "Each factual sentence is marked with the passage it came from, and you can open that "
+     "document, section and page to check it. If the assistant produces a source that does not "
+     "exist, the sentence it supported is removed before you see it.", OK),
+    ("It refuses rather than guessing",
+     "When the documents do not cover your question it says so and stops. That is the correct "
+     "answer, not a failure — and it names what would help, such as asking an administrator "
+     "whether the relevant document has been uploaded.", ACCENT),
+]):
+    y = Inches(1.4) + i * Inches(1.55)
+    _rect(s, Inches(0.6), y, Inches(12.1), Inches(1.32), CREAM, LINE)
+    _rect(s, Inches(0.6), y, Inches(0.06), Inches(1.32), col)
+    _tb(s, Inches(0.95), y + Inches(0.18), Inches(11.4), Inches(0.3), t, size=14, bold=True, color=col)
+    _tb(s, Inches(0.95), y + Inches(0.56), Inches(11.4), Inches(0.7), d, size=12, color=INK, spacing=1.25)
+_tb(s, Inches(0.6), Inches(6.15), Inches(12.1), Inches(0.7),
+    "Find it in the sidebar under Knowledge Base. Agents, supervisors and administrators can ask "
+    "questions; only administrators can upload documents or change who may search a collection.",
+    size=11.5, color=MUTE, spacing=1.25)
+footer(s, "Knowledge base")
+
+workflow("70-kb-answer.png", "Ask the knowledge base",
+   "Type your question in plain words and select Ask. There is no query syntax and no filters.",
+   "You get an answer with a confidence band, and every factual sentence marked with the passage "
+   "it came from. Cited sources are listed below with their document, section and page.",
+   "{next} — read what it retrieved but did not use.", "Agent & above")
+
+workflow("70-kb-answer.png", "Check the answer",
+   "Read the cited sources, and the passages listed under Also retrieved, not cited.",
+   "The second list is what the search considered and the answer did not use. Seeing both tells "
+   "you how much was weighed; a thin list is a reason to treat the answer carefully.",
+   "{next} — what happens when it has nothing.", "Agent & above",
+   "The confidence band is computed from the evidence, not asked of the assistant.")
+
+workflow("72-kb-abstain.png", "When it declines",
+   "Ask something the uploaded documents do not cover.",
+   "It reports that it has no grounded answer and explains why, rather than producing something "
+   "plausible. Try different wording, or ask an administrator whether the document exists.",
+   "{next} — administrators: stocking the base.", "Agent & above")
+
+workflow("71-kb-documents.png", "Upload and grant access",
+   "Select a collection, choose Upload document, then set which roles may search it.",
+   "The file is parsed, split into passages and indexed. It becomes searchable only once every "
+   "passage is indexed — a document is never half-available.",
+   "{next} — the two states worth knowing.", "Admin only")
+
+s = content("Two states you will meet", "Both are the system being honest rather than broken")
+for i, (t, d, col) in enumerate([
+    ("\u201cNo roles granted \u2014 not searchable\u201d",
+     "A new collection is readable by nobody until you grant a role. It will accept uploads and "
+     "answer nothing until you do, so the list says so rather than leaving you to wonder why "
+     "search returns silence.", ACCENT),
+    ("A document marked Failed, with the reason",
+     "Most often a scanned PDF with no text layer, or the local model being unreachable. The "
+     "previous version of that document keeps answering throughout \u2014 select Re-index once the "
+     "cause is fixed.", ACCENT),
+]):
+    y = Inches(1.5) + i * Inches(1.9)
+    _rect(s, Inches(0.6), y, Inches(12.1), Inches(1.62), CREAM, LINE)
+    _rect(s, Inches(0.6), y, Inches(0.06), Inches(1.62), col)
+    _tb(s, Inches(0.95), y + Inches(0.2), Inches(11.4), Inches(0.3), t, size=14, bold=True, color=col)
+    _tb(s, Inches(0.95), y + Inches(0.6), Inches(11.4), Inches(0.9), d, size=12, color=INK, spacing=1.25)
+_tb(s, Inches(0.6), Inches(5.6), Inches(12.1), Inches(1.1),
+    "Branch users and auditors cannot search the knowledge base at all, and there is no navigation "
+    "entry for them. It holds internal staff procedure, and an auditor is an oversight role rather "
+    "than a working one.", size=11.5, color=MUTE, spacing=1.3)
+footer(s, "Knowledge base")
+
+# ===========================================================================
+# 14 — Scenarios
+# ===========================================================================
+section("14", "Common scenarios", "Four situations, start to finish, naming who does what at each hop.")
 
 for title, kicker, rows in [
     ("Scenario A — a duplicated debit",
@@ -1205,9 +1304,9 @@ for title, kicker, rows in [
     footer(s, "Scenarios")
 
 # ===========================================================================
-# 14 — Quick reference
+# 15 — Quick reference
 # ===========================================================================
-section("14", "Quick reference", "The desk copy. Statuses, who does what, and where things live.")
+section("15", "Quick reference", "The desk copy. Statuses, who does what, and where things live.")
 
 s = content("Status reference", "Who can move a ticket into each state, and what it means")
 table(s, Inches(0.5), Inches(1.25), Inches(12.3),

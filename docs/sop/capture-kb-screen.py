@@ -316,9 +316,92 @@ def main() -> int:
             )
             page.wait_for_timeout(150)
 
-            target = OUT / "70-knowledge-base.png"
-            page.screenshot(path=str(target), full_page=True)
-            print(f"saved {target}")
+            shots = {}
+
+            def grab(key, filename, callouts):
+                """Screenshot plus the on-screen position of each callout target.
+
+                Positions are measured from the live DOM rather than guessed as
+                percentages — the first version of this deck guessed, and put
+                markers beside controls instead of on them.
+                """
+                page.wait_for_timeout(250)
+                # Viewport capture, not full page. Every other screen in the
+                # deck is a 1440x900 viewport shot; a full-page capture of this
+                # long screen comes out near-square and overflows the slide.
+                box = page.evaluate("() => ({w: innerWidth, h: innerHeight})")
+                recorded = []
+                for label, selector in callouts:
+                    loc = page.locator(selector).first
+                    if loc.count() == 0:
+                        print(f"  ! {key}: no match for {selector!r} — callout dropped")
+                        continue
+                    # getBoundingClientRect is viewport-relative, which is what
+                    # the fractions must be measured against now that the
+                    # screenshot is the viewport rather than the document.
+                    r = loc.evaluate(
+                        "el => { const b = el.getBoundingClientRect();"
+                        " return {x: b.x, y: b.y, width: b.width, height: b.height}; }"
+                    )
+                    if r["y"] < 0 or r["y"] + r["height"] > box["h"]:
+                        print(f"  ! {key}: {selector!r} outside the viewport — callout dropped")
+                        continue
+                    recorded.append({
+                        "label": label,
+                        "x0": round(r["x"] / box["w"], 4),
+                        "y0": round(r["y"] / box["h"], 4),
+                        "w": round(r["width"] / box["w"], 4),
+                        "h": round(r["height"] / box["h"], 4),
+                        "x": round((r["x"] + r["width"] / 2) / box["w"], 4),
+                        "y": round((r["y"] + r["height"] / 2) / box["h"], 4),
+                    })
+                page.screenshot(path=str(OUT / filename))
+                shots[key] = {"file": filename, "callouts": recorded}
+                print(f"saved {OUT / filename} ({len(recorded)} callouts)")
+
+            page.evaluate("() => scrollTo(0, 0)")
+            page.wait_for_timeout(250)
+            grab("70-kb-answer", "70-kb-answer.png", [
+                ("Ask in plain words — no query syntax", "input[aria-label='Your question for the knowledge base']"),
+                ("Confidence, computed from the evidence", "text=High confidence"),
+                ("Cited sources: document, section, page", "text=CITED SOURCES"),
+                ("Also retrieved but not cited", "text=ALSO RETRIEVED, NOT CITED"),
+            ])
+
+            # Curation half: scroll so the collection and document cards are in view.
+            page.get_by_text("Documents", exact=True).first.scroll_into_view_if_needed()
+            page.mouse.wheel(0, 120)
+            page.wait_for_timeout(400)
+            grab("71-kb-documents", "71-kb-documents.png", [
+                ("Upload PDF, Word, Markdown, text or CSV", "button:has-text('Upload document')"),
+                ("Which roles may search this collection", "text=WHO CAN SEARCH THIS COLLECTION"),
+                ("A collection nobody can read is flagged", "text=No roles granted"),
+                ("A document that failed says why", "text=scanned image"),
+            ])
+
+            # An answer the system declined to give.
+            page.get_by_label("Your question for the knowledge base").fill(
+                "What is the staff car parking policy?")
+            page.route("**/api/v1/kb/query", lambda r: r.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps(envelope({**ANSWER, "answer": None, "abstained": True,
+                                          "abstain_reason": "no_passages", "confidence": 0.0,
+                                          "confidence_band": "low", "sources": []}))))
+            page.get_by_role("button", name="Ask", exact=True).click()
+            page.wait_for_selector("text=No grounded answer", timeout=15000)
+            page.evaluate("() => scrollTo(0, 0)")
+            page.wait_for_timeout(400)
+            grab("72-kb-abstain", "72-kb-abstain.png", [
+                ("It says so and stops, rather than guessing",
+                 "text=No grounded answer"),
+            ])
+
+            # Merge into the deck manifest so build-deck.py can use these.
+            manifest_path = OUT / "manifest.json"
+            manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
+            manifest.update(shots)
+            manifest_path.write_text(json.dumps(manifest, indent=2))
+            print(f"manifest updated: {len(shots)} knowledge-base screens")
 
             browser.close()
     finally:

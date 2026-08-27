@@ -683,5 +683,101 @@
         "y": 0.3392
       }
     ]
+  },
+  "70-kb-answer": {
+    "file": "70-kb-answer.png",
+    "callouts": [
+      {
+        "label": "Ask in plain words \u2014 no query syntax",
+        "x0": 0.1889,
+        "y0": 0.3905,
+        "w": 0.7274,
+        "h": 0.039,
+        "x": 0.5526,
+        "y": 0.41
+      },
+      {
+        "label": "Confidence, computed from the evidence",
+        "x0": 0.1889,
+        "y0": 0.4625,
+        "w": 0.0894,
+        "h": 0.02,
+        "x": 0.2336,
+        "y": 0.4725
+      },
+      {
+        "label": "Cited sources: document, section, page",
+        "x0": 0.1889,
+        "y0": 0.56,
+        "w": 0.7806,
+        "h": 0.0165,
+        "x": 0.5792,
+        "y": 0.5683
+      },
+      {
+        "label": "Also retrieved but not cited",
+        "x0": 0.1889,
+        "y0": 0.7235,
+        "w": 0.7806,
+        "h": 0.0165,
+        "x": 0.5792,
+        "y": 0.7318
+      }
+    ]
+  },
+  "71-kb-documents": {
+    "file": "71-kb-documents.png",
+    "callouts": [
+      {
+        "label": "Upload PDF, Word, Markdown, text or CSV",
+        "x0": 0.7761,
+        "y0": 0.4985,
+        "w": 0.1242,
+        "h": 0.038,
+        "x": 0.8382,
+        "y": 0.5175
+      },
+      {
+        "label": "Which roles may search this collection",
+        "x0": 0.4,
+        "y0": 0.5735,
+        "w": 0.5694,
+        "h": 0.0165,
+        "x": 0.6847,
+        "y": 0.5817
+      },
+      {
+        "label": "A collection nobody can read is flagged",
+        "x0": 0.1972,
+        "y0": 0.6405,
+        "w": 0.15,
+        "h": 0.02,
+        "x": 0.2722,
+        "y": 0.6505
+      },
+      {
+        "label": "A document that failed says why",
+        "x0": 0.4,
+        "y0": 0.912,
+        "w": 0.3982,
+        "h": 0.032,
+        "x": 0.5991,
+        "y": 0.928
+      }
+    ]
+  },
+  "72-kb-abstain": {
+    "file": "72-kb-abstain.png",
+    "callouts": [
+      {
+        "label": "It says so and stops, rather than guessing",
+        "x0": 0.2007,
+        "y0": 0.4755,
+        "w": 0.7569,
+        "h": 0.02,
+        "x": 0.5792,
+        "y": 0.4855
+      }
+    ]
   }
 }
