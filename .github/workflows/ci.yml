@@ -116,6 +116,21 @@ jobs:
       - name: Pytest
         run: pytest -q
 
+      # The knowledge-base golden set is NOT run here, and that is deliberate.
+      # Scoring retrieval needs a live embedding model; without one every query
+      # returns nothing and every access-control case "passes" because nothing
+      # was retrieved for anybody. `run_eval` refuses rather than printing
+      # numbers it cannot stand behind, so wiring it in here would either fail
+      # the build permanently or tempt someone into a --no-gates flag.
+      #
+      # What is gated on every change is the harness itself — the scoring
+      # maths, the leak detector, and the golden set being well-formed — which
+      # runs above as tests/test_kb_eval_harness.py against a stub embedder.
+      # Run the real evaluation where a model exists:
+      #     python -m evals.run_eval --build --with-model
+      - name: Golden-set harness self-check
+        run: pytest -q tests/test_kb_eval_harness.py
+
   frontend:
     name: Frontend — typecheck & build
     runs-on: ubuntu-latest

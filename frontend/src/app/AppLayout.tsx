@@ -16,28 +16,82 @@ interface NavItem {
   badge?: string;
 }
 
-const NAV: NavItem[] = [
-  { to: '/dashboard',   label: 'Dashboard',   icon: 'M3 12l9-9 9 9M5 10v10h14V10', badge: 'AI' },
-  { to: '/tickets',     label: 'Tickets',     icon: 'M4 7h16M4 12h16M4 17h10' },
-  { to: '/sla',         label: 'SLA Monitor', icon: 'M12 8v4l3 2M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
-    roles: ['admin', 'supervisor'] },
-  { to: '/escalations', label: 'Escalations', icon: 'M12 9v4M12 17h.01M4.93 19h14.14L12 5z',
-    roles: ['admin', 'supervisor'] },
-  { to: '/knowledge',   label: 'Knowledge Base', icon: 'M4 5a2 2 0 012-2h12v18H6a2 2 0 01-2-2zM8 7h8M8 11h6',
-    roles: ['admin', 'supervisor', 'agent'] },
-  { to: '/branches',    label: 'Branches',    icon: 'M3 21h18M5 21V8l7-5 7 5v13M9 21v-6h6v6',
-    roles: ['admin', 'supervisor'] },
-  { to: '/org',         label: 'Org Hierarchy', icon: 'M3 21V8l9-5 9 5v13M9 21V12h6v9',
-    roles: ['admin'] },
-  { to: '/users',       label: 'Users',       icon: 'M16 11a4 4 0 10-8 0 4 4 0 008 0zM2 21a8 8 0 1116 0',
-    roles: ['admin', 'supervisor'] },
-  { to: '/reports',     label: 'Reports',     icon: 'M9 17v-6M12 17v-4M15 17v-2M5 3h14l1 4H4zM3 7h18v14H3z',
-    roles: ['admin', 'supervisor', 'auditor'] },
-  { to: '/audit',       label: 'Audit Log',   icon: 'M9 12h6M9 16h6M5 4h14v16H5z',
-    roles: ['auditor', 'admin'] },
-  // No `roles`: two-factor authentication is a personal account setting, so
-  // every signed-in user needs to reach it.
-  { to: '/security',    label: 'Security',    icon: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10zM9 12l2 2 4-4' },
+interface NavSection {
+  /** Rendered as a small heading above the group. Null for the top group,
+   *  which needs no label — Dashboard and Tickets are where everyone starts. */
+  title: string | null;
+  items: NavItem[];
+}
+
+/**
+ * The sidebar, grouped.
+ *
+ * It was a flat list of eleven links, which made every destination look
+ * equally weighted: "Knowledge Base" sat between "Escalations" and "Branches"
+ * as though curating the document corpus were the same kind of act as opening
+ * a queue. Grouping states what each area is for, and gives the knowledge base
+ * a home it can grow into rather than one more row.
+ *
+ * A section renders only if the viewer can see at least one item inside it, so
+ * an agent never sees an empty "Administration" heading.
+ */
+const NAV_SECTIONS: NavSection[] = [
+  {
+    title: null,
+    items: [
+      { to: '/dashboard', label: 'Dashboard', icon: 'M3 12l9-9 9 9M5 10v10h14V10', badge: 'AI' },
+      { to: '/tickets',   label: 'Tickets',   icon: 'M4 7h16M4 12h16M4 17h10' },
+    ],
+  },
+  {
+    title: 'Knowledge Base',
+    items: [
+      // Curation is admin-only, but querying is not: the whole point of the
+      // corpus is that agents and supervisors are answered from it. The route
+      // itself hides the upload and grant controls from anyone who cannot use
+      // them — see KnowledgeBasePage.
+      { to: '/knowledge', label: 'Documents & Ask', badge: 'RAG',
+        icon: 'M4 5a2 2 0 012-2h12v18H6a2 2 0 01-2-2zM8 7h8M8 11h6',
+        roles: ['admin', 'supervisor', 'agent'] },
+    ],
+  },
+  {
+    title: 'Operations',
+    items: [
+      { to: '/sla',         label: 'SLA Monitor', icon: 'M12 8v4l3 2M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
+        roles: ['admin', 'supervisor'] },
+      { to: '/escalations', label: 'Escalations', icon: 'M12 9v4M12 17h.01M4.93 19h14.14L12 5z',
+        roles: ['admin', 'supervisor'] },
+      { to: '/branches',    label: 'Branches',    icon: 'M3 21h18M5 21V8l7-5 7 5v13M9 21v-6h6v6',
+        roles: ['admin', 'supervisor'] },
+    ],
+  },
+  {
+    title: 'Administration',
+    items: [
+      { to: '/org',   label: 'Org Hierarchy', icon: 'M3 21V8l9-5 9 5v13M9 21V12h6v9',
+        roles: ['admin'] },
+      { to: '/users', label: 'Users',         icon: 'M16 11a4 4 0 10-8 0 4 4 0 008 0zM2 21a8 8 0 1116 0',
+        roles: ['admin', 'supervisor'] },
+    ],
+  },
+  {
+    title: 'Oversight',
+    items: [
+      { to: '/reports', label: 'Reports',   icon: 'M9 17v-6M12 17v-4M15 17v-2M5 3h14l1 4H4zM3 7h18v14H3z',
+        roles: ['admin', 'supervisor', 'auditor'] },
+      { to: '/audit',   label: 'Audit Log', icon: 'M9 12h6M9 16h6M5 4h14v16H5z',
+        roles: ['auditor', 'admin'] },
+    ],
+  },
+  {
+    title: 'Account',
+    items: [
+      // No `roles`: two-factor authentication is a personal account setting, so
+      // every signed-in user needs to reach it.
+      { to: '/security', label: 'Security', icon: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10zM9 12l2 2 4-4' },
+    ],
+  },
 ];
 
 function Icon({ d, className }: { d: string; className?: string }) {
@@ -66,7 +120,16 @@ export function AppLayout() {
   const nav = useNavigate();
   const [searchValue, setSearchValue] = useState('');
 
-  const visibleNav = NAV.filter((i) => !i.roles || (user && i.roles.includes(user.role)));
+  // Filter items first, then drop any section left empty — otherwise an agent
+  // sees an "Administration" heading with nothing under it.
+  const visibleSections = NAV_SECTIONS
+    .map((section) => ({
+      ...section,
+      items: section.items.filter(
+        (i) => !i.roles || (user && i.roles.includes(user.role)),
+      ),
+    }))
+    .filter((section) => section.items.length > 0);
 
   const onLogout = async () => {
     try { await apiLogout(refreshToken); } catch { /* network errors are fine on logout */ }
@@ -95,28 +158,37 @@ export function AppLayout() {
         </div>
 
         {/* Nav items */}
-        <nav className="flex flex-col gap-0.5 flex-1">
-          {visibleNav.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) =>
-                cn(
-                  'flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm font-medium transition-colors',
-                  isActive
-                    ? 'bg-white/15 text-white border-l-2 border-white shadow-sm'
-                    : 'text-white/80 hover:bg-white/10 hover:text-white',
-                )
-              }
-            >
-              <Icon d={item.icon} />
-              <span className="flex-1 truncate">{item.label}</span>
-              {item.badge && (
-                <span className="px-1.5 py-0.5 rounded bg-white/15 text-white/90 text-[9px] font-bold tracking-wider leading-none">
-                  {item.badge}
-                </span>
+        <nav className="flex flex-col gap-3 flex-1">
+          {visibleSections.map((section) => (
+            <div key={section.title ?? 'main'} className="flex flex-col gap-0.5">
+              {section.title && (
+                <h2 className="px-2.5 pt-1 pb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-white/45">
+                  {section.title}
+                </h2>
               )}
-            </NavLink>
+              {section.items.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  className={({ isActive }) =>
+                    cn(
+                      'flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm font-medium transition-colors',
+                      isActive
+                        ? 'bg-white/15 text-white border-l-2 border-white shadow-sm'
+                        : 'text-white/80 hover:bg-white/10 hover:text-white',
+                    )
+                  }
+                >
+                  <Icon d={item.icon} />
+                  <span className="flex-1 truncate">{item.label}</span>
+                  {item.badge && (
+                    <span className="px-1.5 py-0.5 rounded bg-white/15 text-white/90 text-[9px] font-bold tracking-wider leading-none">
+                      {item.badge}
+                    </span>
+                  )}
+                </NavLink>
+              ))}
+            </div>
           ))}
         </nav>
 

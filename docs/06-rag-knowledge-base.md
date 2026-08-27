@@ -594,3 +594,53 @@ corpus.**
 
 Every later phase depends on that answer, and no amount of architecture
 substitutes for measuring it.
+
+---
+
+## 15. The evaluation harness (added after the build)
+
+`backend/evals/` measures what construction cannot guarantee.
+
+**What it is.** A pinned corpus (`evals/corpus/`), a golden set of questions
+with known answers (`evals/golden_set.yaml`), and a runner
+(`evals/run_eval.py`) that scores retrieval recall, MRR, section accuracy,
+abstention correctness, citation integrity and cross-collection leakage.
+
+**Run it:**
+
+    python -m evals.run_eval --build              # retrieval only
+    python -m evals.run_eval --build --with-model # adds answer generation
+
+**It refuses to run without an embedding model, on purpose.** Retrieval
+filters on `embedding IS NOT NULL`, so with no model every query returns
+nothing — and every access-control case would report a pass because nothing
+was retrieved for anybody. That is a green gate proving nothing, the same
+class of failure as a CI job reporting success on a suite it never executed.
+The harness exits with a message instead.
+
+**Why the corpus is pinned rather than borrowed from the demo seed.** Scoring
+against `seed_dev.py` would mean a screenshot tweak moves retrieval recall for
+reasons nobody can reconstruct. `evals/corpus/` is version-controlled beside
+the questions that reference it, so a score change means the system changed.
+
+**Hard gates** (exit non-zero): any fabricated citation surviving validation,
+any passage retrieved from a collection the caller has no grant on. Neither is
+a quality threshold — both are correctness failures.
+
+**Soft floors:** recall@8 ≥ 80%, abstention accuracy ≥ 90%. Deliberately
+modest. They catch a broken index; they do not certify quality, and raising
+them before an SME review would be scoring a ruler against itself.
+
+**In CI:** the harness *self-check* runs on every change
+(`tests/test_kb_eval_harness.py`) against a stub embedder — it proves a miss
+scores as a miss, a leak trips the gate, and an unjudged abstention is not
+counted as correct. The golden set itself is not run in CI because no model is
+available there.
+
+**Still open (Q6).** `golden_set.yaml` is marked `reviewed_by: null` and its
+header says STARTER SET. The questions were written by working backwards from
+the corpus, which tests that retrieval finds the passage *a developer* thought
+was relevant. Only someone who works disputes or compliance can say the
+questions are ones staff actually ask and the expected passages are the ones
+they would want. Until then the retrieval numbers are a smoke test and the
+hard gates are the real value.
