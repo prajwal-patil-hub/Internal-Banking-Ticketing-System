@@ -304,6 +304,18 @@ def main() -> int:
                 timeout=15000,
             )
 
+            # The floating chat launcher is fixed to the viewport, so on a
+            # full-page capture it lands in the middle of the document list and
+            # reads as a stray artefact on the slide. It belongs to a different
+            # feature; hide it rather than crop around it.
+            page.evaluate(
+                """() => {
+                    const b = document.querySelector('[aria-label="Open AI Assistant"]');
+                    if (b) b.style.display = 'none';
+                }"""
+            )
+            page.wait_for_timeout(150)
+
             target = OUT / "70-knowledge-base.png"
             page.screenshot(path=str(target), full_page=True)
             print(f"saved {target}")

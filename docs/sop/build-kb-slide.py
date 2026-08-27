@@ -118,7 +118,11 @@ rect(0, 0, W, Inches(0.95), TEAL)
 rect(0, Inches(0.95), W, Inches(0.04), ACCENT)
 tb(Inches(0.55), Inches(0.17), Inches(6), Inches(0.3),
    "THE KNOWLEDGE BASE", size=12, bold=True, color=ACCENT)
-tb(Inches(0.55), Inches(0.46), Inches(9.2), Inches(0.4),
+# Width stops short of the role label's box at x=9.03. The text is shorter
+# than that today, so the two never touched visually — but overlapping boxes
+# are a collision waiting for a longer title, which is what the layout audit
+# flags and why it is worth fixing while it is still cosmetic.
+tb(Inches(0.55), Inches(0.46), Inches(8.30), Inches(0.4),
    "Asking it a question, and keeping it stocked", size=20, bold=True, color=WHITE)
 tb(W - Inches(4.3), Inches(0.35), Inches(3.75), Inches(0.3),
    "ASK: AGENT & ABOVE  ·  UPLOAD: ADMIN", size=11, bold=True, color=CREAM,
@@ -128,45 +132,48 @@ tb(W - Inches(4.3), Inches(0.35), Inches(3.75), Inches(0.3),
 shot = Image.open(SHOTS / "70-knowledge-base.png")
 SW, SH = shot.size
 
-PX, PW = Inches(0.45), Inches(7.10)
+# Markers for left-aligned targets sit in a gutter to the left of the panel.
+# Drawing them over the panel put them on top of the very labels they point at
+# — a marker that obscures its subject is worse than no marker.
+PX, PW = Inches(0.80), Inches(6.75)
+GUTTER_CX = Inches(0.60)
 
 # Panel A — the answering half: question, confidence, answer, sources.
-A_BOX = (int(SW * 0.156), int(SH * 0.150), SW, int(SH * 0.588))
+# Cropped past the sidebar (x) and past the stat strip (y), so the type stays
+# legible at slide scale instead of being shrunk to fit decoration.
+A_BOX = (int(SW * 0.178), int(SH * 0.221), SW, int(SH * 0.590))
 A_Y = Inches(1.22)
 a_h = place(shot, A_BOX, PX, A_Y, PW)
 
 # Panel B — the curating half: collections, grants, document states.
-B_BOX = (int(SW * 0.156), int(SH * 0.609), SW, int(SH * 0.948))
+B_BOX = (int(SW * 0.178), int(SH * 0.609), SW, int(SH * 0.960))
 B_Y = A_Y + a_h + Inches(0.13)
 b_h = place(shot, B_BOX, PX, B_Y, PW)
 
-# Callouts, as (panel, x-fraction, y-fraction, label). Reading order is top to
-# bottom within a panel, and the answering panel comes first because that is
-# the order a reader meets the feature: you ask before you curate.
+# (panel, x-fraction or None for the gutter, y-fraction, label). Reading order
+# is top to bottom within a panel, and the answering panel comes first because
+# that is the order a reader meets the feature: you ask before you curate.
 CALLOUTS = [
-    ("A", 0.045, 0.20, "Ask in plain words — no query syntax"),
-    ("A", 0.085, 0.33, "Confidence band, computed from the evidence\nnot claimed by the model"),
-    ("A", 0.037, 0.42, "Every factual sentence carries its source [n]"),
-    ("A", 0.052, 0.60, "Cited sources: document, section and page"),
-    ("A", 0.052, 0.90, "Also retrieved but not cited — shown so you\ncan see what was weighed"),
-    ("B", 0.790, 0.09, "Admins upload PDF, Word, Markdown, text or CSV"),
-    ("B", 0.305, 0.29, "Which roles may search this collection"),
-    ("B", 0.045, 0.33, "A collection nobody can read is flagged,\nnot left to fail silently"),
-    ("B", 0.280, 0.92, "A document that failed to index says why"),
+    ("A", None,  0.204, "Ask in plain words — no query syntax"),
+    ("A", None,  0.312, "Confidence band, computed from the evidence\nrather than claimed by the model"),
+    ("A", None,  0.428, "Every factual sentence carries its source [n]"),
+    ("A", None,  0.522, "Cited sources: document, section and page"),
+    ("A", None,  0.852, "Also retrieved but not cited — shown so you\ncan see what was weighed"),
+    ("B", 0.700, 0.087, "Admins upload PDF, Word, Markdown, text or CSV"),
+    ("B", 0.500, 0.307, "Which roles may search this collection"),
+    ("B", None,  0.324, "A collection nobody can read is flagged,\nnot left to fail silently"),
+    ("B", None,  0.907, "A document that failed to index says why"),
 ]
 
 D = Inches(0.28)
 for i, (panel, fx, fy, _label) in enumerate(CALLOUTS, start=1):
     py, ph = (A_Y, a_h) if panel == "A" else (B_Y, b_h)
     cy = py + Emu(int(ph * fy))
-    left = PX + Emu(int(PW * fx))
-    cx = left - D * 0.72
-    if cx < PX + D * 0.5:
-        cx = left + D * 0.62
+    cx = GUTTER_CX if fx is None else PX + Emu(int(PW * fx))
     marker(cx, cy, i, D, ACCENT, 12)
 
 # ---- right column ----------------------------------------------------------
-rx, rw = Inches(7.90), Inches(4.98)
+rx, rw = Inches(7.85), Inches(5.03)
 y = Inches(1.22)
 
 tb(rx, y, rw, Inches(0.24), "ON THIS SCREEN", size=10, bold=True, color=ACCENT)
