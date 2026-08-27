@@ -62,6 +62,19 @@ function Sk({ className }: { className?: string }) {
   return <div className={cn('animate-pulse rounded-lg bg-[var(--inset)]', className)} />;
 }
 
+/**
+ * Format a count for display without trusting it to exist.
+ *
+ * `data.indexed_chunks.toLocaleString()` throws if the field is absent, and a
+ * throw inside render takes the whole route down to a white screen — the
+ * status strip is decoration, but it would kill the documents list and the
+ * ask panel with it. API version skew is exactly when this matters and
+ * exactly when nobody is watching, so the numbers are read defensively.
+ */
+function count(n: number | undefined | null): string {
+  return typeof n === 'number' ? n.toLocaleString() : '—';
+}
+
 function StatTile({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
     <div className="card-sm flex flex-col gap-1">
@@ -149,22 +162,22 @@ export function KnowledgeBasePage() {
           <>
             <StatTile
               label="Collections"
-              value={statusQuery.data.accessible_collections}
+              value={count(statusQuery.data.accessible_collections)}
               sub={canManage ? 'you can curate these' : 'granted to your role'}
             />
             <StatTile
               label="Indexed passages"
-              value={statusQuery.data.indexed_chunks.toLocaleString()}
+              value={count(statusQuery.data.indexed_chunks)}
               sub="searchable right now"
             />
             <StatTile
               label="Indexing"
-              value={statusQuery.data.versions_in_progress}
+              value={count(statusQuery.data.versions_in_progress)}
               sub="documents still processing"
             />
             <StatTile
               label="Failed"
-              value={statusQuery.data.versions_failed}
+              value={count(statusQuery.data.versions_failed)}
               sub={statusQuery.data.versions_failed ? 'needs re-indexing' : 'none'}
             />
           </>
@@ -449,7 +462,7 @@ function CollectionList({
                 </span>
                 {/* A collection nobody can read answers nothing. Say so here
                     rather than letting an admin discover it via silence. */}
-                {c.granted_roles.length === 0 && (
+                {(c.granted_roles ?? []).length === 0 && (
                   <span className="block text-[11px] text-[var(--warn)] mt-0.5">
                     No roles granted — not searchable
                   </span>
@@ -508,9 +521,10 @@ function DocumentPanel({
   });
 
   const toggleRole = (role: string) => {
-    const next = collection.granted_roles.includes(role)
-      ? collection.granted_roles.filter((r) => r !== role)
-      : [...collection.granted_roles, role];
+    const current = collection.granted_roles ?? [];
+    const next = current.includes(role)
+      ? current.filter((r) => r !== role)
+      : [...current, role];
     grants.mutate(next);
   };
 
@@ -564,7 +578,7 @@ function DocumentPanel({
             </span>
             <div className="flex flex-wrap gap-2">
               {ROLE_OPTIONS.map((role) => {
-                const on = collection.granted_roles.includes(role);
+                const on = (collection.granted_roles ?? []).includes(role);
                 return (
                   <button
                     key={role}
@@ -631,7 +645,7 @@ function DocumentRow({
   onNotice: (n: { tone: 'ok' | 'err'; text: string }) => void;
 }) {
   const meta = STATUS_META[doc.status] ?? STATUS_META.pending;
-  const failed = doc.versions.find((v) => v.status === 'failed');
+  const failed = (doc.versions ?? []).find((v) => v.status === 'failed');
 
   const reindex = useMutation({
     mutationFn: () => reindexDocument(doc.id),

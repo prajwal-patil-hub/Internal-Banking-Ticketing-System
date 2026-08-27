@@ -67,7 +67,15 @@ RRF_K = 60
 KB_CONFIDENCE_HIGH = 0.70
 
 #: Citation markers the model is asked to emit: [1], [2], [1][3] …
-_CITATION = re.compile(r"\[(\d{1,2})\]")
+#:
+#: Matches any run of digits, deliberately. An earlier `\d{1,2}` looked
+#: sufficient — there are never more than `KB_CONTEXT_TOP_N` passages — but it
+#: made `[100]` invisible to validation rather than invalid: the marker was not
+#: recognised, so the sentence was not dropped, the marker was not stripped,
+#: and `rejected` stayed empty, meaning the UI cheerfully reported that no
+#: fabricated citations had been removed. A validator that cannot see a token
+#: does not reject it.
+_CITATION = re.compile(r"\[(\d+)\]")
 
 #: Acronyms worth expanding before lexical search. Bank staff type the short
 #: form; the policy document spells it out, and a pure keyword arm otherwise
@@ -132,14 +140,16 @@ def accessible_collections(user: User) -> Select:
     sentinel, because that sentinel is exactly how an access filter goes
     missing when a caller forgets to branch on it.
 
-    A super-admin sees every *active* collection. A read-only role holder
-    marked super-admin does not get write powers elsewhere and does not get a
-    widened read here either: `is_read_only` is checked first, matching
-    `authz.can_write_tickets`.
+    A super-admin sees every *active* collection — but only if their role is
+    eligible for the knowledge base at all. The eligibility test is
+    `authz.can_query_knowledge_base`, the same predicate the API guard uses,
+    rather than a second copy of the rule here: an earlier version checked
+    only `is_read_only`, which let a branch user carrying the super-admin flag
+    skip the grant join and read every collection in the bank.
     """
     base = select(KBCollection.id).where(KBCollection.is_active.is_(True))
 
-    if user.is_super_admin and not authz.is_read_only(user):
+    if user.is_super_admin and authz.can_query_knowledge_base(user):
         return base
 
     return base.join(
@@ -238,6 +248,30 @@ _SYSTEM_RULES = [
 SYSTEM_PROMPT = "\n".join(_SYSTEM_RULES)
 
 
+#: Anything in document text that could imitate the prompt's own framing.
+#: A document is untrusted input written by whoever produced the file.
+_FORGERY = re.compile(r"^\s*(?:<<<|>>>|\[\d+\]\s)", re.MULTILINE)
+
+
+def _defang(content: str) -> str:
+    """Neutralise text that could forge a passage boundary or header.
+
+    Delimiters and the `[n] Title` header format are both predictable, so a
+    document containing its own `>>>` followed by `[3] Some Policy` and a
+    `<<<` splices a fabricated passage 3 into the prompt. Because the forged
+    number lands *inside* the valid range, citation validation then accepts a
+    `[3]` citation for the injected claim and the sources panel displays the
+    genuine passage 3 beside it — laundering unattributed content through a
+    real citation.
+
+    This does not cross the access boundary (retrieval is filtered in SQL and
+    the model has no tools), but it defeats attribution, which is the whole
+    product. Stripping the leading markers costs nothing: no legitimate policy
+    text begins a line with `<<<` or a bare citation marker.
+    """
+    return _FORGERY.sub("", content)
+
+
 def build_prompt(question: str, passages: list[Passage]) -> str:
     """Number the passages and delimit them so injected text is visibly data."""
     parts = ["PASSAGES", ""]
@@ -249,7 +283,7 @@ def build_prompt(question: str, passages: list[Passage]) -> str:
             header += f" (p.{p.page_from})"
         parts.append(header)
         parts.append("<<<")
-        parts.append(p.content)
+        parts.append(_defang(p.content))
         parts.append(">>>")
         parts.append("")
     parts.append(f"QUESTION: {question}")
@@ -259,6 +293,23 @@ def build_prompt(question: str, passages: list[Passage]) -> str:
 #: Sentence boundary for citation surgery. Conservative for the same reason as
 #: the chunker's: "Rs. 500" and "clause 3.2" must not split.
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9])")
+
+
+def _split_units(answer: str) -> list[str]:
+    """Break an answer into the units citation validation operates on.
+
+    Lines first, then sentences within each line. Sentence-splitting alone is
+    not enough: the system prompt invites bullet lists, and a bullet starting
+    with "- " does not match the `[A-Z0-9]` lookahead, so an entire list
+    collapsed into one "sentence". A single valid citation anywhere in that
+    block then licensed every other bullet in it — including fabricated ones.
+    """
+    units: list[str] = []
+    for line in answer.splitlines():
+        if not line.strip():
+            continue
+        units.extend(part for part in _SENTENCE_SPLIT.split(line) if part.strip())
+    return units
 
 
 def validate_citations(
@@ -285,37 +336,46 @@ def validate_citations(
     cited: list[uuid.UUID] = []
     rejected: list[int] = []
     seen: set[int] = set()
-    kept: list[str] = []
+    kept_lines: list[str] = []
 
-    for sentence in _SENTENCE_SPLIT.split(answer):
-        if not sentence.strip():
+    # Line-aware so a surviving bullet list still renders as a list rather than
+    # being flattened into one paragraph.
+    for line in answer.splitlines():
+        if not line.strip():
             continue
 
-        numbers = [int(m.group(1)) for m in _CITATION.finditer(sentence)]
-        good = [n for n in numbers if n in valid_range]
-        bad = [n for n in numbers if n not in valid_range]
+        kept_parts: list[str] = []
+        for sentence in _split_units(line):
+            numbers = [int(m.group(1)) for m in _CITATION.finditer(sentence)]
+            good = [n for n in numbers if n in valid_range]
+            bad = [n for n in numbers if n not in valid_range]
 
-        for n in bad:
-            if n not in rejected:
-                rejected.append(n)
+            for n in bad:
+                if n not in rejected:
+                    rejected.append(n)
 
-        # Cited, but every citation was invented — the claim has no support.
-        if numbers and not good:
-            continue
+            # Cited, but every citation was invented — the claim has no support.
+            if numbers and not good:
+                continue
 
-        for n in good:
-            if n not in seen:
-                seen.add(n)
-                cited.append(passages[n - 1].chunk_id)
+            for n in good:
+                if n not in seen:
+                    seen.add(n)
+                    cited.append(passages[n - 1].chunk_id)
 
-        # A surviving sentence may still carry a stray bad marker alongside a
-        # good one; remove just the marker, the claim itself is supported.
-        text = sentence
-        for n in bad:
-            text = text.replace(f"[{n}]", "")
-        kept.append(re.sub(r"\s{2,}", " ", text).strip())
+            # A surviving sentence may still carry a stray bad marker alongside
+            # a good one; remove just the marker, the claim itself is supported.
+            text = sentence
+            for n in bad:
+                text = text.replace(f"[{n}]", "")
+            text = re.sub(r"\s{2,}", " ", text).strip()
+            if text:
+                kept_parts.append(text)
 
-    cleaned = " ".join(k for k in kept if k).strip()
+        if kept_parts:
+            kept_lines.append(" ".join(kept_parts))
+
+    cleaned = "\n".join(kept_lines).strip()
     return cleaned, cited, rejected
 
 

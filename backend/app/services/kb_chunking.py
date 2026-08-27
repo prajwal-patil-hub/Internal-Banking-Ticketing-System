@@ -102,6 +102,37 @@ def _split_oversized(text: str, limit: int, overlap: int) -> list[str]:
     return [p for p in pieces if p]
 
 
+def _split_rows(text: str, limit: int) -> list[str]:
+    """Group table rows into chunks without ever cutting inside a row.
+
+    Row boundaries are the only safe split points here, so a single row longer
+    than the limit is hard-cut as a last resort — a chunk that cannot be
+    indexed at all is worse than one with a mangled column.
+    """
+    parts: list[str] = []
+    current: list[str] = []
+    size = 0
+
+    for row in text.split("\n"):
+        if len(row) > limit:
+            if current:
+                parts.append("\n".join(current))
+                current, size = [], 0
+            for i in range(0, len(row), limit):
+                parts.append(row[i : i + limit])
+            continue
+
+        if current and size + len(row) + 1 > limit:
+            parts.append("\n".join(current))
+            current, size = [], 0
+        current.append(row)
+        size += len(row) + 1
+
+    if current:
+        parts.append("\n".join(current))
+    return [p for p in parts if p.strip()]
+
+
 def chunk_blocks(
     blocks: list[Block],
     *,
@@ -130,11 +161,17 @@ def chunk_blocks(
             buffer, buffer_len = [], 0
             return
 
-        # Table rows are emitted verbatim: splitting them on sentence
-        # boundaries would cut between columns.
-        parts = [text] if "table_row" in kinds else _split_oversized(
-            text, max_chars, overlap_chars
-        )
+        if "table_row" in kinds:
+            # Table rows are not split on sentence boundaries — that would cut
+            # between columns. They are still size-capped, though: an earlier
+            # version emitted them verbatim, so one 30 MB line in a CSV became
+            # one 30 MB chunk. That chunk would be sent whole to the embedding
+            # model, pasted whole into every prompt that retrieved it, and
+            # rejected outright by the GIN `to_tsvector` index above ~1 MB,
+            # failing the insert. Unbounded is not the same as unsplit.
+            parts = _split_rows(text, max_chars)
+        else:
+            parts = _split_oversized(text, max_chars, overlap_chars)
 
         for part in parts:
             chunks.append(

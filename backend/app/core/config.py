@@ -123,6 +123,13 @@ class Settings(BaseSettings):
     KB_CONTEXT_TOP_N: int = 8
     #: Below this derived confidence the service abstains rather than answering.
     KB_MIN_CONFIDENCE: float = 0.35
+    #: Hard ceiling on passages produced by one document.
+    #:
+    #: Ingestion runs inline and issues one embedding round trip per batch, so
+    #: an unbounded document holds the single local model — and with it chat
+    #: and email intake — for as long as it takes. A 40 MB text file would
+    #: otherwise yield ~20k passages and ~1250 sequential round trips.
+    KB_MAX_CHUNKS_PER_DOCUMENT: int = 4000
 
     # --- Email Ingestion (IMAP) ---
     IMAP_ENABLED: bool = False

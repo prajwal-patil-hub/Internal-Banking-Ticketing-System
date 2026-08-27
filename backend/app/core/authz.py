@@ -118,9 +118,27 @@ KB_MANAGE_ROLES: frozenset[str] = frozenset({ADMIN})
 KB_QUERY_ROLES: frozenset[str] = frozenset({AGENT, SUPERVISOR, ADMIN})
 
 
+#: Roles the super-admin flag must never widen into knowledge-base access.
+#:
+#: `is_read_only` alone was not enough here. It contains only `auditor`, so a
+#: `branch_user` carrying the super-admin flag fell straight through to the
+#: `user.is_super_admin or ...` branch and gained both curation and query
+#: rights — and, because `accessible_collections` skips the grant join for
+#: super-admins, a view of every collection in the bank regardless of grants.
+#: That contradicted the stated policy two lines above it. The flag is meant to
+#: widen an *administrative* role's reach, not to convert a ticket-raiser into
+#: one.
+KB_NEVER_ROLES: frozenset[str] = frozenset({AUDITOR, BRANCH_USER})
+
+
+def _kb_eligible(user: User) -> bool:
+    """Gate the super-admin short-circuit itself."""
+    return not is_read_only(user) and role_of(user) not in KB_NEVER_ROLES
+
+
 def can_manage_knowledge_base(user: User) -> bool:
     """May curate collections and documents."""
-    if is_read_only(user):
+    if not _kb_eligible(user):
         return False
     return user.is_super_admin or role_of(user) in KB_MANAGE_ROLES
 
@@ -128,10 +146,10 @@ def can_manage_knowledge_base(user: User) -> bool:
 def can_query_knowledge_base(user: User) -> bool:
     """May ask the knowledge base a question.
 
-    Super-admin widens this, but never past the read-only check: an auditor
-    flagged super-admin is still an auditor.
+    Super-admin widens this, but never past `_kb_eligible`: an auditor or a
+    branch user flagged super-admin is still an auditor or a branch user.
     """
-    if is_read_only(user):
+    if not _kb_eligible(user):
         return False
     return user.is_super_admin or role_of(user) in KB_QUERY_ROLES
 

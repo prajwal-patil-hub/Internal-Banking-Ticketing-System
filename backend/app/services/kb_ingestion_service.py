@@ -124,6 +124,7 @@ class KBIngestionService:
         user: User,
         title: str | None = None,
         document: KBDocument | None = None,
+        force_new_version: bool = False,
     ) -> tuple[KBDocument, KBDocumentVersion, bool]:
         """Store the bytes and register a pending version.
 
@@ -136,7 +137,10 @@ class KBIngestionService:
         checksum = hashlib.sha256(data).hexdigest()
         safe_name = sanitize_filename(filename)
 
-        if document is not None:
+        # Re-indexing deliberately re-uploads identical bytes, so it needs the
+        # dedupe short-circuit skipped or it would return the very version it
+        # is trying to replace.
+        if document is not None and not force_new_version:
             existing = (
                 await self.db.execute(
                     select(KBDocumentVersion).where(
@@ -215,6 +219,13 @@ class KBIngestionService:
                 raise ValidationError(
                     "No indexable text was found in this file, so there is "
                     "nothing to retrieve. Check the document is not empty."
+                )
+            if len(chunks) > settings.KB_MAX_CHUNKS_PER_DOCUMENT:
+                raise ValidationError(
+                    f"This document produces {len(chunks):,} passages, over the "
+                    f"{settings.KB_MAX_CHUNKS_PER_DOCUMENT:,} limit. Embedding it "
+                    "would occupy the local model long enough to stall chat and "
+                    "email intake. Split it into smaller documents."
                 )
 
             rows: list[KBChunk] = []

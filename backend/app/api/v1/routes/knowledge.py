@@ -60,6 +60,14 @@ log = get_logger(__name__)
 
 router = APIRouter(prefix="/kb", tags=["knowledge-base"])
 
+#: Ingestion calls allowed per administrator per minute.
+#:
+#: `/kb/query` was rate-limited from the start because one local model serves
+#: every AI path; ingestion was not, which was the bigger hole. A single large
+#: upload issues one embedding round trip per batch of 16 passages, holding the
+#: model — and therefore chat and email intake — for the whole request.
+KB_INGEST_RATE_LIMIT = 6
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -160,6 +168,13 @@ async def _readable_collection(
             )
         )
     ).scalar_one_or_none()
+    if collection is None:
+        raise NotFoundError("Collection not found.")
+    return collection
+
+
+async def _collection_of(document: KBDocument, db: AsyncSession) -> KBCollection:
+    collection = await db.get(KBCollection, document.collection_id)
     if collection is None:
         raise NotFoundError("Collection not found.")
     return collection
@@ -479,9 +494,22 @@ async def upload_document(
     what went wrong rather than a silent partial index.
     """
     collection = await _manageable_collection(collection_id, db, current_user)
+    check_rate_limit(f"kb-ingest:{current_user.id}", limit=KB_INGEST_RATE_LIMIT)
 
     if not settings.KB_ENABLED:
         raise ValidationError("The knowledge base is disabled (KB_ENABLED=false).")
+
+    # Reject on the declared length before reading the body into memory. This
+    # does not stop a lying or absent Content-Length — Starlette has already
+    # spooled the multipart body by the time this handler runs — but it turns
+    # the common oversized-upload case into a cheap 422 instead of a 40 MB
+    # allocation, and the post-read check below still backstops it.
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > settings.KB_MAX_UPLOAD_BYTES:
+        raise ValidationError(
+            f"File is larger than the {settings.KB_MAX_UPLOAD_BYTES // 1_048_576} MB "
+            "knowledge-base limit."
+        )
 
     data = await file.read()
     # Validate before storing so a rejected file never reaches object storage.
@@ -507,8 +535,16 @@ async def upload_document(
     except ValidationError:
         raise
     except Exception as exc:
+        # The exception text is logged, never returned: a SQLAlchemy DBAPIError
+        # carries the full INSERT statement and its bound parameters, and a
+        # botocore error carries the bucket and endpoint. The global handler in
+        # core/exceptions.py masks unhandled errors for exactly this reason,
+        # and interpolating `exc` here would walk straight around it.
         log.warning("kb.upload_failed", error=str(exc), collection_id=str(collection.id))
-        raise ValidationError(f"The document could not be indexed: {exc}") from exc
+        raise ValidationError(
+            "The document could not be indexed. Its status shows the reason, "
+            "and the full error is in the server log."
+        ) from exc
 
     await _audit(
         db,
@@ -547,18 +583,33 @@ async def download_document(
     attachments: a presigned URL is a bearer token that outlives the session
     and survives in browser history and proxy logs.
     """
+    # The role check runs BEFORE the fetch. Fetching first made 403 mean "that
+    # document id exists" and 404 mean it does not — the existence oracle this
+    # module's docstring says it avoids, reintroduced by statement order.
+    curator = authz.can_manage_knowledge_base(current_user)
+    if not curator:
+        authz.assert_can_query_knowledge_base(current_user)
+
     document = await db.get(KBDocument, document_id)
     if document is None:
         raise NotFoundError("Document not found.")
 
-    if not authz.can_manage_knowledge_base(current_user):
-        authz.assert_can_query_knowledge_base(current_user)
+    if not curator:
         await _readable_collection(document.collection_id, db, current_user)
 
-    version = next(
-        (v for v in document.versions if v.id == document.active_version_id),
-        None,
-    ) or next(iter(sorted(document.versions, key=lambda v: v.version_no, reverse=True)), None)
+    active = next(
+        (v for v in document.versions if v.id == document.active_version_id), None
+    )
+    if curator:
+        # A curator may pull a failed version to see what was uploaded.
+        version = active or next(
+            iter(sorted(document.versions, key=lambda v: v.version_no, reverse=True)), None
+        )
+    else:
+        # Everyone else gets the active version only. Falling back to the
+        # newest would hand out the bytes of a version that failed ingestion —
+        # content retrieval deliberately refuses to serve.
+        version = active
     if version is None:
         raise NotFoundError("This document has no stored content.")
 
@@ -597,37 +648,59 @@ async def reindex_document(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> dict:
-    """Re-run parse/chunk/embed over the current version's stored bytes.
+    """Rebuild the index from a version's stored bytes, into a *new* version.
 
     The recovery path for a version left FAILED by a model outage, and the way
     to rebuild vectors after the embedding model changes.
+
+    It builds forward rather than in place. An earlier version deleted the
+    chunks of the newest version, committed, and only then re-embedded — so a
+    model outage midway left `active_version_id` pointing at a version with
+    zero chunks, and the document silently retrieved nothing. That is exactly
+    the "never partially retrievable" invariant the two-phase design exists to
+    hold, broken by the recovery path meant to restore it.
+
+    Building into a new version means a failed rebuild leaves the old one
+    still active and still answering.
     """
     authz.assert_can_manage_knowledge_base(current_user)
+    check_rate_limit(f"kb-ingest:{current_user.id}", limit=KB_INGEST_RATE_LIMIT)
+
     document = await db.get(KBDocument, document_id)
     if document is None:
         raise NotFoundError("Document not found.")
 
-    version = next(
+    source = next(
+        (v for v in document.versions if v.id == document.active_version_id), None
+    ) or next(
         iter(sorted(document.versions, key=lambda v: v.version_no, reverse=True)), None
     )
-    if version is None:
+    if source is None:
         raise NotFoundError("This document has no stored content to re-index.")
 
-    extension = version.s3_key.rsplit(".", 1)[-1].lower()
-
-    # Drop the previous chunk rows for this version, or the (version, ordinal)
-    # unique constraint rejects the rebuild on its first insert.
-    await db.execute(KBChunk.__table__.delete().where(KBChunk.version_id == version.id))
-    version.embedded_count = 0
-    version.chunk_count = 0
-    version.embedding_model = settings.KB_EMBEDDING_MODEL
-    await db.commit()
-
+    extension = source.s3_key.rsplit(".", 1)[-1].lower()
     service = KBIngestionService(db)
+
     try:
+        data = await service.storage.download(source.s3_key)
+        document, version, _dup = await service.create_version(
+            collection=await _collection_of(document, db),
+            filename=document.original_filename,
+            content_type=document.content_type,
+            data=data,
+            user=current_user,
+            document=document,
+            force_new_version=True,
+        )
         version = await service.process_version(document, version, extension=extension)
+    except ValidationError:
+        raise
     except Exception as exc:
-        raise ValidationError(f"Re-indexing failed: {exc}") from exc
+        log.warning("kb.reindex_failed", document_id=str(document.id), error=str(exc))
+        raise ValidationError(
+            "Re-indexing failed and the previous version is still serving. "
+            "Check the document's status for the reason."
+        ) from exc
 
     await _audit(
         db,
@@ -760,19 +833,30 @@ async def kb_status(
             )
         )
     ).scalar_one()
+    # Scoped to accessible collections like the two counts above. Left global,
+    # these told an agent granted one collection how many documents were
+    # indexing or failing across collections they cannot read.
+    visible_versions = select(KBDocumentVersion.id).join(
+        KBDocument, KBDocumentVersion.document_id == KBDocument.id
+    ).where(KBDocument.collection_id.in_(accessible))
+
     pending = (
         await db.execute(
-            select(func.count(KBDocumentVersion.id)).where(
-                KBDocumentVersion.status.in_(
-                    [KBVersionStatus.PENDING.value, KBVersionStatus.PROCESSING.value]
-                )
+            select(func.count()).select_from(
+                visible_versions.where(
+                    KBDocumentVersion.status.in_(
+                        [KBVersionStatus.PENDING.value, KBVersionStatus.PROCESSING.value]
+                    )
+                ).subquery()
             )
         )
     ).scalar_one()
     failed = (
         await db.execute(
-            select(func.count(KBDocumentVersion.id)).where(
-                KBDocumentVersion.status == KBVersionStatus.FAILED.value
+            select(func.count()).select_from(
+                visible_versions.where(
+                    KBDocumentVersion.status == KBVersionStatus.FAILED.value
+                ).subquery()
             )
         )
     ).scalar_one()
