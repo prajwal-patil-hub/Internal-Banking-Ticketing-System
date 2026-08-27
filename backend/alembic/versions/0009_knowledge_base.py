@@ -23,8 +23,8 @@ with cosine distance. Building it on an empty table is instant; it is the
 re-index of a populated table that is slow, which is the reason to create it
 now rather than "later, when we have data".
 
-Revision ID: 0008_knowledge_base
-Revises: 0007_comment_attachments
+Revision ID: 0009_knowledge_base
+Revises: 0008_assignment_control
 """
 
 from typing import Sequence, Union
@@ -34,8 +34,8 @@ from alembic import op
 from pgvector.sqlalchemy import Vector
 from sqlalchemy.dialects import postgresql
 
-revision: str = "0008_knowledge_base"
-down_revision: Union[str, None] = "0007_comment_attachments"
+revision: str = "0009_knowledge_base"
+down_revision: Union[str, None] = "0008_assignment_control"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
