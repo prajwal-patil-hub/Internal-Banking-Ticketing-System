@@ -1,13 +1,95 @@
 # 06 — Knowledge Base (RAG) Architecture
 
-**Status: proposal. Nothing in here is built.**
+**Status: built and merged.** Sections 1–14 below are the original proposal
+and are left as written, because the reasoning is still the reasoning. This
+section records what actually shipped, what deliberately did not, and which
+open questions the build answered by implication.
 
-Scope: admins and super admins upload documents; agents, supervisors and
-auditors ask questions and get answers grounded in those documents.
+Scope: admins and super admins upload documents; agents and supervisors ask
+questions and get answers grounded in those documents.
 
-This document is the compilation requested before any build. It states what
-the thing must do, what it must never do, the decisions I recommend and why,
-the ones that need your call, and what "industry ready" costs.
+---
+
+## 0. As built
+
+### What shipped
+
+| Area | Status | Where |
+|---|---|---|
+| Schema — 6 tables, pgvector, HNSW + GIN indexes | Built | `alembic/versions/0009_knowledge_base.py` |
+| Collections, role grants, documents, versions | Built | `app/models/knowledge.py` |
+| Ingestion: validate → store → parse → chunk → embed → activate | Built | `app/services/kb_ingestion_service.py` |
+| Parsing: PDF, DOCX, MD, TXT, CSV with heading paths and tables kept whole | Built | `app/services/kb_parsing.py` |
+| Structure-aware chunking with overlap | Built | `app/services/kb_chunking.py` |
+| Hybrid dense + lexical retrieval, RRF fusion | Built | `app/services/kb_retrieval_service.py` |
+| RBAC filter applied in SQL before retrieval | Built | `accessible_collections()`, `_retrievable()` |
+| Server-side citation validation, sentence-level | Built | `validate_citations()` |
+| Abstention as a first-class outcome | Built | `KBAnswer.abstained` |
+| Derived confidence, banded server-side | Built | `derive_confidence()` |
+| Prompt-injection mitigation (delimiters + defanging) | Built | `_defang()`, `SYSTEM_PROMPT` |
+| Query logging with retrieved and rejected citation ids | Built | `kb_query_logs` |
+| Admin UI: collections, grants, upload, versions, re-index | Built | `frontend/src/pages/KnowledgeBasePage.tsx` |
+| Ask UI with cited vs merely-retrieved sources | Built | same |
+| API — 9 endpoints | Built | `app/api/v1/routes/knowledge.py` |
+| Demo seed data | Built | `scripts/seed_dev.py` |
+
+### What deliberately did not ship
+
+**Cross-encoder reranking (§D3).** It needs a second model, and calling RRF
+fusion "reranking" would have been worse than not having it. Retrieval is
+hybrid dense+lexical fused with RRF and stops there. This is the single
+largest quality lever left unpulled.
+
+**The evaluation harness and golden set (§8).** This is the honest gap, and it
+is the one that matters. Everything above is *correct by construction* —
+citations cannot be fabricated, restricted passages cannot be retrieved — but
+nothing yet measures whether the answers are *good*. There is no golden set,
+no retrieval metrics in CI, and no calibration of the confidence numbers
+against reality. That work is blocked on Q6 below, not on engineering.
+
+**Background ingestion (§6.1).** Ingestion runs inline in the request. A
+worker needs its own queue table, retry policy and orphan-recovery sweep, and
+a PENDING row stranded by a restart is a worse failure than a slow upload. The
+two-phase commit and the version status column are exactly the machinery a
+worker would need, so moving it later is a change in one place. Until then
+`KB_MAX_UPLOAD_BYTES` and `KB_MAX_CHUNKS_PER_DOCUMENT` bound the request.
+
+**OCR (§Q5).** A PDF with no text layer is refused with an explanation rather
+than indexed as an empty document.
+
+**Contradiction detection (§7.2).** Not built.
+
+### Open questions, answered by the build
+
+These were answered conservatively so the build could proceed. Each is
+reversible; none should be treated as a decision you made.
+
+| # | Answered as | Reversing it |
+|---|---|---|
+| **Q2** — do branch users get it? | **No.** `branch_user` is in `authz.KB_NEVER_ROLES` and cannot query even with the super-admin flag. | Remove from `KB_NEVER_ROLES`, add to `KB_QUERY_ROLES`, grant per collection |
+| **Q3** — do auditors read everything? | **No.** `auditor` is excluded, matching the existing AI-helper guard on tickets: it is an oversight role, and a query spends model tokens and writes a log row. | Same as Q2 |
+| **Q4** — cloud models near restricted documents? | **Never, in practice.** Embeddings are Ollama-only by construction; `llm_client.embed` refuses any other provider rather than silently producing incomparable vectors. | Needs per-collection provider routing — real work, not a config flag |
+| **Q5** — scanned PDFs? | **Out of scope**, refused with a clear message. | Add an OCR step in `kb_parsing` |
+| **Q7** — latency? | **Reranker omitted**, so p95 is retrieval + one generation. | Ship the reranker |
+| **Q8** — cite a page image? | **Text + page number.** | UI + storage work |
+| **Q9** — query log retention? | **Unbounded.** `kb_query_logs` has no retention job. | Needs a regulatory answer, then a scheduled purge |
+
+**Q1** (corpus size) and **Q6** (SMEs for the golden set) remain genuinely
+open. Q6 is still the biggest risk in the feature: without it there is no
+calibration and no quality gate, only correctness guarantees.
+
+### Verification status
+
+- 439 backend tests pass against a live PostgreSQL 16 with pgvector, including
+  RBAC and full-pipeline integration tests that insert real rows and real
+  768-dimension vectors rather than asserting on compiled SQL.
+- The migration has been run upgrade → downgrade → upgrade on a live server.
+- `alembic check` reports no table or column drift.
+- 64 frontend tests, tsc, eslint and the production build pass.
+- An adversarial security review produced 12 findings; all are fixed, each
+  with a named regression test.
+
+**Not verified:** answer quality. See "the evaluation harness" above.
 
 ---
 

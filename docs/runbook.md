@@ -159,6 +159,60 @@ restore from backup.
 The system degrades rather than failing: tickets still get created from email
 without AI extraction, carrying the subject and raw body.
 
+### `CREATE EXTENSION vector` fails during migration
+
+Migration `0009_knowledge_base` enables pgvector. Two things go wrong here:
+
+- **The image does not ship the extension.** Stock `postgres:15` / `postgres:16`
+  do not, and the migration fails with *"could not open extension control
+  file"*. All three compose files and CI pin `pgvector/pgvector:pg15` / `pg16`.
+  If you are running your own Postgres, install `postgresql-16-pgvector` (or
+  build pgvector from source) before migrating.
+- **The database role cannot create extensions.** `CREATE EXTENSION` needs
+  superuser, or `CREATE` on the database plus the extension being
+  allow-listed. On managed Postgres (RDS, Cloud SQL, Supabase) the provider
+  usually has to enable it first. Ask a superuser to run
+  `CREATE EXTENSION IF NOT EXISTS vector;` once, by hand — the migration is
+  idempotent and will skip it on the next run.
+
+Downgrading `0009` drops the six `kb_*` tables but deliberately leaves the
+extension in place: another schema in the same database may be using it, and
+dropping it cascades to their columns.
+
+### Knowledge-base documents stay stuck on "Indexing" or show "Failed"
+
+Ingestion runs inside the upload request, so a stuck document usually means a
+dependency is down rather than a slow parse.
+
+- **Failed with a storage error.** MinIO is unreachable. Same cause as the
+  attachment 503 below. Nothing is lost; press **Re-index** once storage is
+  back.
+- **Failed with an embedding error.** Ollama is down or the embedding model is
+  not pulled: `ollama pull nomic-embed-text`. The previous version of the
+  document keeps serving answers throughout — a failed re-index degrades to
+  "the new copy did not take", never to "the document disappeared".
+- **Failed: "appears to be a scanned image".** The PDF has no text layer. OCR
+  is not enabled; upload a text-based PDF.
+- **Failed: "produces N passages, over the limit".** Split the document. The
+  ceiling exists because embedding is sequential and holds the single local
+  model, which would stall chat and email intake.
+
+A collection showing **"No roles granted — not searchable"** is not an error:
+a new collection is readable by nobody until an administrator grants a role on
+the Knowledge Base screen. It is flagged because a granted-to-nobody
+collection accepts uploads and answers nothing, which otherwise looks like a
+retrieval bug.
+
+### The knowledge base answers "No grounded answer"
+
+This is a success path, not a fault. The service refuses rather than guessing
+when retrieval comes back thin, when the model's own citations do not resolve
+to real passages, or when derived confidence falls below
+`KB_MIN_CONFIDENCE`. The panel states which of those happened. Check
+`kb_query_logs.abstain_reason` for the distribution; a spike in
+`no_valid_citations` means the model is fabricating sources and is worth
+investigating, whereas `no_passages` usually means a document is missing.
+
 ### Attachment upload returns 503
 
 `STORAGE_UNAVAILABLE` means MinIO/S3 is unreachable — not a bad request.
