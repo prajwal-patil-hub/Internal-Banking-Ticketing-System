@@ -28,6 +28,7 @@ from app.api.v1.routes import (
     dashboard,
     escalations,
     health,
+    knowledge,
     org,
     reports,
     tickets,
@@ -102,6 +103,7 @@ def create_app() -> FastAPI:
     app.include_router(reports.router, prefix="/api/v1")
     app.include_router(escalations.router, prefix="/api/v1")
     app.include_router(branches.router, prefix="/api/v1")
+    app.include_router(knowledge.router, prefix="/api/v1")
 
     return app
 

@@ -97,3 +97,55 @@ def assert_can_grant_super_admin(actor: User, requested: bool) -> None:
         raise AuthorizationError(
             "Only a super admin can grant super admin privileges."
         )
+
+
+#: Roles that may create knowledge-base collections, upload documents and
+#: grant access to them. Deliberately narrower than TICKET_WRITE_ROLES: an
+#: agent works tickets, but publishing a document that every other agent will
+#: be answered from is a curation decision, not a working one.
+KB_MANAGE_ROLES: frozenset[str] = frozenset({ADMIN})
+
+#: Roles that may ask the knowledge base a question.
+#:
+#: Matches the existing AI-helper guard on tickets (`agent`, `supervisor`,
+#: `admin`) rather than inventing a second policy. `auditor` is excluded for
+#: the same reason it cannot run the ticket AI helpers — it is an oversight
+#: role, and a query spends model tokens and writes a log row. `branch_user`
+#: is excluded because the knowledge base holds internal procedure; letting
+#: the people who *raise* tickets query staff runbooks is a policy decision
+#: for the business, not a default to slip in (open question Q2 in
+#: docs/06-rag-knowledge-base.md).
+KB_QUERY_ROLES: frozenset[str] = frozenset({AGENT, SUPERVISOR, ADMIN})
+
+
+def can_manage_knowledge_base(user: User) -> bool:
+    """May curate collections and documents."""
+    if is_read_only(user):
+        return False
+    return user.is_super_admin or role_of(user) in KB_MANAGE_ROLES
+
+
+def can_query_knowledge_base(user: User) -> bool:
+    """May ask the knowledge base a question.
+
+    Super-admin widens this, but never past the read-only check: an auditor
+    flagged super-admin is still an auditor.
+    """
+    if is_read_only(user):
+        return False
+    return user.is_super_admin or role_of(user) in KB_QUERY_ROLES
+
+
+def assert_can_manage_knowledge_base(user: User) -> None:
+    if not can_manage_knowledge_base(user):
+        raise AuthorizationError(
+            f"The '{role_of(user)}' role cannot manage knowledge-base content. "
+            "Only administrators may upload or grant access to documents."
+        )
+
+
+def assert_can_query_knowledge_base(user: User) -> None:
+    if not can_query_knowledge_base(user):
+        raise AuthorizationError(
+            f"The '{role_of(user)}' role cannot query the knowledge base."
+        )
