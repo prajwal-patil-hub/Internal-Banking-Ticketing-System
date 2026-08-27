@@ -257,8 +257,8 @@ export function TicketDetailPage() {
   const [replyFiles, setReplyFiles] = useState<File[]>([]);
   const [replyNote,  setReplyNote]  = useState<string | null>(null);
   const [replyError, setReplyError] = useState<string | null>(null);
-  const [aiSummaryResult, setAISummaryResult] = useState<{ summary: string; sentiment: string; risk_score: number } | null>(null);
-  const [aiSuggestResult, setAISuggestResult] = useState<{ suggestions: string[]; next_actions: string[] } | null>(null);
+  const [aiSummaryResult, setAISummaryResult] = useState<Awaited<ReturnType<typeof aiSummarize>> | null>(null);
+  const [aiSuggestResult, setAISuggestResult] = useState<Awaited<ReturnType<typeof aiSuggest>> | null>(null);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [aiExpanded, setAiExpanded] = useState(false);
 
@@ -479,18 +479,34 @@ export function TicketDetailPage() {
                 {/* Fresh summary */}
                 {aiSummaryResult && (
                   <div className="p-3 rounded-lg bg-accent-50 dark:bg-accent-500/10 border border-accent-200 dark:border-accent-500/20">
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <p className="text-[10px] font-semibold text-accent-600 dark:text-accent-400 uppercase tracking-wide">Summary</p>
-                      <span className={cn('pill text-[9px]',
-                        aiSummaryResult.sentiment === 'positive' ? 'bg-emerald-100 text-emerald-700' :
-                        aiSummaryResult.sentiment === 'negative' ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-600'
-                      )}>{aiSummaryResult.sentiment}</span>
-                      <span className={cn('pill text-[9px]',
-                        aiSummaryResult.risk_score >= 0.7 ? 'bg-red-100 text-red-700' :
-                        aiSummaryResult.risk_score >= 0.3 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
-                      )}>Risk {(aiSummaryResult.risk_score * 100).toFixed(0)}%</span>
-                    </div>
-                    <p className="text-xs text-slate-700 dark:text-slate-300">{aiSummaryResult.summary}</p>
+                    {aiSummaryResult.error ? (
+                      /* The model is reachable or it is not — say which, rather
+                         than rendering an empty panel that looks like a result. */
+                      <p className="text-xs text-red-600 dark:text-red-400 whitespace-pre-line">{aiSummaryResult.error}</p>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                          <p className="text-[10px] font-semibold text-accent-600 dark:text-accent-400 uppercase tracking-wide">Summary</p>
+                          {aiSummaryResult.sentiment && (
+                            <span className={cn('pill text-[9px]',
+                              aiSummaryResult.sentiment === 'positive' ? 'bg-emerald-100 text-emerald-700' :
+                              aiSummaryResult.sentiment === 'negative' ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-600'
+                            )}>{aiSummaryResult.sentiment}</span>
+                          )}
+                          {/* Band comes from the server; deriving it here is how
+                              the badge drifted from the backend thresholds. */}
+                          {aiSummaryResult.risk_score !== null && (
+                            <span className={cn('pill text-[9px]',
+                              aiSummaryResult.risk_band === 'high' ? 'bg-red-100 text-red-700' :
+                              aiSummaryResult.risk_band === 'medium' ? 'bg-amber-100 text-amber-700' :
+                              aiSummaryResult.risk_band === 'low' ? 'bg-emerald-100 text-emerald-700' :
+                              'bg-slate-100 text-slate-600'
+                            )}>Risk {(aiSummaryResult.risk_score * 100).toFixed(0)}%</span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-700 dark:text-slate-300">{aiSummaryResult.summary}</p>
+                      </>
+                    )}
                   </div>
                 )}
                 {/* Suggestions */}
@@ -500,6 +516,9 @@ export function TicketDetailPage() {
                       <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Suggestions</p>
                       <button onClick={() => setShowSuggestions(false)} className="text-[10px] text-slate-400 hover:text-slate-600">Hide</button>
                     </div>
+                    {aiSuggestResult.error ? (
+                      <p className="text-xs text-red-600 dark:text-red-400 whitespace-pre-line">{aiSuggestResult.error}</p>
+                    ) : (
                     <div className="flex flex-col gap-2">
                       {aiSuggestResult.suggestions.map((s, i) => (
                         <div key={i} className="flex items-start gap-2 text-xs text-slate-700 dark:text-slate-300">
@@ -507,15 +526,8 @@ export function TicketDetailPage() {
                           {s}
                         </div>
                       ))}
-                      {aiSuggestResult.next_actions.map((a, i) => (
-                        <div key={`a${i}`} className="flex items-start gap-2 text-xs text-slate-700 dark:text-slate-300">
-                          <svg className="h-4 w-4 text-emerald-500 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M9 12l2 2 4-4M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" />
-                          </svg>
-                          {a}
-                        </div>
-                      ))}
                     </div>
+                    )}
                   </div>
                 )}
               </div>

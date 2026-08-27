@@ -21,6 +21,7 @@ from sqlalchemy.orm import selectinload
 from app.core.logging import get_logger
 from app.models.ticket import OPEN_STATUS_VALUES as _OPEN_STATUSES
 from app.models.ticket import Ticket
+from app.services.job_lock import run_locked
 from app.services.routing_service import RoutingService
 from app.services.settings_service import SettingsService
 
@@ -35,6 +36,18 @@ BATCH_LIMIT = 50
 
 
 async def assign_stale_unassigned_job() -> None:
+    """Scheduler entry point. Runs on exactly one replica.
+
+    The schedulers live inside the API process, so without this every replica
+    would run this job on the same tick — duplicate mailbox polls, duplicate
+    breach evaluations, the same stale ticket auto-assigned twice. A
+    session-level Postgres advisory lock makes the extra replicas skip rather
+    than queue, and releases itself if the holder dies.
+    """
+    await run_locked("assignment_safety_net", _assign_stale_unassigned_job_locked)
+
+
+async def _assign_stale_unassigned_job_locked() -> None:
     from app.db.session import get_db
 
     try:

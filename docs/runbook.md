@@ -213,6 +213,38 @@ to real passages, or when derived confidence falls below
 `no_valid_citations` means the model is fabricating sources and is worth
 investigating, whereas `no_passages` usually means a document is missing.
 
+### An UPDATE or DELETE on audit_logs is refused
+
+Expected. The audit trail is append-only and enforced by a trigger, which
+refuses with SQLSTATE 42501 for any connection including the table owner.
+
+If a retention policy genuinely requires deleting old rows, that is a
+deliberate operator procedure, not a workaround:
+
+    BEGIN;
+    ALTER TABLE audit_logs DISABLE TRIGGER audit_logs_no_update_delete;
+    DELETE FROM audit_logs WHERE created_at < now() - interval '7 years';
+    ALTER TABLE audit_logs ENABLE TRIGGER audit_logs_no_update_delete;
+    COMMIT;
+
+Run it as a named change with an approver, and record that it happened
+somewhere the trail itself cannot cover.
+
+### A scheduled job appears not to be running
+
+Each of the three jobs takes a Postgres advisory lock, so on a multi-replica
+deployment only one instance executes each tick and the others log
+`job_lock.skipped` at debug level. That is correct behaviour, not a fault.
+
+To see who holds what:
+
+    SELECT objid, classid, pid FROM pg_locks WHERE locktype = 'advisory';
+
+A lock is released when its connection closes, so a killed replica does not
+strand one. If a job genuinely never runs, check that at least one replica
+logs `sla_worker_started` / `email_worker_started` /
+`assignment_worker_started` at boot.
+
 ### Attachment upload returns 503
 
 `STORAGE_UNAVAILABLE` means MinIO/S3 is unreachable — not a bad request.

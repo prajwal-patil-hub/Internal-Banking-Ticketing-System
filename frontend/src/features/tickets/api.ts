@@ -233,14 +233,25 @@ export async function getCategories(): Promise<Category[]> {
   return data.data;
 }
 
-export async function aiSummarize(ticketId: string): Promise<{ summary: string; sentiment: string; risk_score: number }> {
+/**
+ * Both helpers now reach the model, so both can fail with the model
+ * unreachable. The server returns 200 with `error` set rather than a 5xx, so
+ * the reason can be rendered inline — and `summary` / `suggestions` come back
+ * empty in that case. Treating an empty result as success would put the UI
+ * back where it started: a button that appears to work and produces nothing.
+ */
+export async function aiSummarize(
+  ticketId: string,
+): Promise<{ summary: string | null; sentiment: string | null; risk_score: number | null; risk_band: 'high' | 'medium' | 'low' | null; error: string | null }> {
   const { data } = await api.post(`/tickets/${ticketId}/ai-summarize`, undefined, {
     timeout: AI_TIMEOUT_MS,
   });
   return data.data;
 }
 
-export async function aiSuggest(ticketId: string): Promise<{ suggestions: string[]; next_actions: string[] }> {
+export async function aiSuggest(
+  ticketId: string,
+): Promise<{ suggestions: string[]; error: string | null }> {
   const { data } = await api.post(`/tickets/${ticketId}/ai-suggest`, undefined, {
     timeout: AI_TIMEOUT_MS,
   });
