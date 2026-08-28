@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/Button';
 import { cn } from '@/lib/cn';
 import { extractError } from '@/lib/api';
+import { PageHeader, PageShell } from '@/components/PageHeader';
 import {
   listUsers, createUser, updateUser, deactivateUser, setUserLeave,
   getLevels, listOrgUnits, listOrgRoles,
@@ -271,14 +272,12 @@ export function UsersPage() {
   });
 
   return (
-    <div className="flex flex-col gap-5">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight text-[var(--tx)]">Users</h1>
-          <p className="text-xs text-[var(--tx-3)] mt-0.5">Manage user accounts and org assignments.</p>
-        </div>
-        <Button onClick={() => setCreating(true)} className="h-8 text-xs">+ Add User</Button>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Users"
+        subtitle="Manage user accounts and org assignments."
+        actions={<Button onClick={() => setCreating(true)} className="h-8 text-xs">+ Add User</Button>}
+      />
 
       <div className="flex items-center gap-3 flex-wrap">
         <input className="input h-8 text-xs w-56" placeholder="Search name or email…" value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} />
@@ -387,6 +386,6 @@ export function UsersPage() {
       )}
 
       {leaveFor && <LeaveModal user={leaveFor} onClose={() => setLeaveFor(null)} />}
-    </div>
+    </PageShell>
   );
 }

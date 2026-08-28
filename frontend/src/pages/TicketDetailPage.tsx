@@ -67,7 +67,7 @@ const STATUS_VARIANTS: Partial<Record<TicketStatus, 'primary' | 'ghost' | 'dange
 // ── Skeletons ─────────────────────────────────────────────────────────────────
 
 function Sk({ className }: { className?: string }) {
-  return <div className={cn('animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800', className)} />;
+  return <div className={cn('animate-pulse rounded-lg bg-[var(--inset)]', className)} />;
 }
 
 function DetailSkeleton() {
@@ -102,13 +102,13 @@ function CommentItem({ comment, ticketId }: { comment: Comment; ticketId: string
       'flex flex-col gap-1.5 p-3 rounded-lg border text-sm',
       comment.is_internal
         ? 'bg-amber-50 border-amber-200 dark:bg-amber-900/10 dark:border-amber-800/40'
-        : 'bg-white border-slate-100 dark:bg-slate-800/60 dark:border-slate-700/60',
+        : 'bg-white border-[var(--sh-dark)]',
     )}>
       <div className="flex items-center gap-2">
         <div className="h-6 w-6 rounded-full bg-brand-100 dark:bg-brand-900/40 flex items-center justify-center text-brand-700 dark:text-brand-300 text-[10px] font-bold shrink-0">
           {comment.author_id?.slice(0, 2).toUpperCase() ?? 'SY'}
         </div>
-        <span className="text-xs font-medium text-slate-700 dark:text-slate-300">
+        <span className="text-xs font-medium text-[var(--tx-2)]">
           {comment.author_id ? `Agent #${comment.author_id.slice(0, 6)}` : 'System'}
         </span>
         {comment.is_internal && (
@@ -117,9 +117,9 @@ function CommentItem({ comment, ticketId }: { comment: Comment; ticketId: string
         {comment.ai_generated && (
           <Badge tone="info" className="text-[9px] py-0.5 px-1.5">AI</Badge>
         )}
-        <span className="text-[10px] text-slate-400 ml-auto">{timeStr}</span>
+        <span className="text-[10px] text-[var(--tx-3)] ml-auto">{timeStr}</span>
       </div>
-      <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap leading-relaxed pl-8">
+      <p className="text-sm text-[var(--tx-2)] whitespace-pre-wrap leading-relaxed pl-8">
         {comment.body}
       </p>
 
@@ -182,43 +182,43 @@ function AuditRow({ entry }: { entry: { id: string; action: string; actor_email:
   const date = new Date(entry.created_at);
   const timeStr = date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) +
     ' ' + date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-  const cls = ACTION_CLS[entry.action] ?? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400';
+  const cls = ACTION_CLS[entry.action] ?? 'bg-[var(--inset)] text-[var(--tx-2)]';
 
   return (
     <>
       <tr
-        className="border-b border-slate-50 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/30 cursor-pointer transition-colors"
+        className="border-b border-[var(--sh-dark)] hover:bg-[var(--inset)] cursor-pointer transition-colors"
         onClick={() => setExpanded((p) => !p)}
       >
-        <td className="px-4 py-2 text-[11px] text-slate-500 whitespace-nowrap">{timeStr}</td>
-        <td className="px-4 py-2 text-[11px] font-medium text-slate-700 dark:text-slate-300">{entry.actor_email ?? 'System'}</td>
+        <td className="px-4 py-2 text-[11px] text-[var(--tx-3)] whitespace-nowrap">{timeStr}</td>
+        <td className="px-4 py-2 text-[11px] font-medium text-[var(--tx-2)]">{entry.actor_email ?? 'System'}</td>
         <td className="px-4 py-2">
           <span className={cn('pill text-[10px]', cls)}>{entry.action}</span>
         </td>
         <td className="px-4 py-2 text-right">
           {(entry.old_values || entry.new_values) && (
-            <svg className={cn('h-3 w-3 text-slate-400 inline-block transition-transform', expanded && 'rotate-180')} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <svg className={cn('h-3 w-3 text-[var(--tx-3)] inline-block transition-transform', expanded && 'rotate-180')} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M6 9l6 6 6-6" />
             </svg>
           )}
         </td>
       </tr>
       {expanded && (entry.old_values || entry.new_values) && (
-        <tr className="bg-slate-50 dark:bg-slate-900/50">
+        <tr className="bg-[var(--inset)]">
           <td colSpan={4} className="px-4 py-3">
             <div className="grid grid-cols-2 gap-3 text-xs">
               {entry.old_values && (
                 <div>
-                  <p className="font-medium text-slate-400 mb-1 text-[10px] uppercase tracking-wide">Before</p>
-                  <pre className="bg-white dark:bg-slate-800 rounded-lg p-2 overflow-x-auto text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-[10px]">
+                  <p className="font-medium text-[var(--tx-3)] mb-1 text-[10px] uppercase tracking-wide">Before</p>
+                  <pre className="bg-white rounded-lg p-2 overflow-x-auto text-[var(--tx-2)] border border-[var(--sh-dark)] text-[10px]">
                     {JSON.stringify(entry.old_values, null, 2)}
                   </pre>
                 </div>
               )}
               {entry.new_values && (
                 <div>
-                  <p className="font-medium text-slate-400 mb-1 text-[10px] uppercase tracking-wide">After</p>
-                  <pre className="bg-white dark:bg-slate-800 rounded-lg p-2 overflow-x-auto text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-[10px]">
+                  <p className="font-medium text-[var(--tx-3)] mb-1 text-[10px] uppercase tracking-wide">After</p>
+                  <pre className="bg-white rounded-lg p-2 overflow-x-auto text-[var(--tx-2)] border border-[var(--sh-dark)] text-[10px]">
                     {JSON.stringify(entry.new_values, null, 2)}
                   </pre>
                 </div>
@@ -235,10 +235,10 @@ function AuditRow({ entry }: { entry: { id: string; action: string; actor_email:
 
 function MetaRow({ label, value, mono = false }: { label: string; value: React.ReactNode; mono?: boolean }) {
   return (
-    <div className="flex items-start justify-between gap-2 py-1.5 border-b border-slate-50 dark:border-slate-800/60 last:border-b-0">
-      <span className="text-[11px] text-slate-400 uppercase tracking-wide font-medium shrink-0">{label}</span>
-      <span className={cn('text-xs text-slate-700 dark:text-slate-300 text-right', mono && 'font-mono truncate max-w-[140px]')} title={typeof value === 'string' ? value : undefined}>
-        {value ?? <span className="text-slate-300 dark:text-slate-600">—</span>}
+    <div className="flex items-start justify-between gap-2 py-1.5 border-b border-[var(--sh-dark)]/60 last:border-b-0">
+      <span className="text-[11px] text-[var(--tx-3)] uppercase tracking-wide font-medium shrink-0">{label}</span>
+      <span className={cn('text-xs text-[var(--tx-2)] text-right', mono && 'font-mono truncate max-w-[140px]')} title={typeof value === 'string' ? value : undefined}>
+        {value ?? <span className="text-[var(--tx-3)]">—</span>}
       </span>
     </div>
   );
@@ -321,7 +321,7 @@ export function TicketDetailPage() {
           <circle cx="12" cy="12" r="10" /><path d="M12 8v4M12 16h.01" />
         </svg>
         <p className="text-sm font-medium">Ticket not found</p>
-        <p className="text-xs text-slate-400">This ticket doesn't exist or you don't have access.</p>
+        <p className="text-xs text-[var(--tx-3)]">This ticket doesn't exist or you don't have access.</p>
         <Button variant="ghost" onClick={() => navigate('/tickets')}>Back to Tickets</Button>
       </div>
     );
@@ -351,8 +351,8 @@ export function TicketDetailPage() {
         <button onClick={() => navigate('/tickets')} className="text-brand-600 hover:underline dark:text-brand-400">
           Tickets
         </button>
-        <span className="text-slate-300 dark:text-slate-700">/</span>
-        <span className="font-mono text-slate-500 dark:text-slate-400">{ticket.ticket_number}</span>
+        <span className="text-[var(--tx-3)]">/</span>
+        <span className="font-mono text-[var(--tx-3)]">{ticket.ticket_number}</span>
       </div>
 
       {/* ── Title + status row ───────────────────────────────────────── */}
@@ -375,7 +375,7 @@ export function TicketDetailPage() {
               />
             )}
           </div>
-          <h1 className="text-lg font-semibold text-slate-900 dark:text-slate-100 leading-snug">
+          <h1 className="text-lg font-semibold text-[var(--tx)] leading-snug">
             {ticket.title}
           </h1>
         </div>
@@ -405,13 +405,13 @@ export function TicketDetailPage() {
 
           {/* Description */}
           <div className="card-sm p-4">
-            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2.5">Description</h2>
-            <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed whitespace-pre-wrap">
+            <h2 className="text-sm font-semibold text-[var(--tx-2)] mb-2.5">Description</h2>
+            <p className="text-sm text-[var(--tx-2)] leading-relaxed whitespace-pre-wrap">
               {ticket.description}
             </p>
             {ticket.email_from && (
-              <div className="mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800 text-xs text-slate-500">
-                From: <span className="font-mono text-slate-600 dark:text-slate-400">{ticket.email_from}</span>
+              <div className="mt-3 pt-2.5 border-t border-[var(--sh-dark)] text-xs text-[var(--tx-3)]">
+                From: <span className="font-mono text-[var(--tx-2)]">{ticket.email_from}</span>
               </div>
             )}
           </div>
@@ -419,13 +419,13 @@ export function TicketDetailPage() {
           {/* AI Insights (collapsible) */}
           <div className="card-sm overflow-hidden">
             {/* AI header */}
-            <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-100 dark:border-slate-800">
+            <div className="flex items-center gap-2 px-4 py-3 border-b border-[var(--sh-dark)]">
               <div className="h-5 w-5 rounded bg-accent-100 dark:bg-accent-500/20 flex items-center justify-center shrink-0">
                 <svg className="h-3 w-3 text-accent-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M12 2a10 10 0 0 1 0 20M12 2a10 10 0 0 0 0 20M12 8v4M12 16h.01" />
                 </svg>
               </div>
-              <span className="text-sm font-semibold text-slate-700 dark:text-slate-300 flex-1">AI Insights</span>
+              <span className="text-sm font-semibold text-[var(--tx-2)] flex-1">AI Insights</span>
 
               <div className="flex items-center gap-1.5">
                 <Button
@@ -450,7 +450,7 @@ export function TicketDetailPage() {
                 {hasAI && (
                   <button
                     onClick={() => setAiExpanded((p) => !p)}
-                    className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
+                    className="text-[var(--tx-3)] hover:text-[var(--tx)] transition-colors"
                     aria-expanded={aiExpanded}
                     title={aiExpanded ? 'Collapse' : 'Expand'}
                   >
@@ -464,16 +464,16 @@ export function TicketDetailPage() {
 
             {/* AI content */}
             {!hasAI ? (
-              <p className="text-xs text-slate-400 italic px-4 py-3">
+              <p className="text-xs text-[var(--tx-3)] italic px-4 py-3">
                 Click "Summarize" or "Suggestions" to run AI analysis.
               </p>
             ) : aiExpanded ? (
               <div className="p-4 flex flex-col gap-3">
                 {/* Existing summary from DB */}
                 {ticket.ai_summary && !aiSummaryResult && (
-                  <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
-                    <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1">AI Summary</p>
-                    <p className="text-xs text-slate-700 dark:text-slate-300">{ticket.ai_summary}</p>
+                  <div className="p-3 rounded-lg bg-[var(--inset)] border border-[var(--sh-dark)]">
+                    <p className="text-[10px] font-semibold text-[var(--tx-3)] uppercase tracking-wide mb-1">AI Summary</p>
+                    <p className="text-xs text-[var(--tx-2)]">{ticket.ai_summary}</p>
                   </div>
                 )}
                 {/* Fresh summary */}
@@ -490,7 +490,7 @@ export function TicketDetailPage() {
                           {aiSummaryResult.sentiment && (
                             <span className={cn('pill text-[9px]',
                               aiSummaryResult.sentiment === 'positive' ? 'bg-emerald-100 text-emerald-700' :
-                              aiSummaryResult.sentiment === 'negative' ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-600'
+                              aiSummaryResult.sentiment === 'negative' ? 'bg-red-100 text-red-700' : 'bg-[var(--inset)] text-[var(--tx-2)]'
                             )}>{aiSummaryResult.sentiment}</span>
                           )}
                           {/* Band comes from the server; deriving it here is how
@@ -500,11 +500,11 @@ export function TicketDetailPage() {
                               aiSummaryResult.risk_band === 'high' ? 'bg-red-100 text-red-700' :
                               aiSummaryResult.risk_band === 'medium' ? 'bg-amber-100 text-amber-700' :
                               aiSummaryResult.risk_band === 'low' ? 'bg-emerald-100 text-emerald-700' :
-                              'bg-slate-100 text-slate-600'
+                              'bg-[var(--inset)] text-[var(--tx-2)]'
                             )}>Risk {(aiSummaryResult.risk_score * 100).toFixed(0)}%</span>
                           )}
                         </div>
-                        <p className="text-xs text-slate-700 dark:text-slate-300">{aiSummaryResult.summary}</p>
+                        <p className="text-xs text-[var(--tx-2)]">{aiSummaryResult.summary}</p>
                       </>
                     )}
                   </div>
@@ -513,15 +513,15 @@ export function TicketDetailPage() {
                 {aiSuggestResult && showSuggestions && (
                   <div>
                     <div className="flex items-center justify-between mb-2">
-                      <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Suggestions</p>
-                      <button onClick={() => setShowSuggestions(false)} className="text-[10px] text-slate-400 hover:text-slate-600">Hide</button>
+                      <p className="text-[10px] font-semibold text-[var(--tx-3)] uppercase tracking-wide">Suggestions</p>
+                      <button onClick={() => setShowSuggestions(false)} className="text-[10px] text-[var(--tx-3)] hover:text-[var(--tx)]">Hide</button>
                     </div>
                     {aiSuggestResult.error ? (
                       <p className="text-xs text-red-600 dark:text-red-400 whitespace-pre-line">{aiSuggestResult.error}</p>
                     ) : (
                     <div className="flex flex-col gap-2">
                       {aiSuggestResult.suggestions.map((s, i) => (
-                        <div key={i} className="flex items-start gap-2 text-xs text-slate-700 dark:text-slate-300">
+                        <div key={i} className="flex items-start gap-2 text-xs text-[var(--tx-2)]">
                           <span className="h-4 w-4 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center text-[9px] font-bold shrink-0 mt-0.5">{i + 1}</span>
                           {s}
                         </div>
@@ -532,16 +532,16 @@ export function TicketDetailPage() {
                 )}
               </div>
             ) : (
-              <p className="text-xs text-slate-400 px-4 py-2">AI insights available — click to expand.</p>
+              <p className="text-xs text-[var(--tx-3)] px-4 py-2">AI insights available — click to expand.</p>
             )}
           </div>
 
           {/* Comments */}
           <div className="card-sm p-4">
-            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-3">
+            <h2 className="text-sm font-semibold text-[var(--tx-2)] mb-3">
               Comments
               {comments.length > 0 && (
-                <span className="ml-1.5 text-xs font-normal text-slate-400">({comments.length})</span>
+                <span className="ml-1.5 text-xs font-normal text-[var(--tx-3)]">({comments.length})</span>
               )}
             </h2>
 
@@ -549,7 +549,7 @@ export function TicketDetailPage() {
               {commentsQuery.isLoading ? (
                 [1, 2].map((i) => <Sk key={i} className="h-16 rounded-lg" />)
               ) : comments.length === 0 ? (
-                <p className="text-xs text-slate-400 italic">No comments yet.</p>
+                <p className="text-xs text-[var(--tx-3)] italic">No comments yet.</p>
               ) : (
                 comments
                   .filter((c) => isAgent || !c.is_internal)
@@ -561,7 +561,7 @@ export function TicketDetailPage() {
                 rejected — offering a control the server refuses is worse than
                 not offering it. */}
             {canReply && (
-            <div className="border-t border-slate-100 dark:border-slate-800 pt-3 flex flex-col gap-2">
+            <div className="border-t border-[var(--sh-dark)] pt-3 flex flex-col gap-2">
               <textarea
                 className="input resize-none text-sm"
                 rows={3}
@@ -581,10 +581,10 @@ export function TicketDetailPage() {
 
               <div className="flex items-center justify-between">
                 {canWrite && (
-                  <label className="flex items-center gap-2 cursor-pointer select-none text-xs text-slate-500 dark:text-slate-400">
+                  <label className="flex items-center gap-2 cursor-pointer select-none text-xs text-[var(--tx-3)]">
                     <input
                       type="checkbox"
-                      className="rounded border-slate-300 text-amber-500 focus:ring-amber-400"
+                      className="rounded border-[var(--sh-dark)] text-amber-500 focus:ring-amber-400"
                       checked={isInternal}
                       onChange={(e) => setIsInternal(e.target.checked)}
                     />
@@ -618,26 +618,26 @@ export function TicketDetailPage() {
           {/* Audit trail */}
           {isAgent && (
             <div className="card-sm overflow-hidden">
-              <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800">
-                <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">Audit Trail</span>
+              <div className="px-4 py-3 border-b border-[var(--sh-dark)]">
+                <span className="text-sm font-semibold text-[var(--tx-2)]">Audit Trail</span>
               </div>
               <table className="w-full text-xs">
                 <thead>
-                  <tr className="border-b border-slate-100 dark:border-slate-800">
-                    <th className="text-left px-4 py-2 text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Time</th>
-                    <th className="text-left px-4 py-2 text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Actor</th>
-                    <th className="text-left px-4 py-2 text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Action</th>
+                  <tr className="border-b border-[var(--sh-dark)]">
+                    <th className="text-left px-4 py-2 text-[10px] uppercase tracking-wider text-[var(--tx-3)] font-semibold">Time</th>
+                    <th className="text-left px-4 py-2 text-[10px] uppercase tracking-wider text-[var(--tx-3)] font-semibold">Actor</th>
+                    <th className="text-left px-4 py-2 text-[10px] uppercase tracking-wider text-[var(--tx-3)] font-semibold">Action</th>
                     <th className="px-4 py-2 w-8" />
                   </tr>
                 </thead>
                 <tbody>
                   {auditQuery.isLoading ? (
                     <tr>
-                      <td colSpan={4} className="px-4 py-4 text-center text-xs text-slate-400">Loading…</td>
+                      <td colSpan={4} className="px-4 py-4 text-center text-xs text-[var(--tx-3)]">Loading…</td>
                     </tr>
                   ) : auditQuery.data?.items.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="px-4 py-4 text-center text-xs text-slate-400">No audit entries</td>
+                      <td colSpan={4} className="px-4 py-4 text-center text-xs text-[var(--tx-3)]">No audit entries</td>
                     </tr>
                   ) : (
                     (auditQuery.data?.items ?? []).map((entry) => (
@@ -665,7 +665,7 @@ export function TicketDetailPage() {
 
           {/* Ticket info */}
           <div className="card-sm p-4">
-            <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Ticket Info</h2>
+            <h2 className="text-sm font-semibold text-[var(--tx-2)] mb-2">Ticket Info</h2>
             <div className="flex flex-col">
               <MetaRow label="Reporter"   value={ticket.reporter?.full_name ?? ticket.reporter_id} />
               <MetaRow
@@ -700,7 +700,7 @@ export function TicketDetailPage() {
           {/* Org unit */}
           {ticket.org_unit && (
             <div className="card-sm p-4">
-              <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Organisation Unit</h2>
+              <h2 className="text-sm font-semibold text-[var(--tx-2)] mb-2">Organisation Unit</h2>
               <div className="flex flex-col">
                 <MetaRow label="Name"  value={ticket.org_unit.name} />
                 <MetaRow label="Code"  value={<span className="font-mono text-xs">{ticket.org_unit.code}</span>} />
@@ -712,7 +712,7 @@ export function TicketDetailPage() {
           {/* SLA + controls */}
           <div className="card-sm p-4">
             <div className="flex items-center justify-between mb-2">
-              <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300">SLA</h2>
+              <h2 className="text-sm font-semibold text-[var(--tx-2)]">SLA</h2>
               {canWrite && (
                 <button
                   className="text-xs text-brand-600 dark:text-brand-400 hover:underline"
@@ -734,8 +734,8 @@ export function TicketDetailPage() {
           {(ticket.tags.length > 0 || ticket.ai_sentiment) && (
             <div className="card-sm p-4">
               {ticket.tags.length > 0 && (
-                <div className={cn(ticket.ai_sentiment ? 'mb-3 pb-3 border-b border-slate-100 dark:border-slate-800' : '')}>
-                  <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Tags</h2>
+                <div className={cn(ticket.ai_sentiment ? 'mb-3 pb-3 border-b border-[var(--sh-dark)]' : '')}>
+                  <h2 className="text-sm font-semibold text-[var(--tx-2)] mb-2">Tags</h2>
                   <div className="flex flex-wrap gap-1.5">
                     {ticket.tags.map((tag) => (
                       <span key={tag} className="pill bg-brand-50 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300">
@@ -747,11 +747,11 @@ export function TicketDetailPage() {
               )}
               {ticket.ai_sentiment && (
                 <div>
-                  <h2 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Sentiment</h2>
+                  <h2 className="text-sm font-semibold text-[var(--tx-2)] mb-1.5">Sentiment</h2>
                   <span className={cn('pill text-xs',
                     ticket.ai_sentiment === 'positive' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' :
                     ticket.ai_sentiment === 'negative' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
-                    'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                    'bg-[var(--inset)] text-[var(--tx-2)]'
                   )}>
                     {ticket.ai_sentiment}
                   </span>

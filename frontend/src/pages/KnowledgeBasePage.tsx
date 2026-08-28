@@ -5,6 +5,7 @@ import { Button } from '@/components/Button';
 import { cn } from '@/lib/cn';
 import { extractError } from '@/lib/api';
 import { useAuth } from '@/store/auth';
+import { PageHeader, PageShell } from '@/components/PageHeader';
 import {
   abstainMessage,
   askKnowledgeBase,
@@ -113,21 +114,16 @@ export function KnowledgeBasePage() {
   };
 
   return (
-    <div className="flex flex-col gap-6">
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold">Knowledge Base</h1>
-          <p className="text-sm text-[var(--tx-3)] mt-1 max-w-2xl">
-            Policies, runbooks and procedure notes that staff can ask questions against.
-            Every answer is traced back to the passage it came from.
-          </p>
-        </div>
-        {statusQuery.data && (
+    <PageShell>
+      <PageHeader
+        title="Knowledge Base"
+        subtitle="Policies, runbooks and procedure notes that staff can ask questions against. Every answer is traced back to the passage it came from."
+        actions={statusQuery.data && (
           <span className="text-xs text-[var(--tx-3)] font-mono">
             {statusQuery.data.embedding_model} · {statusQuery.data.embedding_dim}d
           </span>
         )}
-      </header>
+      />
 
       {banner && (
         <div
@@ -222,7 +218,7 @@ export function KnowledgeBasePage() {
           The knowledge base holds internal staff procedure and is not available to branch users.
         </p>
       )}
-    </div>
+    </PageShell>
   );
 }
 

@@ -1,18 +1,39 @@
 import { useState } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 
 import { Logo } from '@/components/Logo';
 import { AIChatWidget } from '@/components/AIChatWidget';
 import { useTheme } from '@/store/theme';
 import { cn } from '@/lib/cn';
-import { useAuth, type Role } from '@/store/auth';
+import { useAuth, type AuthUser } from '@/store/auth';
+import {
+  canManageOrg,
+  canManageUsers,
+  canQueryKnowledgeBase,
+  canViewAudit,
+  canViewBranches,
+  canViewEscalations,
+  canViewReports,
+  canViewSLA,
+} from '@/lib/permissions';
 import { logout as apiLogout } from '@/features/auth/api';
 
 interface NavItem {
   to: string;
   label: string;
   icon: string;
-  roles?: Role[];
+  /**
+   * Whether this viewer may open the route. Omit for routes open to every
+   * signed-in user.
+   *
+   * A predicate from `@/lib/permissions`, not a role list. The sidebar used to
+   * carry its own `roles: Role[]` on each item, which made it a third copy of
+   * rules already stated in `authz.py` and in the router's `RequireAuth`
+   * guards. Three copies of one rule drift, and the sidebar is what tells a
+   * user a route exists — so a sidebar that disagrees with the router either
+   * shows links that 403 or hides pages the user is entitled to.
+   */
+  can?: (u: AuthUser | null) => boolean;
   badge?: string;
 }
 
@@ -52,42 +73,42 @@ const NAV_SECTIONS: NavSection[] = [
       // them — see KnowledgeBasePage.
       { to: '/knowledge', label: 'Documents & Ask', badge: 'RAG',
         icon: 'M4 5a2 2 0 012-2h12v18H6a2 2 0 01-2-2zM8 7h8M8 11h6',
-        roles: ['admin', 'supervisor', 'agent'] },
+        can: canQueryKnowledgeBase },
     ],
   },
   {
     title: 'Operations',
     items: [
       { to: '/sla',         label: 'SLA Monitor', icon: 'M12 8v4l3 2M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
-        roles: ['admin', 'supervisor'] },
+        can: canViewSLA },
       { to: '/escalations', label: 'Escalations', icon: 'M12 9v4M12 17h.01M4.93 19h14.14L12 5z',
-        roles: ['admin', 'supervisor'] },
+        can: canViewEscalations },
       { to: '/branches',    label: 'Branches',    icon: 'M3 21h18M5 21V8l7-5 7 5v13M9 21v-6h6v6',
-        roles: ['admin', 'supervisor'] },
+        can: canViewBranches },
     ],
   },
   {
     title: 'Administration',
     items: [
       { to: '/org',   label: 'Org Hierarchy', icon: 'M3 21V8l9-5 9 5v13M9 21V12h6v9',
-        roles: ['admin'] },
+        can: canManageOrg },
       { to: '/users', label: 'Users',         icon: 'M16 11a4 4 0 10-8 0 4 4 0 008 0zM2 21a8 8 0 1116 0',
-        roles: ['admin', 'supervisor'] },
+        can: canManageUsers },
     ],
   },
   {
     title: 'Oversight',
     items: [
       { to: '/reports', label: 'Reports',   icon: 'M9 17v-6M12 17v-4M15 17v-2M5 3h14l1 4H4zM3 7h18v14H3z',
-        roles: ['admin', 'supervisor', 'auditor'] },
+        can: canViewReports },
       { to: '/audit',   label: 'Audit Log', icon: 'M9 12h6M9 16h6M5 4h14v16H5z',
-        roles: ['auditor', 'admin'] },
+        can: canViewAudit },
     ],
   },
   {
     title: 'Account',
     items: [
-      // No `roles`: two-factor authentication is a personal account setting, so
+      // No `can`: two-factor authentication is a personal account setting, so
       // every signed-in user needs to reach it.
       { to: '/security', label: 'Security', icon: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10zM9 12l2 2 4-4' },
     ],
@@ -110,6 +131,35 @@ function Icon({ d, className }: { d: string; className?: string }) {
   );
 }
 
+/**
+ * The header breadcrumb.
+ *
+ * It used to read "SUCCESS Bank / Internal Ticketing" on every route — the
+ * same two words on all fourteen screens, which is decoration, not a
+ * breadcrumb. It now names where you actually are, which is the one thing a
+ * persistent header is for.
+ *
+ * Derived from the nav table rather than a second hand-written map, so a
+ * renamed sidebar item cannot leave a stale crumb behind it.
+ */
+function useBreadcrumb(): string[] {
+  const { pathname } = useLocation();
+
+  for (const section of NAV_SECTIONS) {
+    for (const item of section.items) {
+      if (pathname === item.to || pathname.startsWith(`${item.to}/`)) {
+        const leaf =
+          pathname === item.to
+            ? []
+            // The ticket number is not known here, so name the kind of thing.
+            : [pathname.endsWith('/new') ? 'New' : 'Detail'];
+        return [...(section.title ? [section.title] : []), item.label, ...leaf];
+      }
+    }
+  }
+  return ['Internal Ticketing'];
+}
+
 function userInitials(name: string): string {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase()).join('') || '?';
 }
@@ -119,15 +169,14 @@ export function AppLayout() {
   const { user, refreshToken, clear } = useAuth();
   const nav = useNavigate();
   const [searchValue, setSearchValue] = useState('');
+  const crumbs = useBreadcrumb();
 
   // Filter items first, then drop any section left empty — otherwise an agent
   // sees an "Administration" heading with nothing under it.
   const visibleSections = NAV_SECTIONS
     .map((section) => ({
       ...section,
-      items: section.items.filter(
-        (i) => !i.roles || (user && i.roles.includes(user.role)),
-      ),
+      items: section.items.filter((i) => !i.can || i.can(user)),
     }))
     .filter((section) => section.items.length > 0);
 
@@ -222,11 +271,17 @@ export function AppLayout() {
           style={{ height: 'var(--header-height, 56px)', boxShadow: '0 2px 8px var(--sh-dark)' }}
         >
           {/* Breadcrumb */}
-          <div className="flex items-center gap-2 text-xs text-[var(--tx-3)]">
-            <span className="font-medium text-[var(--tx-2)]">SUCCESS Bank</span>
-            <span>/</span>
-            <span>Internal Ticketing</span>
-          </div>
+          <nav aria-label="Breadcrumb" className="flex items-center gap-2 text-xs text-[var(--tx-3)] min-w-0">
+            <span className="font-medium text-[var(--tx-2)] shrink-0">SUCCESS Bank</span>
+            {crumbs.map((crumb, i) => (
+              <span key={crumb} className="flex items-center gap-2 min-w-0">
+                <span aria-hidden="true">/</span>
+                <span className={cn('truncate', i === crumbs.length - 1 && 'text-[var(--tx-2)]')}>
+                  {crumb}
+                </span>
+              </span>
+            ))}
+          </nav>
 
           {/* Search + user */}
           <div className="flex items-center gap-3">

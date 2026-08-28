@@ -68,7 +68,7 @@ export function AssigneeControl({ ticket, canAssign, canAutoAssign }: Props) {
   const current = ticket.assignee?.full_name ?? null;
 
   if (!canAssign) {
-    return <span className="text-slate-700 dark:text-slate-300">{current ?? 'Unassigned'}</span>;
+    return <span className="text-[var(--tx-2)]">{current ?? 'Unassigned'}</span>;
   }
 
   const entries = rankCandidates(workloadQuery.data ?? []);
@@ -76,7 +76,7 @@ export function AssigneeControl({ ticket, canAssign, canAutoAssign }: Props) {
   return (
     <div className="flex flex-col items-end gap-1">
       <div className="flex items-center gap-2">
-        <span className={cn('text-slate-700 dark:text-slate-300', !current && 'italic text-[var(--tx-3)]')}>
+        <span className={cn('text-[var(--tx-2)]', !current && 'italic text-[var(--tx-3)]')}>
           {current ?? 'Unassigned'}
         </span>
         <button

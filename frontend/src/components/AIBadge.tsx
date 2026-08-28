@@ -53,7 +53,7 @@ export function AIBadge({ category, confidence, riskScore, riskBand, className }
         </span>
       )}
       {riskScore !== null && (
-        <span className={cn('pill text-xs', band?.className ?? 'bg-slate-100 text-slate-700')}>
+        <span className={cn('pill text-xs', band?.className ?? 'bg-[var(--inset)] text-[var(--tx-2)]')}>
           <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M12 9v4M12 17h.01M4.93 19h14.14L12 5z" />
           </svg>

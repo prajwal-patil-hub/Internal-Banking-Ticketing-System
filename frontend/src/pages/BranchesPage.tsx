@@ -5,6 +5,7 @@ import { Button } from '@/components/Button';
 import { cn } from '@/lib/cn';
 import { extractError } from '@/lib/api';
 import { useAuth } from '@/store/auth';
+import { PageHeader, PageShell } from '@/components/PageHeader';
 import {
   listBranches,
   getBranchSummary,
@@ -163,22 +164,16 @@ export function BranchesPage() {
   };
 
   return (
-    <div className="flex flex-col gap-5">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight text-[var(--tx)]">
-            Branch Management
-          </h1>
-          <p className="text-xs text-[var(--tx-3)] mt-0.5">
-            {summary ? `${summary.total} branches · ${summary.regions.length} regions` : 'Loading…'}
-          </p>
-        </div>
-        {canExport && (
+    <PageShell>
+      <PageHeader
+        title="Branch Management"
+        subtitle={summary ? `${summary.total} branches · ${summary.regions.length} regions` : 'Loading…'}
+        actions={canExport && (
           <Button variant="ghost" onClick={handleExport} disabled={exporting}>
             {exporting ? 'Preparing…' : 'Export CSV'}
           </Button>
         )}
-      </div>
+      />
       {exportError && <p className="text-xs text-[var(--err)] -mt-3">{exportError}</p>}
 
       {/* Network health */}
@@ -310,6 +305,6 @@ export function BranchesPage() {
           </table>
         </div>
       </div>
-    </div>
+    </PageShell>
   );
 }

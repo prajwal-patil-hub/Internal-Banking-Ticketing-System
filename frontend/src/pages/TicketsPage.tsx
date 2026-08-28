@@ -4,9 +4,11 @@ import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/Button';
 import { TicketCard } from '@/components/TicketCard';
 import { useAuth } from '@/store/auth';
+import { canRaiseTicket } from '@/lib/permissions';
 import { cn } from '@/lib/cn';
 import { listTickets } from '@/features/tickets/api';
 import type { TicketSource, TicketStatus, TicketPriority } from '@/features/tickets/api';
+import { PageHeader, PageShell, RefreshingDot } from '@/components/PageHeader';
 
 const STALE = 30_000;
 const PAGE_SIZE = 20;
@@ -35,12 +37,12 @@ const PRIORITY_OPTIONS: { value: TicketPriority | ''; label: string }[] = [
 // ── Skeleton ──────────────────────────────────────────────────────────────────
 
 function Sk({ className }: { className?: string }) {
-  return <div className={cn('animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800', className)} />;
+  return <div className={cn('animate-pulse rounded-lg bg-[var(--inset)]', className)} />;
 }
 
 function TicketSkeleton() {
   return (
-    <div className="rounded-xl border border-slate-200 dark:border-slate-800 p-3.5">
+    <div className="rounded-xl border border-[var(--sh-dark)] p-3.5">
       <div className="flex flex-col gap-2">
         <div className="flex items-center gap-2">
           <Sk className="h-4 w-20 rounded" />
@@ -82,6 +84,9 @@ function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }
 export function TicketsPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  // An auditor is read-only: offering a New Ticket button leads to a form
+  // whose submit the server rejects.
+  const canRaise = canRaiseTicket(user);
   const [searchParams, setSearchParams] = useSearchParams();
   const [filtersOpen, setFiltersOpen] = useState(false);
   const filterDrawerRef = useRef<HTMLDivElement>(null);
@@ -213,37 +218,31 @@ export function TicketsPage() {
   const total      = data?.total ?? 0;
 
   return (
-    <div className="flex flex-col gap-4">
+    <PageShell>
 
-      {/* ── Page header ─────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">Tickets</h1>
-          <p className="text-xs text-slate-400 mt-0.5">
-            {isFetching && !isLoading ? (
-              <span className="flex items-center gap-1">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse inline-block" />
-                Refreshing…
-              </span>
-            ) : (
-              `${total.toLocaleString()} ticket${total !== 1 ? 's' : ''}`
-            )}
-          </p>
-        </div>
-        <Button onClick={() => navigate('/tickets/new')}>
-          <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-          New Ticket
-        </Button>
-      </div>
+      <PageHeader
+        title="Tickets"
+        subtitle={
+          isFetching && !isLoading
+            ? <RefreshingDot />
+            : `${total.toLocaleString()} ticket${total !== 1 ? 's' : ''}`
+        }
+        actions={canRaise && (
+          <Button onClick={() => navigate('/tickets/new')}>
+            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            New Ticket
+          </Button>
+        )}
+      />
 
       {/* ── Search bar + filter trigger ──────────────────────────────── */}
       <div className="flex items-center gap-2">
         {/* Search */}
         <div className="relative flex-1">
           <svg
-            className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none"
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--tx-3)] pointer-events-none"
             viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
           >
             <circle cx="11" cy="11" r="8" />
@@ -258,7 +257,7 @@ export function TicketsPage() {
           {searchInput && (
             <button
               onClick={() => { setSearchInput(''); removeFilter('q'); }}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--tx-3)] hover:text-[var(--tx)]"
             >
               <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M18 6 6 18M6 6l12 12" />
@@ -297,7 +296,7 @@ export function TicketsPage() {
         {activeCount > 0 && (
           <button
             onClick={clearFilters}
-            className="text-xs text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 whitespace-nowrap shrink-0 transition-colors"
+            className="text-xs text-[var(--tx-3)] hover:text-[var(--tx)] whitespace-nowrap shrink-0 transition-colors"
           >
             Clear all
           </button>
@@ -310,11 +309,11 @@ export function TicketsPage() {
         aria-hidden={!filtersOpen}
       >
         <div ref={filterDrawerRef}>
-          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+          <div className="rounded-xl border border-[var(--sh-dark)] bg-white p-4">
             <div className="flex flex-wrap items-end gap-4 mb-4">
               {/* Status */}
               <div className="flex flex-col gap-1">
-                <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Status</label>
+                <label className="text-[10px] font-semibold uppercase tracking-wider text-[var(--tx-3)]">Status</label>
                 <select
                   className="input w-40 h-8 text-xs"
                   value={draftStatus}
@@ -328,7 +327,7 @@ export function TicketsPage() {
 
               {/* Priority */}
               <div className="flex flex-col gap-1">
-                <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Priority</label>
+                <label className="text-[10px] font-semibold uppercase tracking-wider text-[var(--tx-3)]">Priority</label>
                 <select
                   className="input w-36 h-8 text-xs"
                   value={draftPriority}
@@ -342,11 +341,11 @@ export function TicketsPage() {
 
               {/* My Tickets */}
               <div className="flex flex-col gap-1">
-                <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Assigned To</label>
-                <label className="flex items-center gap-2 h-8 cursor-pointer select-none text-sm font-medium text-slate-700 dark:text-slate-300">
+                <label className="text-[10px] font-semibold uppercase tracking-wider text-[var(--tx-3)]">Assigned To</label>
+                <label className="flex items-center gap-2 h-8 cursor-pointer select-none text-sm font-medium text-[var(--tx-2)]">
                   <input
                     type="checkbox"
-                    className="rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                    className="rounded border-[var(--sh-dark)] text-brand-600 focus:ring-brand-500"
                     checked={draftMyTickets}
                     onChange={(e) => setDraftMine(e.target.checked)}
                   />
@@ -355,11 +354,11 @@ export function TicketsPage() {
               </div>
             </div>
 
-            <div className="flex items-center gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+            <div className="flex items-center gap-2 pt-3 border-t border-[var(--sh-dark)]">
               <Button onClick={applyFilters}>Apply Filters</Button>
               <button
                 onClick={() => { setDraftStatus(''); setDraftPriority(''); setDraftMine(false); }}
-                className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
+                className="text-xs text-[var(--tx-3)] hover:text-[var(--tx)] transition-colors"
               >
                 Reset
               </button>
@@ -371,7 +370,7 @@ export function TicketsPage() {
       {/* ── Active filter chips ──────────────────────────────────────── */}
       {activeCount > 0 && (
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Active:</span>
+          <span className="text-[10px] uppercase tracking-wider text-[var(--tx-3)] font-semibold">Active:</span>
           {search    && <FilterChip label={`Search: "${search}"`}                onRemove={() => removeFilter('q')} />}
           {status    && <FilterChip label={`Status: ${status.replace('_', ' ')}`} onRemove={() => removeFilter('status')} />}
           {priority  && <FilterChip label={`Priority: ${priority}`}              onRemove={() => removeFilter('priority')} />}
@@ -389,11 +388,11 @@ export function TicketsPage() {
 
       {/* ── Error ───────────────────────────────────────────────────── */}
       {isError && (
-        <div className="flex items-center gap-3 rounded-xl border border-red-100 dark:border-red-900/40 bg-white dark:bg-slate-900 p-4">
+        <div className="flex items-center gap-3 rounded-xl border border-red-100 dark:border-red-900/40 bg-white p-4">
           <svg className="h-5 w-5 text-red-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="10" /><path d="M12 8v4M12 16h.01" />
           </svg>
-          <p className="text-sm text-slate-600 dark:text-slate-400 flex-1">Failed to load tickets. Please try again.</p>
+          <p className="text-sm text-[var(--tx-2)] flex-1">Failed to load tickets. Please try again.</p>
           <Button variant="ghost" onClick={() => refetch()}>Retry</Button>
         </div>
       )}
@@ -409,13 +408,13 @@ export function TicketsPage() {
       {!isLoading && !isError && data && (
         <>
           {data.items.length === 0 ? (
-            <div className="flex flex-col items-center gap-3 py-16 text-center bg-white dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800">
-              <svg className="h-10 w-10 text-slate-300 dark:text-slate-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <div className="flex flex-col items-center gap-3 py-16 text-center bg-white rounded-xl border border-[var(--sh-dark)]">
+              <svg className="h-10 w-10 text-[var(--tx-3)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M9 12h6M9 16h6M13 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-5-5z" />
               </svg>
               <div>
-                <p className="text-sm font-medium text-slate-700 dark:text-slate-300">No tickets found</p>
-                <p className="text-xs text-slate-400 mt-1">
+                <p className="text-sm font-medium text-[var(--tx-2)]">No tickets found</p>
+                <p className="text-xs text-[var(--tx-3)] mt-1">
                   {activeCount > 0 ? 'Try adjusting your filters.' : 'Create your first ticket to get started.'}
                 </p>
               </div>
@@ -434,7 +433,7 @@ export function TicketsPage() {
           {/* ── Pagination ───────────────────────────────────────────── */}
           {totalPages > 1 && (
             <div className="flex items-center justify-between pt-1">
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-[var(--tx-3)]">
                 Page {page} of {totalPages} · {total.toLocaleString()} tickets
               </p>
               <div className="flex items-center gap-1.5">
@@ -464,7 +463,7 @@ export function TicketsPage() {
                           'h-7 w-7 rounded-lg text-xs font-medium transition-colors',
                           p === page
                             ? 'bg-brand-600 text-white'
-                            : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800',
+                            : 'text-[var(--tx-3)] hover:bg-[var(--inset)]',
                         )}
                       >
                         {p}
@@ -488,6 +487,6 @@ export function TicketsPage() {
           )}
         </>
       )}
-    </div>
+    </PageShell>
   );
 }
