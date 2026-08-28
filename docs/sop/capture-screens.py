@@ -21,7 +21,12 @@ BASE = "http://127.0.0.1:5199"
 CHROME = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome"
 OUT = Path(sys.argv[1])
 OUT.mkdir(parents=True, exist_ok=True)
-VP = {"width": 1440, "height": 900}
+from capture_config import DEVICE_SCALE_FACTOR, VIEWPORT
+
+# Shared with capture-kb-screen.py. The two scripts used to declare their own
+# viewports and had drifted 100px apart — see capture_config for what that
+# did to the walkthrough.
+VP = VIEWPORT
 
 USERS = {
     "branch":     ("sunita.desai@successbank.local", "Passw0rd@123"),
@@ -128,7 +133,7 @@ def CSS(sel):     return lambda p: p.locator(sel)
 
 with sync_playwright() as pw:
     b = pw.chromium.launch(executable_path=CHROME, args=["--no-sandbox"])
-    ctx = b.new_context(viewport=VP, device_scale_factor=2)
+    ctx = b.new_context(viewport=VP, device_scale_factor=DEVICE_SCALE_FACTOR)
     page = ctx.new_page()
 
     # ---- login ------------------------------------------------------------

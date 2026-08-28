@@ -26,6 +26,8 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
+from capture_config import DEVICE_SCALE_FACTOR, VIEWPORT
+
 OUT = Path(sys.argv[1] if len(sys.argv) > 1 else "docs/sop/screens")
 OUT.mkdir(parents=True, exist_ok=True)
 
@@ -241,8 +243,8 @@ def main() -> int:
             browser = pw.chromium.launch(
                 executable_path=CHROME, args=["--no-sandbox"]
             )
-            page = browser.new_page(viewport={"width": 1440, "height": 1000},
-                                    device_scale_factor=2)
+            page = browser.new_page(viewport=VIEWPORT,
+                                    device_scale_factor=DEVICE_SCALE_FACTOR)
 
             def route(pattern, payload):
                 page.route(

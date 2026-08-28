@@ -32,6 +32,8 @@ from pathlib import Path
 
 from PIL import Image
 
+from capture_config import EXPECTED_SIZE, check_uniform
+
 SHOTS = Path(sys.argv[1] if len(sys.argv) > 1 else "docs/sop/screens")
 OUT = Path(sys.argv[2] if len(sys.argv) > 2
            else "docs/sop/SUCCESS-Bank-Application-Walkthrough.html")
@@ -129,8 +131,6 @@ JOURNEY: list[tuple[str, str | None, list[tuple[str, str, str, str | None]]]] = 
          "Upload, grant roles, re-index. Administrators only.",
          "A collection with no roles granted is flagged as not searchable — "
          "otherwise it accepts uploads and answers nothing."),
-        ("70-knowledge-base", "The whole screen",
-         "Status, ask panel, collections and documents together.", None),
         ("60-ai-assistant", "The AI assistant",
          "Conversational help grounded in what your role can already open.",
          "It can summarise and suggest. It cannot change a ticket — it tells you "
@@ -435,6 +435,36 @@ def main() -> int:
     if not screens:
         print("No screenshots found — run capture-screens.py first.", file=sys.stderr)
         return 1
+    # Refuse to build from mixed capture sizes.
+    #
+    # The walkthrough lays every screen out at the same width, so a capture
+    # taken at a different viewport is silently rescaled: the four
+    # knowledge-base screens were shot at 1440x1000 (one taller still) against
+    # 1440x900 everywhere else, stretching them 11% and 52% taller than their
+    # neighbours. The sidebar is identical markup in all of them, but at a
+    # different scale it reads as a different component — the report that
+    # started this was "some pages show multiple types of sidebars".
+    #
+    # A hard failure, not a warning. The previous build emitted a perfectly
+    # valid HTML file that was wrong in a way only visible to someone
+    # scrolling through it.
+    problems = check_uniform(SHOTS)
+    if problems:
+        print(
+            f"Capture sizes are not uniform — expected "
+            f"{EXPECTED_SIZE[0]}x{EXPECTED_SIZE[1]} for every screen:",
+            file=sys.stderr,
+        )
+        for problem in problems:
+            print(f"  {problem}", file=sys.stderr)
+        print(
+            "\nRe-capture the offending screens. Both capture scripts import "
+            "the viewport from capture_config.py, so they cannot disagree; a "
+            "mismatch here means a stale PNG on disk.",
+            file=sys.stderr,
+        )
+        return 1
+
     OUT.parent.mkdir(parents=True, exist_ok=True)
     # One screen per line rather than one enormous line. It changes nothing in
     # a browser, but a viewer that shows the file as source — GitHub serves
