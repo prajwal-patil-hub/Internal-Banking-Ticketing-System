@@ -132,6 +132,7 @@ export function TicketCard({ ticket, className, compact = false }: Props) {
                 category={ticket.ai_category ?? null}
                 confidence={ticket.ai_confidence ?? null}
                 riskScore={ticket.ai_risk_score}
+                riskBand={ticket.ai_risk_band ?? null}
               />
             </div>
           )}

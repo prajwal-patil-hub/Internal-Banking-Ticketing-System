@@ -40,6 +40,8 @@ export interface Ticket {
   ai_confidence: number | null;
   ai_summary: string | null;
   ai_risk_score: number | null;
+  /** Banded by the server so the client never re-derives it. */
+  ai_risk_band: 'high' | 'medium' | 'low' | null;
   ai_sentiment: string | null;
   email_from: string | null;
   sla_breached: boolean;
@@ -64,6 +66,8 @@ export interface TicketSummary {
   assignee_id: string | null;
   sla_breached: boolean;
   ai_risk_score: number | null;
+  /** Banded by the server so the client never re-derives it. */
+  ai_risk_band: 'high' | 'medium' | 'low' | null;
   created_at: string;
 }
 
@@ -181,6 +185,33 @@ export async function assignTicket(id: string, assignee_id: string): Promise<Tic
   return data.data;
 }
 
+/** One candidate for a ticket, with the two facts needed to choose between them. */
+export interface WorkloadEntry {
+  user_id: string;
+  email: string;
+  full_name: string;
+  role: string;
+  open_count: number;
+  on_leave: boolean;
+  leave_from: string | null;
+  leave_to: string | null;
+  leave_note: string | null;
+}
+
+export async function getWorkload(): Promise<WorkloadEntry[]> {
+  const { data } = await api.get('/assignment/workload');
+  return data.data;
+}
+
+/**
+ * Let the router choose. Supervisor and above only — the server enforces it,
+ * this is just where the button lives.
+ */
+export async function autoAssignTicket(id: string): Promise<Ticket> {
+  const { data } = await api.post(`/tickets/${id}/auto-assign`);
+  return data.data;
+}
+
 export async function getComments(ticketId: string, includeInternal = true): Promise<Comment[]> {
   const { data } = await api.get(`/tickets/${ticketId}/comments`, {
     params: { include_internal: includeInternal },
@@ -202,14 +233,25 @@ export async function getCategories(): Promise<Category[]> {
   return data.data;
 }
 
-export async function aiSummarize(ticketId: string): Promise<{ summary: string; sentiment: string; risk_score: number }> {
+/**
+ * Both helpers now reach the model, so both can fail with the model
+ * unreachable. The server returns 200 with `error` set rather than a 5xx, so
+ * the reason can be rendered inline — and `summary` / `suggestions` come back
+ * empty in that case. Treating an empty result as success would put the UI
+ * back where it started: a button that appears to work and produces nothing.
+ */
+export async function aiSummarize(
+  ticketId: string,
+): Promise<{ summary: string | null; sentiment: string | null; risk_score: number | null; risk_band: 'high' | 'medium' | 'low' | null; error: string | null }> {
   const { data } = await api.post(`/tickets/${ticketId}/ai-summarize`, undefined, {
     timeout: AI_TIMEOUT_MS,
   });
   return data.data;
 }
 
-export async function aiSuggest(ticketId: string): Promise<{ suggestions: string[]; next_actions: string[] }> {
+export async function aiSuggest(
+  ticketId: string,
+): Promise<{ suggestions: string[]; error: string | null }> {
   const { data } = await api.post(`/tickets/${ticketId}/ai-suggest`, undefined, {
     timeout: AI_TIMEOUT_MS,
   });

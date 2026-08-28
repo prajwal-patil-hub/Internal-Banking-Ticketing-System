@@ -5,6 +5,7 @@ import { listTickets } from '@/features/tickets/api';
 import type { Ticket } from '@/features/tickets/api';
 import { listEscalationRules, listEscalationEvents } from '@/features/escalations/api';
 import type { EscalationRule, EscalationEvent } from '@/features/escalations/api';
+import { PageHeader, PageShell } from '@/components/PageHeader';
 
 const STALE = 30_000;
 
@@ -212,20 +213,15 @@ export function EscalationsPage() {
   const activeCount = escalatedTickets.length;
 
   return (
-    <div className="flex flex-col gap-5">
+    <PageShell>
 
-      {/* ── Header ──────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight text-[var(--tx)]">Escalations</h1>
-          <p className="text-xs text-[var(--tx-3)] mt-0.5">Active escalations and escalation rule management</p>
-        </div>
-        {activeCount > 0 && (
-          <span className="pill pill-err text-sm px-3 py-1">
-            {activeCount} Active
-          </span>
+      <PageHeader
+        title="Escalations"
+        subtitle="Active escalations and escalation rule management"
+        actions={activeCount > 0 && (
+          <span className="pill pill-err text-sm px-3 py-1">{activeCount} Active</span>
         )}
-      </div>
+      />
 
       {/* ── Summary cards ───────────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -347,6 +343,6 @@ export function EscalationsPage() {
           </table>
         </div>
       </div>
-    </div>
+    </PageShell>
   );
 }

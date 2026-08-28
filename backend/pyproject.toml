@@ -41,6 +41,17 @@ dependencies = [
   # --- AI ---
   "openai>=1.54.0",
 
+  # --- Knowledge base (RAG) ---
+  # pgvector ships the SQLAlchemy `Vector` column type; the matching Postgres
+  # extension must exist in the server image, which is why the compose files
+  # and CI pin `pgvector/pgvector:*` rather than stock `postgres:*`.
+  "pgvector==0.5.0",
+  "pypdf==6.16.2",
+  "python-docx==1.2.0",
+  # Golden-set format for the evaluation harness: SMEs will hand-edit it,
+  # and YAML is the only format they will not fight.
+  "pyyaml==6.0.2",
+
   # --- Email / file handling ---
   "aiosmtplib==3.0.1",
   "aiofiles==24.1.0",

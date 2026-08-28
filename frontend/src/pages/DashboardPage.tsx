@@ -2,7 +2,15 @@ import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/Button';
 import { TicketCard } from '@/components/TicketCard';
-import { useAuth } from '@/store/auth';
+import { useAuth, type Role } from '@/store/auth';
+import { PageHeader, PageShell } from '@/components/PageHeader';
+import {
+  canRaiseTicket,
+  canSeeOrgMetrics,
+  canViewEscalations,
+  canViewReports,
+  canViewSLA,
+} from '@/lib/permissions';
 import { cn } from '@/lib/cn';
 import {
   getDashboardKPIs,
@@ -110,7 +118,12 @@ function KPICard({ label, value, suffix, tone = 'default', icon, delta, to, hint
 
 // ── SLA Health ────────────────────────────────────────────────────────────────
 
-function SLAHealthCard({ sla }: { sla: SLAStatus }) {
+/**
+ * @param canOpenSLA whether this viewer's role can open `/sla`. Agents and
+ *   auditors cannot; for them the two segments that have no ticket-list filter
+ *   of their own render inert rather than linking to a 403.
+ */
+function SLAHealthCard({ sla, canOpenSLA }: { sla: SLAStatus; canOpenSLA: boolean }) {
   const navigate = useNavigate();
   const total = sla.on_time + sla.at_risk + sla.breached;
   const pct = (n: number) => (total > 0 ? (n / total) * 100 : 0);
@@ -147,29 +160,47 @@ function SLAHealthCard({ sla }: { sla: SLAStatus }) {
           // At Risk has no server-side filter of its own — it is a derived
           // "due within the hour" window — so it opens the SLA Monitor, which
           // computes exactly that. The other two map to real filters.
-          { label: 'On Time',  count: sla.on_time,  color: 'bg-emerald-500', to: '/sla' },
-          { label: 'At Risk',  count: sla.at_risk,  color: 'bg-amber-400',   to: '/sla' },
+          { label: 'On Time',  count: sla.on_time,  color: 'bg-emerald-500',
+            to: canOpenSLA ? '/sla' : null },
+          { label: 'At Risk',  count: sla.at_risk,  color: 'bg-amber-400',
+            to: canOpenSLA ? '/sla' : null },
+          // Breached maps to a real ticket-list filter, so it stays clickable
+          // for every role that can see this card at all.
           { label: 'Breached', count: sla.breached, color: 'bg-red-500',
             to: '/tickets?status_group=open&sla_breached=1' },
-        ].map(({ label, count, color, to }) => (
-          <button
-            key={label}
-            type="button"
-            onClick={() => navigate(to)}
-            aria-label={`${label}: ${count}. View these tickets.`}
-            className={cn(
-              'flex flex-col items-center gap-0.5 rounded-lg py-1 -my-1 transition-colors',
-              'hover:bg-[var(--inset)] cursor-pointer',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]',
-            )}
-          >
-            <div className="flex items-center gap-1">
-              <span className={cn('h-2 w-2 rounded-full inline-block', color)} />
-              <span className="text-xs font-bold tabular-nums text-[var(--tx)]">{count}</span>
-            </div>
-            <span className="text-[10px] text-[var(--tx-3)]">{label}</span>
-          </button>
-        ))}
+        ].map(({ label, count, color, to }) => {
+          const inner = (
+            <>
+              <div className="flex items-center gap-1">
+                <span className={cn('h-2 w-2 rounded-full inline-block', color)} />
+                <span className="text-xs font-bold tabular-nums text-[var(--tx)]">{count}</span>
+              </div>
+              <span className="text-[10px] text-[var(--tx-3)]">{label}</span>
+            </>
+          );
+          if (!to) {
+            return (
+              <div key={label} className="flex flex-col items-center gap-0.5 py-1 -my-1">
+                {inner}
+              </div>
+            );
+          }
+          return (
+            <button
+              key={label}
+              type="button"
+              onClick={() => navigate(to)}
+              aria-label={`${label}: ${count}. View these tickets.`}
+              className={cn(
+                'flex flex-col items-center gap-0.5 rounded-lg py-1 -my-1 transition-colors',
+                'hover:bg-[var(--inset)] cursor-pointer',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]',
+              )}
+            >
+              {inner}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -362,6 +393,22 @@ function ErrorCard({ message, onRetry }: { message: string; onRetry: () => void 
   );
 }
 
+/**
+ * What this screen is, per role.
+ *
+ * Every role saw "Operational overview · SUCCESS Bank Internal Ticketing",
+ * which describes the product rather than the screen and is equally true on
+ * every page. A branch user is not looking at an operational overview — they
+ * are looking at three counts of their own tickets.
+ */
+const SUBTITLE_FOR_ROLE: Record<Role, string> = {
+  branch_user: 'The tickets you have raised',
+  agent:       'Your queue and the load across the bank',
+  supervisor:  'Team load, SLA pressure and the escalation queue',
+  admin:       'Operational overview across every branch and department',
+  auditor:     'Read-only oversight — ticket history and the audit trail',
+};
+
 // ── Main Dashboard ────────────────────────────────────────────────────────────
 
 export function DashboardPage() {
@@ -379,7 +426,17 @@ export function DashboardPage() {
   // them as a branch user returns 403, and the page then rendered four red
   // "failed to load" cards — so the landing screen of the role that uses the
   // system most looked broken. Don't ask for what this role may not have.
-  const orgMetrics = !!user && user.role !== 'branch_user';
+  const orgMetrics = canSeeOrgMetrics(user);
+
+  // A KPI card is a promise that clicking it shows you the number in full.
+  // Where the viewer's role cannot open the destination, the promise is false:
+  // the router bounces them to /forbidden, which reads as a broken dashboard
+  // rather than as a permission boundary. So a card links only where the role
+  // can follow, and otherwise points somewhere it *can* go or renders inert —
+  // `KPICard` drops the button semantics entirely when `to` is unset.
+  const mayEscalations = canViewEscalations(user);
+  const mayReports = canViewReports(user);
+  const mayRaise = canRaiseTicket(user);
 
   const kpiQuery      = useQuery({ queryKey: ['dashboard', 'kpis'],        queryFn: getDashboardKPIs,       staleTime: STALE, refetchInterval: STALE, enabled: orgMetrics });
   const slaQuery      = useQuery({ queryKey: ['dashboard', 'sla'],         queryFn: getSLAStatus,           staleTime: STALE, refetchInterval: STALE, enabled: orgMetrics });
@@ -415,31 +472,32 @@ export function DashboardPage() {
   const isRefreshing = kpiQuery.isFetching || slaQuery.isFetching;
 
   return (
-    <div className="flex flex-col gap-5">
+    <PageShell>
 
-      {/* ── Page header ──────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight text-[var(--tx)]">
-            Welcome, <span className="text-[var(--brand)]">{user?.full_name?.split(' ')[0] ?? 'User'}</span>
-          </h1>
-          <p className="text-xs text-[var(--tx-3)] mt-0.5">Operational overview · SUCCESS Bank Internal Ticketing</p>
-        </div>
-        <div className="flex items-center gap-2">
-          {isRefreshing && (
-            <span className="text-[11px] text-[var(--tx-3)] flex items-center gap-1.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse inline-block" />
-              Live
-            </span>
-          )}
-          <Button onClick={() => navigate('/tickets/new')}>
-            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-            New Ticket
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title={<>Welcome, <span className="text-[var(--brand)]">{user?.full_name?.split(' ')[0] ?? 'User'}</span></>}
+        subtitle={SUBTITLE_FOR_ROLE[user?.role ?? 'branch_user']}
+        actions={
+          <>
+            {isRefreshing && (
+              <span className="text-[11px] text-[var(--tx-3)] flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-[var(--ok)] animate-pulse inline-block" />
+                Live
+              </span>
+            )}
+            {/* An auditor is read-only. The form would open and the submit
+                would be refused. */}
+            {mayRaise && (
+              <Button onClick={() => navigate('/tickets/new')}>
+                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+                New Ticket
+              </Button>
+            )}
+          </>
+        }
+      />
 
       {/* ── Branch user: their own three numbers ─────────────────────── */}
       {!orgMetrics && (
@@ -478,7 +536,13 @@ export function DashboardPage() {
           <KPICard label="Critical"     value={kpis.critical_open}      tone={kpis.critical_open > 0 ? 'danger' : 'default'} to="/tickets?status_group=open&priority=critical" hint="Show open critical tickets"    icon="M12 8v4M12 16h.01M4.93 19h14.14L12 5z" />
           <KPICard label="AI Sorted"    value={kpis.ai_auto_categorized} tone="default" to={`/tickets?ai_categorized=1&created_from=${sevenDaysAgo}`} hint="Show tickets the AI categorised"                                          icon="M12 2a10 10 0 0 1 0 20M12 2a10 10 0 0 0 0 20M12 8v4M12 16h.01" />
           <KPICard label="Via Email"    value={kpis.email_tickets_today} tone="default" to={`/tickets?source=email&created_from=${todayUtc}`} hint="Show tickets that arrived by email today"                                          icon="M4 4h16v16H4V4zm0 0l8 9 8-9" />
-          <KPICard label="Escalated"    value={kpis.escalations_active} tone={kpis.escalations_active > 0 ? 'warning' : 'default'} to="/escalations" hint="Open the escalation queue" icon="M12 9v4M12 17h.01M4.93 19h14.14L12 5z" />
+          {/* Agents and auditors cannot open /escalations. They can reach the
+              same tickets from the queue they do have, so send them there
+              rather than to a 403. */}
+          <KPICard label="Escalated"    value={kpis.escalations_active} tone={kpis.escalations_active > 0 ? 'warning' : 'default'}
+                   to={mayEscalations ? '/escalations' : '/tickets?status=escalated'}
+                   hint={mayEscalations ? 'Open the escalation queue' : 'Show escalated tickets'}
+                   icon="M12 9v4M12 17h.01M4.93 19h14.14L12 5z" />
           <KPICard
             label="Avg Resolve"
             value={kpis.avg_resolution_hours < 24
@@ -486,8 +550,10 @@ export function DashboardPage() {
               : (kpis.avg_resolution_hours / 24).toFixed(1)}
             suffix={kpis.avg_resolution_hours < 24 ? 'h' : 'd'}
             tone="default"
-            to="/reports"
-            hint="Open reports and resolution trends"
+            // An agent has no Reports route. The number still tells them
+            // something; the link would only 403, so leave the card inert.
+            to={mayReports ? '/reports' : undefined}
+            hint={mayReports ? 'Open reports and resolution trends' : undefined}
             icon="M12 8v4l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"
           />
         </div>
@@ -503,7 +569,7 @@ export function DashboardPage() {
           ) : slaQuery.isError ? (
             <ErrorCard message="Failed to load SLA data" onRetry={() => slaQuery.refetch()} />
           ) : slaQuery.data ? (
-            <SLAHealthCard sla={slaQuery.data} />
+            <SLAHealthCard sla={slaQuery.data} canOpenSLA={canViewSLA(user)} />
           ) : null}
         </div>
 
@@ -591,6 +657,6 @@ export function DashboardPage() {
           )}
         </div>
       </div>
-    </div>
+    </PageShell>
   );
 }

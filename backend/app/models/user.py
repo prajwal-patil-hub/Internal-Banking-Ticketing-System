@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -48,6 +48,18 @@ class User(UUIDPKMixin, TimestampMixin, Base):
     is_super_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    # Availability, which is a different thing from `is_active`.
+    #
+    # `is_active` gates login — deactivating someone to cover a week's leave
+    # would lock them out of the system entirely. These two dates say only
+    # "do not route new work here", and they expire on their own so nobody
+    # has to remember to switch availability back on when the person returns.
+    # Both inclusive; both NULL means available.
+    leave_from: Mapped[date | None] = mapped_column(Date, nullable=True)
+    leave_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    leave_note: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
     mfa_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
     mfa_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

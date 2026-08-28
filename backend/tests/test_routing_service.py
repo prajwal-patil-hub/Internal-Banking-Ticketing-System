@@ -73,30 +73,48 @@ async def test_get_agent_workload_returns_list_of_dicts() -> None:
 
     db = _mock_db()
 
-    # The service executes a JOIN query and calls .all() on the result
-    row1 = MagicMock()
-    row1.id = uuid.uuid4()
-    row1.email = "agent1@bank.com"
-    row1.full_name = "Agent One"
-    row1.open_count = 5
+    from datetime import date, timedelta
 
-    row2 = MagicMock()
-    row2.id = uuid.uuid4()
-    row2.email = "agent2@bank.com"
-    row2.full_name = "Agent Two"
-    row2.open_count = 2
+    today = date.today()
+
+    def _row(email, name, open_count, leave_from=None, leave_to=None):
+        r = MagicMock()
+        r.id = uuid.uuid4()
+        r.email = email
+        r.full_name = name
+        r.role = "agent"
+        r.open_count = open_count
+        # Real values, not MagicMocks: the service compares these to today's
+        # date to decide whether someone is on leave, and a MagicMock compares
+        # as anything.
+        r.leave_from = leave_from
+        r.leave_to = leave_to
+        r.leave_note = None
+        return r
+
+    # The service executes a JOIN query and calls .all() on the result
+    row1 = _row("agent1@bank.com", "Agent One", 5)
+    row2 = _row("agent2@bank.com", "Agent Two", 2)
+    row3 = _row("agent3@bank.com", "Agent Three", 0,
+                today - timedelta(days=1), today + timedelta(days=3))
 
     mock_result = MagicMock()
-    mock_result.all.return_value = [row1, row2]
+    mock_result.all.return_value = [row1, row2, row3]
     db.execute = AsyncMock(return_value=mock_result)
 
     svc = RoutingService(db)
     workload = await svc.get_agent_workload()
 
     assert isinstance(workload, list)
-    assert len(workload) == 2
+    assert len(workload) == 3
     assert workload[0]["email"] == "agent1@bank.com"
     assert workload[1]["open_count"] == 2
+
+    # Someone on leave is still listed — a supervisor may knowingly assign to
+    # them — but is marked so the UI can say so and auto-routing can skip them.
+    assert workload[0]["on_leave"] is False
+    assert workload[2]["on_leave"] is True
+    assert workload[2]["leave_to"] == (today + timedelta(days=3)).isoformat()
 
 
 @pytest.mark.asyncio

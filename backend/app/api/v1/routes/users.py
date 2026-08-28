@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response, status
@@ -16,6 +17,7 @@ from app.models.org import OrgRole, OrgUnit
 from app.models.role import Role
 from app.models.user import User
 from app.schemas.envelope import ok, paginated
+from app.services.routing_service import is_on_leave
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -48,6 +50,12 @@ def _serialize_user(user: User) -> dict:
         } if user.org_role else None,
         "is_super_admin": user.is_super_admin,
         "is_active": user.is_active,
+        # Availability is reported separately from is_active on purpose: one
+        # says whether the account works, the other whether to send them work.
+        "leave_from": user.leave_from.isoformat() if user.leave_from else None,
+        "leave_to": user.leave_to.isoformat() if user.leave_to else None,
+        "leave_note": user.leave_note,
+        "on_leave": is_on_leave(user),
         "mfa_enabled": user.mfa_enabled,
         "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
         "created_at": user.created_at.isoformat(),
@@ -258,6 +266,49 @@ async def reset_user_mfa(
     user.mfa_secret = None
     await db.commit()
     return ok({"user_id": str(user_id), "mfa_enabled": False})
+
+
+@router.patch("/{user_id}/leave", summary="Set or clear a user's leave window")
+async def set_user_leave(
+    user_id: uuid.UUID,
+    payload: dict,
+    db: AsyncSession = Depends(get_session),
+    # Supervisors as well as admins: knowing who is on shift is the
+    # supervisor's job, and making it admin-only would mean rota changes
+    # queue behind whoever holds an admin account.
+    current_user: User = Depends(require_roles("supervisor", "admin")),
+) -> dict:
+    """Record that someone is away, so routing stops sending them new work.
+
+    This never touches `is_active`. Deactivating an account to cover leave
+    would lock the person out of the system, which is why the two are
+    separate fields rather than one "available" flag.
+
+    Send both dates as null to clear the window and make them available again.
+    """
+    user = await _get_user_or_404(user_id, db)
+
+    def _parse(field: str) -> date | None:
+        raw = payload.get(field)
+        if raw in (None, ""):
+            return None
+        try:
+            return date.fromisoformat(str(raw)[:10])
+        except ValueError:
+            raise ValidationError(f"{field} must be an ISO date, e.g. 2026-08-18.")
+
+    leave_from = _parse("leave_from")
+    leave_to = _parse("leave_to")
+
+    if leave_from and leave_to and leave_to < leave_from:
+        raise ValidationError("leave_to cannot be earlier than leave_from.")
+
+    user.leave_from = leave_from
+    user.leave_to = leave_to
+    user.leave_note = (payload.get("leave_note") or "").strip()[:200] or None
+    await db.commit()
+    await db.refresh(user)
+    return ok(_serialize_user(user))
 
 
 @router.delete("/{user_id}")

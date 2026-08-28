@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated
@@ -15,6 +16,8 @@ from app.api.v1.deps import get_current_user, get_session, require_roles
 from app.core import authz
 from app.core.exceptions import AuthorizationError, NotFoundError, ValidationError
 from app.core.logging import get_logger
+from app.core.ratelimit import check_rate_limit
+from app.models.ai_interaction import AIInteractionLog
 from app.models.attachment import Attachment
 from app.models.audit import AuditAction, AuditLog
 from app.models.comment import CommentSource, TicketComment
@@ -25,10 +28,12 @@ from app.models.ticket import (
     Ticket,
     TicketSource,
     TicketStatus,
+    risk_band,
 )
 from app.models.ticket import OPEN_STATUSES as _OPEN_STATUSES
 from app.models.user import User
 from app.schemas.envelope import ok, paginated
+from app.services import llm_client
 from app.services.org_service import get_accessible_org_unit_ids
 from app.services.routing_service import RoutingService
 from app.services.sla_service import SLAService
@@ -206,6 +211,9 @@ def _serialize_ticket(ticket: Ticket) -> dict:
         "ai_confidence": ticket.ai_confidence,
         "ai_summary": ticket.ai_summary,
         "ai_risk_score": ticket.ai_risk_score,
+        # Banded server-side; see `risk_band` for why the client must not
+        # compute this from the score itself.
+        "ai_risk_band": risk_band(ticket.ai_risk_score),
         "ai_sentiment": ticket.ai_sentiment,
         "sla_policy_id": str(ticket.sla_policy_id) if ticket.sla_policy_id else None,
         "response_due_at": ticket.response_due_at.isoformat() if ticket.response_due_at else None,
@@ -224,6 +232,18 @@ def _serialize_ticket(ticket: Ticket) -> dict:
         "created_at": ticket.created_at.isoformat(),
         "updated_at": ticket.updated_at.isoformat(),
     }
+
+
+def _visible_comments(comments: list[TicketComment], user: User) -> list[TicketComment]:
+    """Comments this user may read, oldest first.
+
+    The same rule the comment list endpoint applies: a branch user never sees
+    an internal note. Only agent-and-above can reach the AI helpers today, so
+    this changes nothing for them — it is here so that widening the guard
+    later cannot quietly feed internal notes into a prompt.
+    """
+    allowed = [c for c in comments if not (c.is_internal and _is_branch_user(user))]
+    return sorted(allowed, key=lambda c: c.created_at)
 
 
 def _serialize_comment(comment: TicketComment) -> dict:
@@ -467,11 +487,16 @@ async def create_ticket(
     # appeared in the SLA monitor, and could never breach.
     await SLAService(db).apply_to_ticket(ticket)
 
-    # Auto-assign by current workload. The routing service existed but nothing
-    # called it, so every ticket arrived unassigned and waited for someone to
-    # notice. Callers can opt out with auto_assign=false to triage by hand.
+    # Deliberately NOT auto-assigned here. Deciding who works a ticket is a
+    # supervisor's call, made from the triage queue or with the Auto-assign
+    # button. A ticket left unassigned is not forgotten: the safety-net worker
+    # routes anything still unowned after the configured delay, so a ticket
+    # raised overnight cannot burn its whole SLA waiting for someone to arrive.
+    #
+    # A caller can still ask for it explicitly — the intake worker does this
+    # for tickets arriving by email, which have no supervisor watching.
     routing_reason: str | None = None
-    if payload.get("auto_assign", True):
+    if payload.get("auto_assign") is True:
         assignee, routing_reason = await RoutingService(db).auto_route_ticket(ticket)
         if assignee is not None:
             ticket.ai_routing_reason = routing_reason[:500]
@@ -744,6 +769,60 @@ async def assign_ticket(
 
 
 @router.post(
+    "/{ticket_id}/auto-assign",
+    summary="Route this ticket automatically, now",
+    # Supervisor and above only. Auto-assignment decides who carries the work,
+    # which is a shift-management decision — an agent choosing to hand a
+    # ticket to whoever the algorithm picks is how work quietly moves off the
+    # person who was given it.
+    dependencies=[Depends(require_roles("supervisor", "admin"))],
+)
+async def auto_assign_ticket(
+    ticket_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    ticket = await _get_ticket_or_404(ticket_id, db, current_user)
+    old_assignee = str(ticket.assignee_id) if ticket.assignee_id else None
+
+    assignee, reason = await RoutingService(db).auto_route_ticket(ticket)
+    if assignee is None:
+        # Not an error: there genuinely may be nobody available, and the caller
+        # needs to know that rather than see a generic failure.
+        await db.rollback()
+        raise ValidationError(
+            "No available assignee found. Everyone who can take this ticket is "
+            "either on leave or inactive."
+        )
+
+    ticket.ai_routing_reason = reason[:500]
+    await _record_audit(
+        db,
+        action=AuditAction.ASSIGNMENT,
+        entity_id=str(ticket.id),
+        user=current_user,
+        request=request,
+        old_values={"assignee_id": old_assignee},
+        new_values={
+            "assignee_id": str(assignee.id),
+            "assignee_email": assignee.email,
+            "auto": True,
+            "reason": reason,
+        },
+    )
+    await db.commit()
+    await db.refresh(ticket)
+    log.info(
+        "ticket_auto_assigned",
+        ticket_id=str(ticket.id),
+        assignee_id=str(assignee.id),
+        actor_id=str(current_user.id),
+    )
+    return ok(_serialize_ticket(ticket))
+
+
+@router.post(
     "/{ticket_id}/duplicate",
     summary="Mark ticket as duplicate of another",
     dependencies=[Depends(require_roles("agent", "supervisor", "admin"))],
@@ -1000,20 +1079,51 @@ async def ai_summarize(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> dict:
+    """Summarise the ticket with the model, grounded in the ticket itself.
+
+    This used to return the `ai_summary` column, which only the email-intake
+    path ever writes — so a ticket raised through the portal always got "AI
+    summary not yet generated", and the audit row still claimed an AI decision
+    had been made. A button that returns a fixed string teaches people the
+    feature is useless, and a false audit row is worse than no audit row.
+    """
     from app.core.config import settings
+    from app.services import ticket_ai
+
     ticket = await _get_ticket_or_404(ticket_id, db, current_user)
 
     if not settings.AI_ENABLED:
         raise ValidationError("AI features are not enabled.")
 
-    result = {
-        "summary": ticket.ai_summary or (
-            "AI summary not yet generated. The ticket will be categorized "
-            "on the next processing cycle."
-        ),
-        "sentiment": ticket.ai_sentiment or "neutral",
-        "risk_score": ticket.ai_risk_score or 0.0,
-    }
+    # One local model serves every AI path; an unthrottled helper would starve
+    # chat and email intake.
+    check_rate_limit(str(current_user.id), limit=settings.AI_RATE_LIMIT_PER_MINUTE)
+
+    comments = _visible_comments(list(ticket.comments or []), current_user)
+
+    started = time.monotonic()
+    outcome = await ticket_ai.summarise_ticket(ticket, comments)
+    latency_ms = int((time.monotonic() - started) * 1000)
+
+    db.add(
+        AIInteractionLog(
+            user_id=current_user.id,
+            ticket_id=ticket.id,
+            interaction_type="summarize",
+            model_id=llm_client.model_id(),
+            prompt_tokens=outcome.input_tokens,
+            completion_tokens=outcome.output_tokens,
+            latency_ms=latency_ms,
+            success=outcome.ok,
+            error_message=None if outcome.ok else outcome.error,
+        )
+    )
+
+    if not outcome.ok:
+        # No audit row: nothing was decided. Still a 200 so the UI can render
+        # the reason inline rather than showing a stack trace.
+        await db.commit()
+        return ok({"summary": None, "error": outcome.error})
 
     await _record_audit(
         db,
@@ -1021,10 +1131,16 @@ async def ai_summarize(
         entity_id=str(ticket.id),
         user=current_user,
         request=request,
-        metadata_={"ai_action": "summarize"},
+        metadata_={"ai_action": "summarize", "latency_ms": latency_ms},
     )
     await db.commit()
-    return ok(result)
+    return ok({
+        "summary": outcome.text,
+        "sentiment": ticket.ai_sentiment,
+        "risk_score": ticket.ai_risk_score,
+        "risk_band": risk_band(ticket.ai_risk_score),
+        "error": None,
+    })
 
 
 @router.post(
@@ -1038,33 +1154,44 @@ async def ai_suggest(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> dict:
+    """Suggest next steps with the model, grounded in the ticket.
+
+    Previously three hard-coded sentences with the priority interpolated into
+    one of them. See `ai_summarize` for why that was worse than absent.
+    """
     from app.core.config import settings
+    from app.services import ticket_ai
+
     ticket = await _get_ticket_or_404(ticket_id, db, current_user)
 
     if not settings.AI_ENABLED:
         raise ValidationError("AI features are not enabled.")
 
-    # Build contextual suggestions based on category and priority
-    suggestions: list[str] = [
-        "Review the customer's transaction history and any recent account activity.",
-        f"This is a {ticket.priority.value}-priority ticket — ensure SLA targets are tracked.",
-        "Check if there are any pending maintenance windows or known incidents affecting this service.",
-    ]
-    next_actions: list[str] = [
-        "Assign to the appropriate department team for investigation.",
-        "Escalate to the relevant department head if unresolved within SLA.",
-    ]
-    if ticket.ai_category:
-        suggestions.insert(
-            0,
-            f"Based on AI categorization ({ticket.ai_category}): "
-            "verify all related systems are checked.",
-        )
+    check_rate_limit(str(current_user.id), limit=settings.AI_RATE_LIMIT_PER_MINUTE)
 
-    result = {
-        "suggestions": suggestions,
-        "next_actions": next_actions,
-    }
+    comments = _visible_comments(list(ticket.comments or []), current_user)
+
+    started = time.monotonic()
+    outcome = await ticket_ai.suggest_next_steps(ticket, comments)
+    latency_ms = int((time.monotonic() - started) * 1000)
+
+    db.add(
+        AIInteractionLog(
+            user_id=current_user.id,
+            ticket_id=ticket.id,
+            interaction_type="suggest",
+            model_id=llm_client.model_id(),
+            prompt_tokens=outcome.input_tokens,
+            completion_tokens=outcome.output_tokens,
+            latency_ms=latency_ms,
+            success=outcome.ok,
+            error_message=None if outcome.ok else outcome.error,
+        )
+    )
+
+    if not outcome.ok:
+        await db.commit()
+        return ok({"suggestions": [], "error": outcome.error})
 
     await _record_audit(
         db,
@@ -1072,12 +1199,10 @@ async def ai_suggest(
         entity_id=str(ticket.id),
         user=current_user,
         request=request,
-        metadata_={"ai_action": "suggest"},
+        metadata_={"ai_action": "suggest", "latency_ms": latency_ms},
     )
     await db.commit()
-    return ok(result)
-
-
+    return ok({"suggestions": outcome.bullets, "error": None})
 
 
 @router.post(
