@@ -436,7 +436,13 @@ def main() -> int:
         print("No screenshots found — run capture-screens.py first.", file=sys.stderr)
         return 1
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(HEAD + json.dumps(screens, separators=(",", ":")) + TAIL)
+    # One screen per line rather than one enormous line. It changes nothing in
+    # a browser, but a viewer that shows the file as source — GitHub serves
+    # raw HTML as text/plain with nosniff, so it always will — renders a single
+    # 3.6-million-character line as an unbroken black slab. Per-line keeps it
+    # merely long, and makes the file greppable and diffable.
+    body = ",\n".join(json.dumps(s, separators=(",", ":")) for s in screens)
+    OUT.write_text(HEAD + "[\n" + body + "\n]" + TAIL)
     size = OUT.stat().st_size / 1_048_576
     print(f"saved {OUT}  ({len(screens)} screens, {size:.1f} MB)")
     return 0
