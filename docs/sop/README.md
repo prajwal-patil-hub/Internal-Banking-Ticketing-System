@@ -85,3 +85,28 @@ compression.
 `render-preview.py` is a proof sheet, not a faithful renderer. It draws what the
 file actually stores, which is the point: it shows the numeral squeezed out of
 its circle rather than the one PowerPoint would helpfully re-centre.
+
+## The application walkthrough
+
+`SUCCESS-Bank-Application-Walkthrough.html` is a separate deliverable from the
+deck: one self-contained page holding 33 real screenshots of the running
+application, in the order you meet them when you use it. It is built by
+`build-walkthrough.py` from the same `screens/` captures.
+
+```bash
+python docs/sop/build-walkthrough.py docs/sop/screens \
+       docs/sop/SUCCESS-Bank-Application-Walkthrough.html
+```
+
+**Download it and open it locally — do not click it in GitHub.**
+`raw.githubusercontent.com` serves every `.html` as `text/plain` with
+`nosniff`, which forbids the browser from rendering it. You get the source, and
+since the page carries 3.6 MB of base64 image data that source is a near-black
+wall of text. This is deliberate GitHub policy — rendering user-supplied HTML
+from a GitHub domain would be a cross-site-scripting vector — so no change to
+this file can make that link render. Clone or download it and open the local
+file instead; every image is embedded, so it needs no network and no server.
+
+The generator writes one screen per line for this reason. It changes nothing in
+a browser, but it keeps the source view legible and the file diffable rather
+than producing one 3.6-million-character line.
