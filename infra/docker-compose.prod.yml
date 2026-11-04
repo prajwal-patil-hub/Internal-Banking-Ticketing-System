@@ -25,7 +25,7 @@ x-restart: &restart
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     <<: *restart
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-success}

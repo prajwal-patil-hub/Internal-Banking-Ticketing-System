@@ -57,7 +57,14 @@ SW, SH = int(prs.slide_width * SCALE), int(prs.slide_height * SCALE)
 for idx, slide in enumerate(prs.slides, start=1):
     if ONLY and idx not in ONLY:
         continue
-    img = Image.new("RGB", (SW, SH), (255, 255, 255))
+    bgc = (255, 255, 255)
+    try:
+        bf = slide.background.fill
+        if bf.type == 1 and bf.fore_color.rgb is not None:
+            bgc = tuple(bf.fore_color.rgb)
+    except Exception:
+        pass
+    img = Image.new("RGB", (SW, SH), bgc)
     d = ImageDraw.Draw(img)
 
     for sh in slide.shapes:

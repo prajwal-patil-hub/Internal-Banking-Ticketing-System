@@ -21,7 +21,12 @@ BASE = "http://127.0.0.1:5199"
 CHROME = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome"
 OUT = Path(sys.argv[1])
 OUT.mkdir(parents=True, exist_ok=True)
-VP = {"width": 1440, "height": 900}
+from capture_config import DEVICE_SCALE_FACTOR, VIEWPORT
+
+# Shared with capture-kb-screen.py. The two scripts used to declare their own
+# viewports and had drifted 100px apart — see capture_config for what that
+# did to the walkthrough.
+VP = VIEWPORT
 
 USERS = {
     "branch":     ("sunita.desai@successbank.local", "Passw0rd@123"),
@@ -120,6 +125,7 @@ def scroll_to(page, locator_fn, offset=380):
 
 
 def T(text):      return lambda p: p.get_by_text(text, exact=False)
+def TX(text):     return lambda p: p.get_by_text(text, exact=True)
 def PH(text):     return lambda p: p.get_by_placeholder(text)
 def ROLE(r, n):   return lambda p: p.get_by_role(r, name=n)
 def CSS(sel):     return lambda p: p.locator(sel)
@@ -127,7 +133,7 @@ def CSS(sel):     return lambda p: p.locator(sel)
 
 with sync_playwright() as pw:
     b = pw.chromium.launch(executable_path=CHROME, args=["--no-sandbox"])
-    ctx = b.new_context(viewport=VP, device_scale_factor=2)
+    ctx = b.new_context(viewport=VP, device_scale_factor=DEVICE_SCALE_FACTOR)
     page = ctx.new_page()
 
     # ---- login ------------------------------------------------------------
@@ -147,7 +153,9 @@ with sync_playwright() as pw:
 
     page.goto(f"{BASE}/tickets", wait_until="networkidle")
     shot(page, "11-branch-tickets", [
-        ("Search and filters", CSS('input[placeholder*="earch"]')),
+        # Not input[placeholder*="earch"]: that matches the global header search
+        # in the top bar, not this page's own box.
+        ("Search and filters", PH("Search by title")),
         ("New Ticket", ROLE("button", "New Ticket")),
     ])
 
@@ -198,12 +206,12 @@ with sync_playwright() as pw:
     ])
     page.goto(f"{BASE}/tickets", wait_until="networkidle")
     shot(page, "21-agent-tickets", [
-        ("Filter by status, priority or owner", CSS('select')),
+        ("Filter by status, priority or owner", ROLE("button", "Filters")),
         ("Every ticket in your scope", CSS('main')),
     ])
     page.goto(f"{BASE}/tickets?status_group=open&sla_breached=true", wait_until="networkidle")
     shot(page, "22-agent-breached", [
-        ("The filter the tile applied", CSS('input[placeholder*="earch"]')),
+        ("The filter the tile applied", ROLE("button", "Filters")),
     ])
 
     at = Path("/tmp/rich_ticket.txt").read_text().strip()
@@ -234,6 +242,40 @@ with sync_playwright() as pw:
     shot(page, "31-supervisor-sla", [("On time, at risk, breached", CSS('main'))])
     page.goto(f"{BASE}/escalations", wait_until="networkidle")
     shot(page, "32-supervisor-escalations", [("Escalation events, newest first", CSS('main'))])
+
+    # Assignment is now a supervisor's decision, so the deck has to show the
+    # control being used rather than describing a rule that fires invisibly.
+    ut = Path("/tmp/unassigned_ticket.txt").read_text().strip()
+    page.goto(f"{BASE}/tickets/{ut}", wait_until="networkidle")
+    page.wait_for_selector("text=TKT-", timeout=20000)
+    settle(page)
+    shot(page, "33-supervisor-unassigned", [
+        ("No owner yet — raising a ticket does not choose one", T("Unassigned")),
+        ("Open the assign list", ROLE("button", "Choose who to assign")),
+    ])
+
+    # Open the list itself. The workload numbers and the leave marker are the
+    # whole point of the slide, so the shot is taken with it expanded.
+    # By accessible name, not the visible word: the status-transition row has
+    # its own "Assign" button and `.first` picked that one, which moved the
+    # ticket's status instead of opening this control.
+    page.get_by_role("button", name="Choose who to assign").first.click()
+    # settle() looks for "Loading…"; this panel says "Loading the queue…", so
+    # wait for the list itself rather than for a phrase that never matches.
+    page.wait_for_selector("text=Auto-assign", timeout=10000)
+    page.wait_for_function(
+        "() => !document.body.innerText.includes('Loading the queue')", timeout=10000)
+    # The list runs past the fold, and the on-leave entry sorts last — the
+    # one row the slide exists to show. Bring it into frame rather than
+    # photographing a truncated list.
+    page.get_by_text("on leave").first.scroll_into_view_if_needed(timeout=8000)
+    page.mouse.wheel(0, 90)
+    settle(page)
+    shot(page, "34-supervisor-assign-list", [
+        ("Hand the choice to the router", T("Auto-assign")),
+        ("Each candidate's open queue — what the router ranks on", T("open")),
+        ("Anyone on leave is marked, and sorted to the bottom", T("on leave")),
+    ])
     page.evaluate("() => localStorage.clear()")
 
     # ---- admin ------------------------------------------------------------
@@ -244,6 +286,24 @@ with sync_playwright() as pw:
         ("Everyone with an account", CSS('main')),
         ("Add a user", ROLE("button", "Add User")),
     ])
+    shot(page, "46-admin-users-availability", [
+        ("Availability is separate from Active — one gates login, the other routing",
+         T("Availability")),
+        ("Record a leave window", ROLE("button", "Leave")),
+    ])
+
+    page.get_by_role("button", name="Leave").first.click()
+    settle(page)
+    shot(page, "47-admin-leave-dialog", [
+        ("First and last day, both inclusive", TX("From")),
+        # Exact match: "To" as a substring appears all over the page.
+        ("Leave the end date empty for indefinite leave", TX("To")),
+        ("Clears the window and makes them available again", T("Clear leave")),
+    ])
+    page.keyboard.press("Escape")
+    page.get_by_role("button", name="Cancel").first.click()
+    settle(page)
+
     page.goto(f"{BASE}/org", wait_until="networkidle")
     shot(page, "42-admin-org", [("Hierarchy levels and org units", CSS('main'))])
     page.goto(f"{BASE}/branches", wait_until="networkidle")

@@ -8,6 +8,7 @@ import { Button } from '@/components/Button';
 import { cn } from '@/lib/cn';
 import { downloadTicketReport, exportAnalytics, type ReportFormat, type AnalyticsFormat } from '@/features/reports/api';
 import { api, extractError } from '@/lib/api';
+import { PageHeader, PageShell } from '@/components/PageHeader';
 
 // ── Chart colors ──────────────────────────────────────────────────────────────
 
@@ -330,11 +331,11 @@ export function ReportsPage() {
   };
 
   return (
-    <div className="flex flex-col gap-5">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight text-[var(--tx)]">Reports</h1>
-        <p className="text-xs text-[var(--tx-3)] mt-0.5">Download audit reports and visualize ticket metrics.</p>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Reports"
+        subtitle="Download audit reports and visualise ticket metrics."
+      />
 
       {/* KPIs */}
       <div className="flex items-center justify-between gap-2 flex-wrap -mb-1">
@@ -491,6 +492,6 @@ export function ReportsPage() {
           </p>
         </div>
       </div>
-    </div>
+    </PageShell>
   );
 }

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/Button';
 import { cn } from '@/lib/cn';
+import { PageHeader, PageShell } from '@/components/PageHeader';
 import {
   getLevels, listOrgUnits, listOrgRoles,
   createLevel, updateLevel, deleteLevel,
@@ -347,11 +348,11 @@ export function OrgManagementPage() {
   ];
 
   return (
-    <div className="flex flex-col gap-5">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight text-[var(--tx)]">Org Management</h1>
-        <p className="text-xs text-[var(--tx-3)] mt-0.5">Configure the banking hierarchy, org units, and per-level roles.</p>
-      </div>
+    <PageShell>
+      <PageHeader
+        title="Org Management"
+        subtitle="Configure the banking hierarchy, org units, and per-level roles."
+      />
 
       <div className="flex gap-1 p-1 card-sm !p-1 w-fit">
         {tabs.map(t => (
@@ -373,6 +374,6 @@ export function OrgManagementPage() {
       {tab === 'levels' && <LevelsTab />}
       {tab === 'units'  && <UnitsTab />}
       {tab === 'roles'  && <RolesTab />}
-    </div>
+    </PageShell>
   );
 }

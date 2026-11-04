@@ -28,7 +28,7 @@ import sys
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import settings
@@ -866,6 +866,9 @@ async def seed(db: AsyncSession) -> None:
     # --- AI interaction history (drives the dashboard's AI panel) ------------
     await seed_ai_interaction_logs(db)
 
+    # --- Knowledge base (runs the real ingestion pipeline) ------------------
+    await seed_knowledge_base(db)
+
     await db.commit()
 
 
@@ -1202,7 +1205,6 @@ async def seed_attachments(db: AsyncSession) -> None:
     Skipped with an explanation if storage is unreachable — seeding must not
     fail because MinIO happens to be down.
     """
-    from sqlalchemy import select
 
     from app.models.attachment import Attachment
     from app.models.comment import TicketComment
@@ -1464,6 +1466,330 @@ async def seed_ai_interaction_logs(db: AsyncSession) -> None:
     await db.flush()
     print(f"  [seed] Created {created} AI interaction logs")
 
+# ---------------------------------------------------------------------------
+# Knowledge base
+# ---------------------------------------------------------------------------
+
+#: Short, realistic policy documents. Deliberately Markdown with numbered
+#: clause headings, because that is the structure the chunker is built around
+#: and seeding prose with no headings would exercise none of it.
+KB_DOCUMENTS: list[dict] = [
+    {
+        "collection": "Disputes & chargebacks",
+        "title": "Chargeback Handling Policy",
+        "filename": "chargeback-policy.md",
+        "body": """# Chargeback Handling Policy
+
+## 1. Scope
+
+This policy covers card transaction disputes raised by SUCCESS Bank customers
+against merchants. It does not cover internal fee reversals.
+
+## 2. Raising a dispute
+
+### 2.1 Who may raise
+
+Any branch user may raise a dispute on behalf of the account holder. The
+account holder's written consent must be attached before the case is worked.
+
+### 2.2 Evidence required
+
+Attach the signed dispute form and a statement extract covering the disputed
+transaction. Cases without both are returned to the branch unworked.
+
+## 3. Timelines
+
+### 3.1 Service disputes
+
+A service dispute must be raised within 45 days of the transaction date. Late
+claims are rejected automatically by the scheme and cannot be appealed.
+
+### 3.2 Fraud claims
+
+A fraud claim may be raised up to 120 days from the transaction date. Fraud
+claims are owned by Fraud Operations, not by the Disputes team.
+
+### 3.3 Summary of windows
+
+| Dispute type | Window | Owning team |
+| Fraud | 120 days | Fraud Operations |
+| Service not rendered | 45 days | Disputes |
+| Duplicate charge | 45 days | Disputes |
+| ATM non-dispense | 30 days | Branch Operations |
+
+## 4. Provisional credit
+
+Provisional credit is issued within 5 working days for disputes under
+Rs 25,000. Above that threshold it requires supervisor approval.
+""",
+    },
+    {
+        "collection": "Compliance policies",
+        "title": "KYC Refresh Procedure",
+        "filename": "kyc-refresh.md",
+        "body": """# KYC Refresh Procedure
+
+## 1. Refresh frequency
+
+### 1.1 Risk-based schedule
+
+Customer due diligence is refreshed on a risk-based cycle: high-risk customers
+every 2 years, medium-risk every 8 years, low-risk every 10 years.
+
+### 1.2 Trigger events
+
+A refresh is triggered ahead of schedule when the customer changes address,
+changes their registered mobile number, or when a transaction pattern breaches
+the monitoring threshold.
+
+## 2. Documents accepted
+
+Officially Valid Documents are passport, driving licence, Voter ID, NREGA job
+card and the Aadhaar proof of possession. A utility bill is accepted as a
+deemed OVD for address only, and only if issued within the last two months.
+
+## 3. Escalation
+
+### 3.1 Non-response
+
+If the customer does not respond within 30 days of the second notice, the
+account is flagged for partial freeze and the case is referred to Compliance.
+
+### 3.2 Adverse media
+
+Any adverse media match must be escalated to the Compliance team the same day.
+Branch staff must not make a determination themselves.
+""",
+    },
+    {
+        "collection": "Compliance policies",
+        "title": "Transaction Monitoring Thresholds",
+        "filename": "monitoring-thresholds.md",
+        "body": """# Transaction Monitoring Thresholds
+
+## 1. Cash transactions
+
+Cash deposits or withdrawals of Rs 10 lakh or more in a single day generate a
+Cash Transaction Report. Structuring — several smaller transactions that
+together cross the threshold — is reported the same way.
+
+## 2. Cross-border
+
+### 2.1 Inward remittance
+
+Inward remittances above USD 25,000 require the purpose code to be recorded
+before credit is released.
+
+### 2.2 Outward remittance
+
+Outward remittances are checked against the sanctions list at initiation and
+again at settlement. A hit at either point halts the transfer.
+
+## 3. Alert handling
+
+Alerts are triaged within 2 working days. An alert left untriaged for 5 days
+is auto-escalated to the department head.
+""",
+    },
+    {
+        "collection": "Treasury runbooks",
+        "title": "End-of-Day Settlement Runbook",
+        "filename": "eod-settlement.md",
+        "body": """# End-of-Day Settlement Runbook
+
+## 1. Cut-off times
+
+NEFT settles in half-hourly batches until 18:00 on working days. RTGS closes
+at 16:30 for customer transactions. IMPS runs 24x7 with no cut-off.
+
+## 2. Reconciliation
+
+### 2.1 Nostro breaks
+
+Any nostro break above Rs 1 lakh is raised as a ticket to Treasury Operations
+the same day, with the statement line attached.
+
+### 2.2 Ageing
+
+A break unresolved after 3 working days is escalated to the Treasury head.
+
+## 3. Failure handling
+
+If the settlement file is rejected, re-generate it from the source ledger
+rather than editing the rejected file. Edited files break the checksum and are
+rejected again.
+""",
+    },
+]
+
+#: Which roles may read each collection. Treasury runbooks are deliberately
+#: granted to supervisors and admins only, so the seeded data demonstrates a
+#: real access boundary rather than making everything visible to everyone.
+KB_COLLECTIONS: list[dict] = [
+    {
+        "name": "Disputes & chargebacks",
+        "description": "Scheme rules, timelines and evidence templates.",
+        "roles": ["agent", "supervisor", "admin"],
+    },
+    {
+        "name": "Compliance policies",
+        "description": "KYC, AML and regulatory circulars.",
+        "roles": ["agent", "supervisor", "admin"],
+    },
+    {
+        "name": "Treasury runbooks",
+        "description": "Settlement and reconciliation procedure.",
+        "roles": ["supervisor", "admin"],
+    },
+]
+
+
+async def seed_knowledge_base(db: AsyncSession) -> None:
+    """Create collections, grants and fully ingested documents.
+
+    Runs the real ingestion pipeline rather than inserting chunk rows
+    directly, so what the demo contains is what an upload would actually
+    produce — same parsing, same chunking, same activation gate. If the seed
+    diverged from the pipeline it would hide exactly the bugs it should catch.
+
+    Embeddings need a running Ollama with the embedding model pulled. When
+    that is unavailable the documents are still created and left FAILED with
+    the reason on them, which is a truthful state the UI already renders —
+    much better than a half-populated index that looks fine and retrieves
+    nothing.
+    """
+    from app.models.knowledge import KBCollection, KBCollectionGrant
+    from app.services.kb_ingestion_service import KBIngestionService
+
+    existing = (await db.execute(select(func.count(KBCollection.id)))).scalar_one()
+    if existing:
+        print("  [seed] Knowledge-base collections already exist — skipped")
+        return
+
+    admin = (await db.execute(
+        select(User).join(Role, User.role_id == Role.id).where(Role.name == "admin")
+    )).scalars().first()
+    if admin is None:
+        print("  [seed] No admin user to own knowledge-base documents — skipped")
+        return
+
+    collections: dict[str, KBCollection] = {}
+    for spec in KB_COLLECTIONS:
+        collection = KBCollection(
+            name=spec["name"],
+            description=spec["description"],
+            created_by_id=admin.id,
+        )
+        db.add(collection)
+        await db.flush()
+        for role_name in spec["roles"]:
+            db.add(
+                KBCollectionGrant(
+                    collection_id=collection.id,
+                    role_name=role_name,
+                    granted_by_id=admin.id,
+                )
+            )
+        collections[spec["name"]] = collection
+    await db.commit()
+    print(f"  [seed] Created {len(collections)} knowledge-base collections")
+
+    service = KBIngestionService(db)
+    indexed = failed = 0
+    reasons: set[str] = set()
+
+    for doc in KB_DOCUMENTS:
+        collection = collections[doc["collection"]]
+        try:
+            _document, version, _dup = await service.ingest(
+                collection=collection,
+                filename=doc["filename"],
+                content_type="text/markdown",
+                data=doc["body"].encode("utf-8"),
+                user=admin,
+                title=doc["title"],
+            )
+            indexed += 1
+            print(f"    · {doc['title']}: {version.chunk_count} passages indexed")
+        except Exception as exc:
+            failed += 1
+            reasons.add(type(exc).__name__)
+            print(f"    · {doc['title']}: not indexed — {str(exc)[:120]}")
+
+    if not failed:
+        print(f"  [seed] Knowledge base ready — {indexed} documents indexed")
+        return
+
+    # Name the dependency that actually failed. Printing the embedding-model
+    # hint after a storage outage sends the operator to fix the wrong service.
+    if "StorageUnavailableError" in reasons:
+        remedy = (
+            "Object storage was unreachable — start MinIO "
+            "(`docker compose up -d minio`), then re-run this script."
+        )
+    elif "EmbeddingError" in reasons:
+        remedy = (
+            "The embedding model was unreachable — start Ollama and run "
+            f"`ollama pull {settings.KB_EMBEDDING_MODEL}`, then use Re-index "
+            "on the Knowledge Base screen."
+        )
+    else:
+        remedy = "See the reasons above; Re-index once the cause is fixed."
+
+    print(f"  [seed] {indexed} document(s) indexed, {failed} left unindexed.")
+    print(f"  [seed] {remedy}")
+
+
+async def reset_knowledge_base(db: AsyncSession) -> None:
+    """Drop seeded collections and their stored objects.
+
+    Documents, versions and chunks cascade from the collection; the objects in
+    storage do not, so their keys are collected first — the same reason the
+    ticket-attachment reset reads keys before deleting rows.
+    """
+    from sqlalchemy import delete
+
+    from app.models.knowledge import (
+        KBCollection,
+        KBDocument,
+        KBDocumentVersion,
+        KBQueryLog,
+    )
+    from app.services.storage_service import StorageService
+
+    names = [spec["name"] for spec in KB_COLLECTIONS]
+    collection_ids = (await db.execute(
+        select(KBCollection.id).where(KBCollection.name.in_(names))
+    )).scalars().all()
+    if not collection_ids:
+        return
+
+    keys = (await db.execute(
+        select(KBDocumentVersion.s3_key)
+        .join(KBDocument, KBDocumentVersion.document_id == KBDocument.id)
+        .where(KBDocument.collection_id.in_(collection_ids))
+    )).scalars().all()
+
+    await db.execute(delete(KBQueryLog))
+    await db.execute(delete(KBCollection).where(KBCollection.id.in_(collection_ids)))
+    await db.commit()
+
+    storage = StorageService()
+    removed = 0
+    for key in keys:
+        try:
+            await storage.delete(key)
+            removed += 1
+        except Exception as exc:
+            # An orphaned object costs disk; a failed reset that leaves the row
+            # would leave the document retrievable. Report and carry on.
+            print(f"    [reset] could not delete {key}: {exc}")
+    print(
+        f"  [reset] Removed {len(collection_ids)} knowledge-base collection(s) "
+        f"and {removed} stored document file(s)"
+    )
+
+
 async def _delete_demo_objects(db: AsyncSession, ticket_ids: list) -> int:
     """Remove the stored bytes for the attachments about to be deleted.
 
@@ -1546,6 +1872,8 @@ async def reset_demo_data(db: AsyncSession) -> None:
         f"SLA rows and escalation events, plus all AI history"
     )
     print(f"  [reset] Removed {removed_objects} stored attachment file(s)")
+
+    await reset_knowledge_base(db)
 
 
 async def main() -> None:

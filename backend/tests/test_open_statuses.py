@@ -73,3 +73,58 @@ def test_no_module_redefines_the_set() -> None:
                 offenders.append(f"{path.relative_to(root)} ({marker.strip()})")
 
     assert not offenders, "these modules redefine the open-status set: " + ", ".join(offenders)
+
+
+# ---------------------------------------------------------------------------
+# Risk banding — one owner for the threshold
+# ---------------------------------------------------------------------------
+
+def test_risk_band_matches_the_filter_thresholds() -> None:
+    """The band the API sends must agree with the SQL the list filter runs.
+
+    AIBadge.tsx used to band at 0.7/0.3 while these constants band at 0.7/0.4,
+    so a ticket scored 0.35 read "Med Risk" on the badge and came back from
+    `?ai_risk=low`. The band is now computed here, from these constants, and
+    sent to the client — so there is nothing left to disagree.
+    """
+    from app.models.ticket import (
+        AI_RISK_HIGH_THRESHOLD,
+        AI_RISK_MEDIUM_THRESHOLD,
+        risk_band,
+    )
+
+    assert risk_band(None) is None
+    assert risk_band(0.0) == "low"
+    # The score that used to contradict itself.
+    assert risk_band(0.35) == "low"
+    assert risk_band(AI_RISK_MEDIUM_THRESHOLD - 0.001) == "low"
+    assert risk_band(AI_RISK_MEDIUM_THRESHOLD) == "medium"
+    assert risk_band(AI_RISK_HIGH_THRESHOLD - 0.001) == "medium"
+    assert risk_band(AI_RISK_HIGH_THRESHOLD) == "high"
+    assert risk_band(1.0) == "high"
+
+
+def test_serialized_ticket_carries_the_band() -> None:
+    """A score without a band would send the client straight back to guessing."""
+    import uuid
+    from datetime import UTC, datetime
+
+    from app.api.v1.routes.tickets import _serialize_ticket
+    from app.models.ticket import Ticket, TicketPriority, TicketSource, TicketStatus
+
+    ticket = Ticket(
+        id=uuid.uuid4(),
+        ticket_number="TKT-20260827-00001",
+        title="t",
+        description="d",
+        status=TicketStatus.NEW,
+        priority=TicketPriority.MEDIUM,
+        source=TicketSource.PORTAL,
+        reporter_id=uuid.uuid4(),
+    )
+    ticket.created_at = ticket.updated_at = datetime.now(UTC)
+    ticket.ai_risk_score = 0.35
+
+    data = _serialize_ticket(ticket)
+    assert data["ai_risk_score"] == 0.35
+    assert data["ai_risk_band"] == "low"

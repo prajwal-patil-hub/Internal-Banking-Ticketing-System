@@ -24,6 +24,7 @@ const BranchesPage      = lazy(() => import('@/pages/BranchesPage').then(m => ({
 const SecurityPage      = lazy(() => import('@/pages/SecurityPage').then(m => ({ default: m.SecurityPage })));
 const SLAMonitorPage    = lazy(() => import('@/pages/SLAMonitorPage').then(m => ({ default: m.SLAMonitorPage })));
 const EscalationsPage   = lazy(() => import('@/pages/EscalationsPage').then(m => ({ default: m.EscalationsPage })));
+const KnowledgeBasePage = lazy(() => import('@/pages/KnowledgeBasePage').then(m => ({ default: m.KnowledgeBasePage })));
 
 /** Shown while a route chunk loads. Deliberately quiet — a full-page spinner
  *  for a sub-second fetch reads as slower than a blank moment. */
@@ -66,6 +67,14 @@ export default function App() {
           element={
             <RequireAuth roles={['admin', 'supervisor']}>
               <EscalationsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/knowledge"
+          element={
+            <RequireAuth roles={['admin', 'supervisor', 'agent']}>
+              <KnowledgeBasePage />
             </RequireAuth>
           }
         />

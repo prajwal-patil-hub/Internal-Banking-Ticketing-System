@@ -192,8 +192,17 @@ def test_the_worker_calls_the_engine() -> None:
     """
     import inspect
 
-    from app.workers.sla_worker import check_sla_breaches_job
+    from app.workers.sla_worker import (
+        _check_sla_breaches_job_locked,
+        check_sla_breaches_job,
+    )
 
-    src = inspect.getsource(check_sla_breaches_job)
+    # The body moved behind an advisory-lock wrapper so the job runs on one
+    # replica. The original guard still applies — it just applies to the body.
+    src = inspect.getsource(_check_sla_breaches_job_locked)
     assert "escalate_breached" in src
     assert "notify_escalation_outcome" in src
+
+    # And the scheduler entry point must be the wrapper, or a second replica
+    # would run all of the above a second time on the same tick.
+    assert "run_locked" in inspect.getsource(check_sla_breaches_job)

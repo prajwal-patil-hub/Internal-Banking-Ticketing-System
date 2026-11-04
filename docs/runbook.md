@@ -159,6 +159,92 @@ restore from backup.
 The system degrades rather than failing: tickets still get created from email
 without AI extraction, carrying the subject and raw body.
 
+### `CREATE EXTENSION vector` fails during migration
+
+Migration `0009_knowledge_base` enables pgvector. Two things go wrong here:
+
+- **The image does not ship the extension.** Stock `postgres:15` / `postgres:16`
+  do not, and the migration fails with *"could not open extension control
+  file"*. All three compose files and CI pin `pgvector/pgvector:pg15` / `pg16`.
+  If you are running your own Postgres, install `postgresql-16-pgvector` (or
+  build pgvector from source) before migrating.
+- **The database role cannot create extensions.** `CREATE EXTENSION` needs
+  superuser, or `CREATE` on the database plus the extension being
+  allow-listed. On managed Postgres (RDS, Cloud SQL, Supabase) the provider
+  usually has to enable it first. Ask a superuser to run
+  `CREATE EXTENSION IF NOT EXISTS vector;` once, by hand — the migration is
+  idempotent and will skip it on the next run.
+
+Downgrading `0009` drops the six `kb_*` tables but deliberately leaves the
+extension in place: another schema in the same database may be using it, and
+dropping it cascades to their columns.
+
+### Knowledge-base documents stay stuck on "Indexing" or show "Failed"
+
+Ingestion runs inside the upload request, so a stuck document usually means a
+dependency is down rather than a slow parse.
+
+- **Failed with a storage error.** MinIO is unreachable. Same cause as the
+  attachment 503 below. Nothing is lost; press **Re-index** once storage is
+  back.
+- **Failed with an embedding error.** Ollama is down or the embedding model is
+  not pulled: `ollama pull nomic-embed-text`. The previous version of the
+  document keeps serving answers throughout — a failed re-index degrades to
+  "the new copy did not take", never to "the document disappeared".
+- **Failed: "appears to be a scanned image".** The PDF has no text layer. OCR
+  is not enabled; upload a text-based PDF.
+- **Failed: "produces N passages, over the limit".** Split the document. The
+  ceiling exists because embedding is sequential and holds the single local
+  model, which would stall chat and email intake.
+
+A collection showing **"No roles granted — not searchable"** is not an error:
+a new collection is readable by nobody until an administrator grants a role on
+the Knowledge Base screen. It is flagged because a granted-to-nobody
+collection accepts uploads and answers nothing, which otherwise looks like a
+retrieval bug.
+
+### The knowledge base answers "No grounded answer"
+
+This is a success path, not a fault. The service refuses rather than guessing
+when retrieval comes back thin, when the model's own citations do not resolve
+to real passages, or when derived confidence falls below
+`KB_MIN_CONFIDENCE`. The panel states which of those happened. Check
+`kb_query_logs.abstain_reason` for the distribution; a spike in
+`no_valid_citations` means the model is fabricating sources and is worth
+investigating, whereas `no_passages` usually means a document is missing.
+
+### An UPDATE or DELETE on audit_logs is refused
+
+Expected. The audit trail is append-only and enforced by a trigger, which
+refuses with SQLSTATE 42501 for any connection including the table owner.
+
+If a retention policy genuinely requires deleting old rows, that is a
+deliberate operator procedure, not a workaround:
+
+    BEGIN;
+    ALTER TABLE audit_logs DISABLE TRIGGER audit_logs_no_update_delete;
+    DELETE FROM audit_logs WHERE created_at < now() - interval '7 years';
+    ALTER TABLE audit_logs ENABLE TRIGGER audit_logs_no_update_delete;
+    COMMIT;
+
+Run it as a named change with an approver, and record that it happened
+somewhere the trail itself cannot cover.
+
+### A scheduled job appears not to be running
+
+Each of the three jobs takes a Postgres advisory lock, so on a multi-replica
+deployment only one instance executes each tick and the others log
+`job_lock.skipped` at debug level. That is correct behaviour, not a fault.
+
+To see who holds what:
+
+    SELECT objid, classid, pid FROM pg_locks WHERE locktype = 'advisory';
+
+A lock is released when its connection closes, so a killed replica does not
+strand one. If a job genuinely never runs, check that at least one replica
+logs `sla_worker_started` / `email_worker_started` /
+`assignment_worker_started` at boot.
+
 ### Attachment upload returns 503
 
 `STORAGE_UNAVAILABLE` means MinIO/S3 is unreachable — not a bad request.

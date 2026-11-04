@@ -1,6 +1,7 @@
 """Aggregate model imports — Alembic introspects this package for metadata."""
 
 from app.models.ai_interaction import AIInteractionLog, ChatMessage, ChatSession  # noqa: F401
+from app.models.assignment import AssignmentRule, SystemSetting  # noqa: F401
 from app.models.attachment import Attachment  # noqa: F401
 from app.models.audit import AuditLog  # noqa: F401
 from app.models.auth import LoginAttempt, RefreshToken  # noqa: F401
@@ -8,6 +9,15 @@ from app.models.branch import Branch  # noqa: F401
 from app.models.comment import TicketComment  # noqa: F401
 from app.models.email_intake import InboundEmail  # noqa: F401
 from app.models.escalation import EscalationEvent, EscalationRule  # noqa: F401
+from app.models.knowledge import (  # noqa: F401
+    KBChunk,
+    KBCollection,
+    KBCollectionGrant,
+    KBDocument,
+    KBDocumentVersion,
+    KBQueryLog,
+    KBVersionStatus,
+)
 from app.models.mfa import MFABackupCode  # noqa: F401
 from app.models.org import HierarchyLevel, OrgRole, OrgUnit, TicketSequence  # noqa: F401
 from app.models.role import Permission, Role, RolePermission  # noqa: F401

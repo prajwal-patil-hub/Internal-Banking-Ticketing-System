@@ -86,6 +86,26 @@ AI_RISK_HIGH_THRESHOLD: float = 0.7
 AI_RISK_MEDIUM_THRESHOLD: float = 0.4
 
 
+def risk_band(score: float | None) -> str | None:
+    """Turn a raw risk score into the label the UI shows.
+
+    Exists so the *server* owns the banding and the client never re-derives
+    it. AIBadge.tsx used to apply its own 0.7/0.3 cut-offs against these
+    0.7/0.4 ones, so a ticket scored 0.35 read "Med Risk" on the badge and
+    "Low Risk" in every backend list and dashboard tile — the same number
+    contradicting itself depending on which screen you were looking at.
+
+    One owner per threshold. The API sends the label; the client renders it.
+    """
+    if score is None:
+        return None
+    if score >= AI_RISK_HIGH_THRESHOLD:
+        return "high"
+    if score >= AI_RISK_MEDIUM_THRESHOLD:
+        return "medium"
+    return "low"
+
+
 class TicketCategory(UUIDPKMixin, TimestampMixin, Base):
     __tablename__ = "ticket_categories"
 

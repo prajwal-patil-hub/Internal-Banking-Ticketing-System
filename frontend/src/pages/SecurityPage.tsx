@@ -6,6 +6,7 @@ import { BackupCodes } from '@/components/BackupCodes';
 import { cn } from '@/lib/cn';
 import { extractError } from '@/lib/api';
 import { useAuth } from '@/store/auth';
+import { PageHeader, PageShell } from '@/components/PageHeader';
 import {
   startMFASetup,
   enableMFA,
@@ -160,13 +161,11 @@ export function SecurityPage() {
   });
 
   return (
-    <div className="space-y-6 max-w-3xl">
-      <div>
-        <h1 className="text-xl font-semibold text-[var(--tx)]">Security</h1>
-        <p className="text-xs text-[var(--tx-3)] mt-0.5">
-          Manage the protection on your own account.
-        </p>
-      </div>
+    <PageShell className="max-w-3xl">
+      <PageHeader
+        title="Security"
+        subtitle="Manage the protection on your own account."
+      />
 
       {notice && (
         <div className="card-sm p-3 text-sm text-[var(--ok)] flex items-start gap-2">
@@ -405,6 +404,6 @@ export function SecurityPage() {
           </dd>
         </dl>
       </section>
-    </div>
+    </PageShell>
   );
 }
