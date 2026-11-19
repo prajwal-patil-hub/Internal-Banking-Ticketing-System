@@ -1076,21 +1076,46 @@ async def ai_categorize(
 async def ai_summarize(
     ticket_id: uuid.UUID,
     request: Request,
+    regenerate: bool = False,
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> dict:
-    """Summarise the ticket with the model, grounded in the ticket itself.
+    """Return the ticket's summary, generating one only if there isn't one.
 
     This used to return the `ai_summary` column, which only the email-intake
-    path ever writes — so a ticket raised through the portal always got "AI
+    path ever wrote — so a ticket raised through the portal always got "AI
     summary not yet generated", and the audit row still claimed an AI decision
     had been made. A button that returns a fixed string teaches people the
     feature is useless, and a false audit row is worse than no audit row.
+
+    It was then changed to always call the model, which was correct but slow:
+    the click blocked on `glm4` with `AI_TIMEOUT_SECONDS` at 180, while the
+    agent watched a spinner for something the system could have had ready.
+
+    Now `enrichment_worker` writes the summary a few minutes after the ticket
+    arrives, so the common case is a column read and returns immediately. The
+    model is called only when the worker has not got to it yet (or is
+    disabled), or when the caller passes `regenerate=true` because the thread
+    has moved on since. Same model, same output, same token cost — the only
+    thing that changed is who waits, and the usual answer is nobody.
     """
     from app.core.config import settings
     from app.services import ticket_ai
 
     ticket = await _get_ticket_or_404(ticket_id, db, current_user)
+
+    # The fast path: already written, and the caller has not asked for a fresh
+    # one. No model call, no rate-limit charge, no audit row — nothing was
+    # decided here, the summary was decided when it was generated.
+    if ticket.ai_summary and not regenerate:
+        return ok({
+            "summary": ticket.ai_summary,
+            "sentiment": ticket.ai_sentiment,
+            "risk_score": ticket.ai_risk_score,
+            "risk_band": risk_band(ticket.ai_risk_score),
+            "generated": False,
+            "error": None,
+        })
 
     if not settings.AI_ENABLED:
         raise ValidationError("AI features are not enabled.")
@@ -1123,7 +1148,11 @@ async def ai_summarize(
         # No audit row: nothing was decided. Still a 200 so the UI can render
         # the reason inline rather than showing a stack trace.
         await db.commit()
-        return ok({"summary": None, "error": outcome.error})
+        return ok({"summary": None, "generated": False, "error": outcome.error})
+
+    # Store it so the next reader — and every other agent on this ticket —
+    # gets the fast path above instead of paying for the same call again.
+    ticket.ai_summary = outcome.text
 
     await _record_audit(
         db,
@@ -1139,6 +1168,7 @@ async def ai_summarize(
         "sentiment": ticket.ai_sentiment,
         "risk_score": ticket.ai_risk_score,
         "risk_band": risk_band(ticket.ai_risk_score),
+        "generated": True,
         "error": None,
     })
 

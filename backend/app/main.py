@@ -39,12 +39,16 @@ from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
 from app.middleware.body_limit import BodySizeLimitMiddleware
 from app.middleware.request_context import RequestContextMiddleware
-from app.services import storage_service
+from app.services import cache_service, storage_service
 from app.workers.assignment_worker import (
     setup_assignment_worker,
     shutdown_assignment_worker,
 )
 from app.workers.email_worker import setup_email_worker, shutdown_email_worker
+from app.workers.enrichment_worker import (
+    setup_enrichment_worker,
+    shutdown_enrichment_worker,
+)
 from app.workers.sla_worker import setup_sla_worker, shutdown_sla_worker
 
 log = get_logger(__name__)
@@ -59,6 +63,7 @@ async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
     await setup_email_worker(app)
     await setup_sla_worker(app)
     await setup_assignment_worker(app)
+    await setup_enrichment_worker(app)
 
     yield
 
@@ -66,6 +71,8 @@ async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
     await shutdown_email_worker()
     await shutdown_sla_worker()
     await shutdown_assignment_worker()
+    await shutdown_enrichment_worker()
+    await cache_service.close()
     log.info("app_stopped")
 
 
