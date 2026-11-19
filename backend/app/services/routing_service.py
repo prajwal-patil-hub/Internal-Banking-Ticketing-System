@@ -1,19 +1,27 @@
-"""Routing service — intelligent ticket assignment based on workload and specialization.
+"""Routing service — who should work this ticket.
 
-Algorithm (in priority order):
-1. Match agents whose branch/department aligns with the ticket's category/department.
-2. Among those, pick the one with the fewest currently open tickets.
-3. If no specialization match, fall back to any active agent by lowest open-ticket count.
-4. If no agent is available, return None.
+Order of preference:
+
+1. A category rule, if one names somebody for this ticket's category.
+2. Someone in the ticket's own branch, by lightest open queue.
+3. Anyone assignable, by lightest open queue.
+
+Agents are considered before supervisors at every step, and anyone on leave is
+excluded throughout. Each step falls through rather than failing: a rule that
+names someone on leave is skipped, not obeyed, because parking tickets on an
+absent person is worse than having no rule at all.
 """
 
 from __future__ import annotations
 
-from sqlalchemy import func, select
+from datetime import date
+
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import authz
 from app.core.logging import get_logger
+from app.models.assignment import AssignmentRule
 from app.models.role import Role
 from app.models.ticket import OPEN_STATUS_VALUES as _OPEN_STATUSES
 from app.models.ticket import Ticket, TicketStatus
@@ -30,6 +38,40 @@ AGENT_ROLE = authz.AGENT
 ASSIGNABLE_ROLES = (authz.AGENT, authz.SUPERVISOR)
 
 
+def is_on_leave(user: User, on_date: date | None = None) -> bool:
+    """Is this person inside a leave window on the given day?
+
+    Both ends are inclusive, and either may be open: a `leave_from` with no
+    `leave_to` is indefinite leave, and a `leave_to` with no `leave_from` is
+    leave that has always been running and ends on that date. Neither set
+    means available.
+    """
+    if user.leave_from is None and user.leave_to is None:
+        return False
+    today = on_date or date.today()
+    if user.leave_from is not None and today < user.leave_from:
+        return False
+    return not (user.leave_to is not None and today > user.leave_to)
+
+
+def _available_on(today: date):
+    """SQL for "not on leave today" — the direct negation of `is_on_leave`.
+
+    Someone is available when they have no leave recorded at all, or their
+    leave has not started yet, or it has already ended.
+
+    Expressed in SQL rather than filtered afterwards in Python so that the
+    lowest-workload ordering applies to the people who can actually take the
+    work. Ordering first and discarding the unavailable would return nobody
+    whenever the idlest agent happened to be away.
+    """
+    return or_(
+        and_(User.leave_from.is_(None), User.leave_to.is_(None)),
+        and_(User.leave_from.isnot(None), User.leave_from > today),
+        and_(User.leave_to.isnot(None), User.leave_to < today),
+    )
+
+
 
 class RoutingService:
     def __init__(self, db: AsyncSession) -> None:
@@ -40,7 +82,13 @@ class RoutingService:
     # ------------------------------------------------------------------
 
     async def get_agent_workload(self) -> list[dict]:
-        """Return a list of all active users with their current open ticket counts."""
+        """Everyone who can be assigned work, with open counts and leave state.
+
+        This backs the assign control, so it deliberately still lists people
+        who are on leave rather than hiding them — a supervisor may knowingly
+        assign to someone returning tomorrow. It marks them instead, and
+        auto-routing skips them.
+        """
         # Subquery: count open tickets per assignee
         open_counts = (
             select(
@@ -53,28 +101,47 @@ class RoutingService:
             .subquery()
         )
 
+        today = date.today()
         stmt = (
             select(
                 User.id,
                 User.email,
                 User.full_name,
+                Role.name.label("role"),
+                User.leave_from,
+                User.leave_to,
+                User.leave_note,
                 func.coalesce(open_counts.c.open_count, 0).label("open_count"),
             )
+            .join(Role, Role.id == User.role_id)
             .outerjoin(open_counts, User.id == open_counts.c.user_id)
-            .where(User.is_active.is_(True))
+            # Only roles that can hold a ticket. Listing branch users and
+            # auditors here would put people in the assign dropdown who cannot
+            # action what they are given.
+            .where(User.is_active.is_(True), Role.name.in_(ASSIGNABLE_ROLES))
             .order_by(func.coalesce(open_counts.c.open_count, 0).asc())
         )
 
         rows = (await self.db.execute(stmt)).all()
-        return [
-            {
+        out = []
+        for row in rows:
+            on_leave = not (
+                (row.leave_from is None and row.leave_to is None)
+                or (row.leave_from is not None and row.leave_from > today)
+                or (row.leave_to is not None and row.leave_to < today)
+            )
+            out.append({
                 "user_id": str(row.id),
                 "email": row.email,
                 "full_name": row.full_name,
+                "role": row.role,
                 "open_count": row.open_count,
-            }
-            for row in rows
-        ]
+                "on_leave": on_leave,
+                "leave_from": row.leave_from.isoformat() if row.leave_from else None,
+                "leave_to": row.leave_to.isoformat() if row.leave_to else None,
+                "leave_note": row.leave_note,
+            })
+        return out
 
     # ------------------------------------------------------------------
     # Best-assignee selection
@@ -103,6 +170,8 @@ class RoutingService:
             .subquery()
         )
 
+        today = date.today()
+
         def _candidates(roles: tuple[str, ...]):
             # Only people who can actually work a ticket are eligible. Without
             # a role filter the lowest-workload user is usually an auditor or
@@ -113,9 +182,46 @@ class RoutingService:
                 select(User)
                 .join(Role, Role.id == User.role_id)
                 .outerjoin(open_counts, User.id == open_counts.c.user_id)
-                .where(User.is_active.is_(True), Role.name.in_(roles))
+                .where(
+                    User.is_active.is_(True),
+                    Role.name.in_(roles),
+                    _available_on(today),
+                )
                 .order_by(func.coalesce(open_counts.c.open_count, 0).asc())
             )
+
+        # --- 1. a category rule, if one applies and the person can take it ---
+        if ticket.category_id is not None:
+            rule = (await self.db.execute(
+                select(AssignmentRule).where(AssignmentRule.category_id == ticket.category_id)
+            )).scalar_one_or_none()
+            if rule is not None:
+                named = (await self.db.execute(
+                    select(User)
+                    .join(Role, Role.id == User.role_id)
+                    .where(
+                        User.id == rule.assignee_id,
+                        User.is_active.is_(True),
+                        Role.name.in_(ASSIGNABLE_ROLES),
+                        _available_on(today),
+                    )
+                )).scalar_one_or_none()
+                if named is not None:
+                    log.info(
+                        "routing.category_rule",
+                        ticket_id=str(ticket.id),
+                        assignee_id=str(named.id),
+                        category_id=str(ticket.category_id),
+                    )
+                    return named
+                # Deliberately not an error. The rule names who *should* own
+                # this category; when they are away the ticket still has to go
+                # somewhere, so fall through to the ordinary search.
+                log.info(
+                    "routing.category_rule_unavailable",
+                    ticket_id=str(ticket.id),
+                    rule_assignee_id=str(rule.assignee_id),
+                )
 
         # Agents are tried before supervisors, and only then by workload.
         # Ranking purely on workload sends everything to whoever is idlest,

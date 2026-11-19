@@ -30,6 +30,7 @@ from app.models.ticket import (
 )
 from app.models.user import User
 from app.schemas.envelope import ok
+from app.services import cache_service
 from app.services.org_service import get_accessible_org_unit_ids
 
 log = get_logger(__name__)
@@ -57,6 +58,22 @@ async def _org_filter(user: User, db: AsyncSession):
     return None
 
 
+async def _scope_and_key(user: User, db: AsyncSession):
+    """The WHERE clause, and a cache key naming exactly what it selects.
+
+    Two calls that return the same key are guaranteed to produce the same
+    aggregate, which is the only safe basis for sharing a cache entry. The key
+    carries the user id wherever the predicate does — `_org_filter` ORs in
+    `assignee_id == user.id` for org members — so one manager's counts can
+    never be served to another.
+    """
+    clause = await _org_filter(user, db)
+    units = None
+    if not user.is_super_admin and user.org_unit_id:
+        units = await get_accessible_org_unit_ids(user, db)
+    return clause, cache_service.scope_key(user, units)
+
+
 # ---------------------------------------------------------------------------
 # KPIs
 # ---------------------------------------------------------------------------
@@ -75,7 +92,13 @@ async def get_kpis(
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     thirty_days_ago = now - timedelta(days=30)
 
-    scope = await _org_filter(current_user, db)
+    scope, key = await _scope_and_key(current_user, db)
+
+    # Eight aggregate counts over the whole ticket table. The client holds
+    # them for 30s anyway, so a 30s entry costs no freshness at all.
+    cached = await cache_service.get("kpis", key)
+    if cached is not None:
+        return ok(cached)
 
     def _base(extra=None):
         clauses = [extra] if extra is not None else []
@@ -130,7 +153,7 @@ async def get_kpis(
         _base(Ticket.status == TicketStatus.ESCALATED)
     )).scalar_one()
 
-    return ok({
+    payload = {
         "open_tickets":        open_count,
         "sla_breached":        sla_breached_count,
         "resolved_today":      resolved_today,
@@ -139,7 +162,9 @@ async def get_kpis(
         "ai_auto_categorized": ai_auto_categorized,
         "email_tickets_today": email_tickets_today,
         "escalations_active":  escalations_active,
-    })
+    }
+    await cache_service.set("kpis", key, payload)
+    return ok(payload)
 
 
 # ---------------------------------------------------------------------------
@@ -158,6 +183,11 @@ async def get_sla_status(
 ) -> dict:
     now = datetime.now(UTC)
     at_risk_cutoff = now + timedelta(minutes=60)
+
+    _, key = await _scope_and_key(current_user, db)
+    cached = await cache_service.get("sla", key)
+    if cached is not None:
+        return ok(cached)
 
     # Resolution-breached open tickets
     breached_count = (await db.execute(
@@ -191,12 +221,14 @@ async def get_sla_status(
     on_time = max(total_tracked - at_risk_count - breached_count, 0)
     compliance_rate = round((on_time / total_tracked) * 100, 1) if total_tracked else 100.0
 
-    return ok({
+    payload = {
         "on_time":        on_time,
         "at_risk":        at_risk_count,
         "breached":       breached_count,
         "compliance_rate": compliance_rate,
-    })
+    }
+    await cache_service.set("sla", key, payload)
+    return ok(payload)
 
 
 # ---------------------------------------------------------------------------
@@ -215,7 +247,14 @@ async def get_category_distribution(
     current_user: User = Depends(get_current_user),
 ) -> dict:
     since = datetime.now(UTC) - timedelta(days=max(1, min(days, 365)))
-    scope = await _org_filter(current_user, db)
+    scope, scope_key = await _scope_and_key(current_user, db)
+
+    # `days` is part of the question, so it is part of the key: without it a
+    # 7-day request would be served a 30-day answer.
+    key = f"{scope_key}:d{days}"
+    cached = await cache_service.get("categories", key)
+    if cached is not None:
+        return ok(cached)
 
     ticket_clauses = [(Ticket.created_at >= since) | (Ticket.id.is_(None))]
     if scope is not None:
@@ -247,6 +286,7 @@ async def get_category_distribution(
         for row in rows
     ]
 
+    await cache_service.set("categories", key, distribution)
     return ok(distribution)
 
 
@@ -265,7 +305,11 @@ async def get_department_load(
     current_user: User = Depends(get_current_user),
 ) -> dict:
     now = datetime.now(UTC)
-    scope = await _org_filter(current_user, db)
+    scope, key = await _scope_and_key(current_user, db)
+
+    cached = await cache_service.get("departments", key)
+    if cached is not None:
+        return ok(cached)
 
     where_clauses = [Ticket.status.in_(_OPEN_STATUSES), Ticket.department.is_not(None)]
     if scope is not None:
@@ -299,6 +343,7 @@ async def get_department_load(
         for row in rows
     ]
 
+    await cache_service.set("departments", key, department_load)
     return ok(department_load)
 
 
@@ -413,6 +458,14 @@ async def get_ai_metrics(
 ) -> dict:
     since = datetime.now(UTC) - timedelta(days=max(1, min(days, 90)))
 
+    # These metrics carry no org predicate — they count model activity across
+    # the whole system — so `days` alone identifies the answer, and every
+    # viewer on the same window shares one entry.
+    key = f"all:d{days}"
+    cached = await cache_service.get("ai-metrics", key)
+    if cached is not None:
+        return ok(cached)
+
     # Total categorize interactions
     total_categorized = (await db.execute(
         select(func.count(AIInteractionLog.id)).where(
@@ -459,7 +512,7 @@ async def get_ai_metrics(
         )
     )).scalar_one()
 
-    return ok({
+    payload = {
         "total_categorized": total_categorized,
         "avg_confidence":    round(float(avg_confidence_raw or 0), 3),
         "high_risk_tickets": high_risk_tickets,
@@ -467,4 +520,6 @@ async def get_ai_metrics(
         # Retained under the old key so an unrefreshed client keeps working.
         "auto_resolved":     ai_assisted_resolved,
         "avg_latency_ms":    round(float(avg_latency_raw or 0), 0),
-    })
+    }
+    await cache_service.set("ai-metrics", key, payload)
+    return ok(payload)

@@ -160,19 +160,74 @@ is recoverable; a rolled-back escalation is not.
 - Every call is logged with tokens and latency.
 - **Degrades rather than fails.** With the model unreachable, an inbound email
   still becomes a ticket carrying its raw body.
+- `services/llm_client.py` is the one place that talks to the model. Before
+  it there were two independent implementations — `AIService` built its own
+  client, `ai_chat.py` opened raw `httpx` inline — which meant two timeout
+  policies and two error vocabularies; the knowledge base would have made it
+  three.
+
+### 7.1 Knowledge base (RAG)
+
+Documents are curated by administrators into collections, and answered from by
+agents and supervisors. Three properties are enforced structurally rather than
+by prompting, because a prompt is not a control:
+
+- **Access is a SQL predicate applied before retrieval.** `kb_chunks` carries a
+  denormalised `collection_id` so the check is a single `WHERE` that cannot be
+  lost to a join refactor. A passage the caller may not read is never
+  selected, so it never enters the prompt, so injection cannot surface it.
+- **Citations are validated server-side** against the retrieved set, at
+  sentence level: a sentence whose only citation was fabricated is dropped
+  entirely, because stripping the marker would leave the claim standing as
+  unattributed prose.
+- **Confidence is derived from retrieval signals**, never asked of the model,
+  and the API returns the *band* as a label so the client cannot re-derive it.
+
+Ingestion is two-phase so a document is never partially retrievable: chunks are
+written against a version, the version flips to READY only when every chunk has
+a vector, and retrieval reads through `kb_documents.active_version_id`.
+
+pgvector lives in the same PostgreSQL instance rather than a dedicated vector
+store — one database to back up, one transaction to keep grants and chunks
+consistent. The server image must therefore ship the extension; see the
+runbook.
+
+Full design and as-built status: `docs/06-rag-knowledge-base.md`.
 
 ## 8. Cross-cutting
 
 **Audit.** Every state change inserts a row with actor, role, IP, request id
-and before/after values. **Immutability is by convention only** — no trigger,
-no permission grant. This is the largest architectural gap.
+and before/after values. **Immutability is enforced in the database**: two
+triggers on `audit_logs` refuse UPDATE, DELETE and TRUNCATE with SQLSTATE
+42501, regardless of who is connected — including the table owner. Inserts are
+unaffected. A retention policy, when one exists, will need a deliberate
+operator procedure that disables the trigger inside a transaction; that should
+be documented rather than working by accident. Dropping the table is still
+possible for anyone who can drop the trigger, which is the honest limit of
+this approach: the trail cannot be *edited*, and a missing table is loud where
+an altered row is not.
 
 **Errors.** One envelope, `{success, data, error: {code, message}, request_id}`.
 Clients must read `error.message`; two pages once read FastAPI's `detail`
 instead and silently showed generic text for every failure.
 
-**Rate limiting.** Present on the AI routes. There is no general middleware and
-no Redis-backed limiter, despite the older document saying otherwise.
+**Scheduled work.** The three APScheduler jobs run inside the API process, and
+each takes a session-level Postgres advisory lock before doing anything
+(`services/job_lock.py`). A second replica finds the lock held and skips rather
+than queues, so the same mailbox is not polled twice and the same stale ticket
+is not auto-assigned twice. The lock is released when the connection closes, so
+a replica killed mid-job frees it without a cleanup sweep.
+
+**Rate limiting.** Present on the AI routes, the ticket AI helpers, and
+knowledge-base ingestion.
+There is no general middleware and no Redis-backed limiter, despite the older
+document saying otherwise.
+
+**Request size.** `middleware/body_limit.py` caps request bodies per path
+prefix, above the application. It has to be there rather than in the handler:
+FastAPI parses a multipart body before it solves dependencies, so an
+unauthenticated caller's oversized upload is already spooled by the time
+`get_current_user` runs.
 
 ## 9. Deployment
 
@@ -192,10 +247,27 @@ CI builds and smoke-tests both on every change. CD publishes to GHCR from
 
 ## 10. Known architectural debt
 
-1. **Audit immutability** is convention, not enforcement.
-2. **Two role definitions** — `core/rbac.py` seeds permission tables that
+1. **Two role definitions** — `core/rbac.py` seeds permission tables that
    nothing reads; `core/authz.py` does the enforcing.
-3. **Schedulers in the API process** block horizontal scaling.
-4. **Repository layer is bypassed** in parts of `tickets.py`.
-5. **No TLS anywhere** in the stack.
+2. **Repository layer is bypassed** in parts of `tickets.py`.
+3. **No TLS anywhere** in the stack. Terminates at whatever sits in front.
+4. **Knowledge-base ingestion runs in the request**, not on a worker. Bounded
+   by upload size and a passage ceiling.
+5. **No evaluation harness gate on answer quality.** The harness exists and
+   measures retrieval, abstention and citation integrity, but its golden set
+   has not been reviewed by subject-matter experts, so the quality numbers are
+   a smoke test rather than a certification.
+
+*Closed since this document was first written:* audit immutability is now a
+database trigger; the schedulers take a Postgres advisory lock so the API can
+run on more than one replica; and the ticket AI helpers call the model instead
+of returning canned text.
+6. **Knowledge-base ingestion runs in the request**, not on a worker. Bounded
+   by upload size and a passage ceiling; the version status column is the
+   machinery a worker would need.
+7. **No evaluation harness for answer quality.** The knowledge base is correct
+   by construction — citations cannot be fabricated, restricted passages
+   cannot be retrieved — but nothing measures whether answers are *good*. This
+   is the largest gap in that feature and is blocked on SME availability, not
+   on engineering.
 6. **Redis is provisioned and unused** — a running dependency nothing needs.

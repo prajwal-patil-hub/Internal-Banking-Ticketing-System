@@ -1,0 +1,261 @@
+# Knowledge-base golden set
+#
+# STATUS: STARTER SET — NOT YET REVIEWED BY SUBJECT-MATTER EXPERTS.
+#
+# Read this before trusting any number the harness prints. These cases were
+# written by working backwards from the seeded demo documents, which means
+# they test that retrieval finds the passage a *developer* thought was
+# relevant. That is enough to catch a broken index, a dropped access filter or
+# a fabricated citation — the things that are objectively wrong.
+#
+# It is NOT enough to say whether the answers are any good. Only somebody who
+# actually works disputes or compliance can say that a question is one staff
+# really ask, that the expected passage is the one they would want, and that a
+# plausible-looking answer is in fact correct. Until that review happens, treat
+# quality scores as a smoke test and the gates below as the real value.
+#
+# Reviewing this file (open question Q6 in docs/06-rag-knowledge-base.md):
+#   1. Delete cases that are not questions anyone asks.
+#   2. Add the questions you get asked repeatedly, especially awkward ones.
+#   3. Fix `expects.section` where the passage you would want differs.
+#   4. Add `should_abstain: true` cases — questions the corpus deliberately
+#      cannot answer. These matter as much as the answerable ones; a system
+#      that never abstains is a system that guesses.
+#   5. Set `reviewed_by` and `reviewed_on` at the bottom.
+#
+# FIELDS
+#   id              stable identifier; used in the report, so keep it when editing
+#   question        asked verbatim
+#   collection      which seeded collection should answer it
+#   expects.doc     document title substring the top passages should come from
+#   expects.section heading-path substring the best passage should carry
+#   expects.facts   strings that must appear in a correct answer (checked only
+#                   when a live model is available)
+#   should_abstain  true when the corpus cannot answer and refusal is correct
+#   role            role the query runs as; drives the access-control cases
+#   tags            free-form, used to slice the report
+
+version: 1
+reviewed_by: null      # ← set when an SME has been through it
+reviewed_on: null
+
+cases:
+  # ---------------------------------------------------------------------
+  # Disputes & chargebacks
+  # ---------------------------------------------------------------------
+  - id: chargeback-service-window
+    question: How long does a customer have to raise a service dispute?
+    collection: Disputes & chargebacks
+    role: agent
+    expects:
+      doc: Chargeback Handling Policy
+      section: "3.1"
+      facts: ["45 days"]
+    tags: [timelines, core]
+
+  - id: chargeback-fraud-window
+    question: What is the window for raising a fraud claim on a card transaction?
+    collection: Disputes & chargebacks
+    role: agent
+    expects:
+      doc: Chargeback Handling Policy
+      section: "3.2"
+      facts: ["120 days"]
+    tags: [timelines, core]
+
+  - id: chargeback-fraud-owner
+    question: Which team owns fraud chargeback claims?
+    collection: Disputes & chargebacks
+    role: agent
+    expects:
+      doc: Chargeback Handling Policy
+      facts: ["Fraud Operations"]
+    tags: [ownership]
+
+  - id: chargeback-atm-window
+    # Deliberately answerable only from the table. If tables are flattened
+    # into prose during parsing, this case is where it shows up.
+    question: How long do we have to raise an ATM non-dispense dispute?
+    collection: Disputes & chargebacks
+    role: agent
+    expects:
+      doc: Chargeback Handling Policy
+      section: "3.3"
+      facts: ["30 days"]
+    tags: [tables, regression]
+
+  - id: chargeback-evidence
+    question: What evidence has to be attached to a dispute?
+    collection: Disputes & chargebacks
+    role: agent
+    expects:
+      doc: Chargeback Handling Policy
+      section: "2.2"
+      facts: ["dispute form", "statement"]
+    tags: [procedure]
+
+  - id: chargeback-provisional-credit
+    question: When does a dispute need supervisor approval for provisional credit?
+    collection: Disputes & chargebacks
+    role: supervisor
+    expects:
+      doc: Chargeback Handling Policy
+      section: "4"
+      facts: ["25,000"]
+    tags: [thresholds]
+
+  # ---------------------------------------------------------------------
+  # Compliance
+  # ---------------------------------------------------------------------
+  - id: kyc-high-risk-cycle
+    question: How often must KYC be refreshed for a high risk customer?
+    collection: Compliance policies
+    role: agent
+    expects:
+      doc: KYC Refresh Procedure
+      section: "1.1"
+      facts: ["2 years"]
+    tags: [kyc, core]
+
+  - id: kyc-triggers
+    question: What events trigger an early KYC refresh?
+    collection: Compliance policies
+    role: agent
+    expects:
+      doc: KYC Refresh Procedure
+      section: "1.2"
+      facts: ["address"]
+    tags: [kyc]
+
+  - id: kyc-adverse-media
+    question: What do I do if a customer has an adverse media hit?
+    collection: Compliance policies
+    role: agent
+    expects:
+      doc: KYC Refresh Procedure
+      section: "3.2"
+      facts: ["same day", "Compliance"]
+    tags: [kyc, escalation]
+
+  - id: kyc-non-response
+    question: What happens if a customer ignores the second KYC notice?
+    collection: Compliance policies
+    role: agent
+    expects:
+      doc: KYC Refresh Procedure
+      section: "3.1"
+      facts: ["30 days", "freeze"]
+    tags: [kyc]
+
+  - id: ctr-threshold
+    question: What cash amount triggers a Cash Transaction Report?
+    collection: Compliance policies
+    role: agent
+    expects:
+      doc: Transaction Monitoring Thresholds
+      section: "1"
+      facts: ["10 lakh"]
+    tags: [aml, thresholds, core]
+
+  - id: aml-alert-triage
+    question: How quickly must a monitoring alert be triaged?
+    collection: Compliance policies
+    role: agent
+    expects:
+      doc: Transaction Monitoring Thresholds
+      section: "3"
+      facts: ["2 working days"]
+    tags: [aml]
+
+  - id: inward-remittance-purpose-code
+    question: Do we need a purpose code for a large inward remittance?
+    collection: Compliance policies
+    role: agent
+    expects:
+      doc: Transaction Monitoring Thresholds
+      section: "2.1"
+      facts: ["25,000"]
+    tags: [aml, cross-border]
+
+  # ---------------------------------------------------------------------
+  # Treasury — granted to supervisor and admin only. These double as access
+  # cases: the same question is asked as an agent below and must find nothing.
+  # ---------------------------------------------------------------------
+  - id: neft-cutoff
+    question: What time does NEFT stop settling?
+    collection: Treasury runbooks
+    role: supervisor
+    expects:
+      doc: End-of-Day Settlement Runbook
+      section: "1"
+      facts: ["18:00"]
+    tags: [treasury, acronym-expansion]
+
+  - id: nostro-break-threshold
+    question: What size of nostro break has to be raised as a ticket same day?
+    collection: Treasury runbooks
+    role: supervisor
+    expects:
+      doc: End-of-Day Settlement Runbook
+      section: "2.1"
+      facts: ["1 lakh"]
+    tags: [treasury]
+
+  - id: rejected-settlement-file
+    question: The settlement file was rejected — can I just edit and resend it?
+    collection: Treasury runbooks
+    role: supervisor
+    expects:
+      doc: End-of-Day Settlement Runbook
+      section: "3"
+      facts: ["re-generate", "checksum"]
+    tags: [treasury, procedure]
+
+  # ---------------------------------------------------------------------
+  # Access control — the answer must be "nothing", not a redaction
+  # ---------------------------------------------------------------------
+  - id: treasury-denied-to-agent
+    question: What time does NEFT stop settling?
+    role: agent
+    should_abstain: true
+    abstain_because: >
+      Treasury runbooks are granted to supervisor and admin only. An agent must
+      retrieve nothing at all — not a filtered answer, not a refusal that
+      confirms the document exists.
+    tags: [access-control, gate]
+
+  - id: nostro-denied-to-agent
+    question: What is the nostro break escalation threshold?
+    role: agent
+    should_abstain: true
+    abstain_because: Same collection, same boundary, different wording.
+    tags: [access-control, gate]
+
+  # ---------------------------------------------------------------------
+  # Abstention — the corpus genuinely does not cover these
+  # ---------------------------------------------------------------------
+  - id: unrelated-topic
+    question: What is the staff car parking policy at head office?
+    role: agent
+    should_abstain: true
+    abstain_because: No uploaded document covers facilities. Guessing would be worse than refusing.
+    tags: [abstention, gate]
+
+  - id: plausible-but-absent
+    # The dangerous kind: sounds exactly like something the corpus would cover,
+    # and a model with banking priors will happily invent a number.
+    question: What is the daily UPI transaction limit for a savings account?
+    role: agent
+    should_abstain: true
+    abstain_because: >
+      UPI is mentioned in the acronym list but no uploaded document states a
+      limit. A model drawing on training data rather than the corpus will
+      answer this confidently and wrongly.
+    tags: [abstention, hallucination-bait, gate]
+
+  - id: future-dated-policy
+    question: What are the chargeback rules taking effect next quarter?
+    role: agent
+    should_abstain: true
+    abstain_because: The corpus holds current policy only; there is no future-dated document.
+    tags: [abstention]

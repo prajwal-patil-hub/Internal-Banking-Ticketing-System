@@ -12,6 +12,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.services.job_lock import run_locked
 
 log = get_logger(__name__)
 
@@ -19,6 +20,18 @@ scheduler = AsyncIOScheduler(timezone="UTC")
 
 
 async def poll_emails_job() -> None:
+    """Scheduler entry point. Runs on exactly one replica.
+
+    The schedulers live inside the API process, so without this every replica
+    would run this job on the same tick — duplicate mailbox polls, duplicate
+    breach evaluations, the same stale ticket auto-assigned twice. A
+    session-level Postgres advisory lock makes the extra replicas skip rather
+    than queue, and releases itself if the holder dies.
+    """
+    await run_locked("email_poll", _poll_emails_job_locked)
+
+
+async def _poll_emails_job_locked() -> None:
     """Poll IMAP mailbox and process inbound emails into tickets.
 
     Runs every 2 minutes via APScheduler. Acquires its own DB session

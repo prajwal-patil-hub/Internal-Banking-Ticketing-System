@@ -14,7 +14,7 @@ import time
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, NamedTuple
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi.responses import StreamingResponse
@@ -30,6 +30,7 @@ from app.db.session import SessionLocal
 from app.models.ai_interaction import AIInteractionLog, ChatMessage, ChatRole, ChatSession
 from app.models.user import User
 from app.schemas.envelope import ok, paginated
+from app.services import llm_client
 from app.services.chat_context import build_chat_context
 
 log = get_logger(__name__)
@@ -163,47 +164,13 @@ def _build_system_prompt(context: str | None = None) -> str:
     return prompt
 
 
-class AIResult(NamedTuple):
-    """Outcome of a single LLM call.
-
-    `ok=False` means the text is a human-readable fallback explaining the
-    failure rather than a real model completion — callers should log the
-    interaction as unsuccessful but must still return 200 so the UI can
-    render the explanation inline.
-    """
-
-    text: str
-    input_tokens: int
-    output_tokens: int
-    ok: bool = True
-    error: str | None = None
-
-
-def _ollama_hint(exc: Exception) -> str:
-    """Turn a connection failure into an actionable setup instruction."""
-    import httpx
-
-    url = settings.LLM_BASE_URL
-    if isinstance(exc, httpx.ConnectError | httpx.ConnectTimeout):
-        return (
-            f"Cannot reach Ollama at {url}. Check that:\n"
-            "  1. Ollama is running — `ollama serve`\n"
-            "  2. It accepts connections from Docker — "
-            "`launchctl setenv OLLAMA_HOST 0.0.0.0` on macOS, then restart Ollama\n"
-            f"  3. The model is pulled — `ollama pull {settings.LLM_MODEL}`"
-        )
-    if isinstance(exc, httpx.ReadTimeout | httpx.TimeoutException):
-        return (
-            f"Ollama did not respond within {settings.AI_TIMEOUT_SECONDS:.0f}s. "
-            f"The model `{settings.LLM_MODEL}` may still be loading — the first "
-            "request after a restart is always the slowest. Please try again."
-        )
-    if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 404:
-        return (
-            f"Ollama does not have the model `{settings.LLM_MODEL}`. "
-            f"Pull it with `ollama pull {settings.LLM_MODEL}`, then retry."
-        )
-    return f"Local AI (Ollama) error: {exc}"
+# The model call itself, the provider fallbacks and the connection-error hints
+# now live in `app.services.llm_client` so the knowledge-base retrieval service
+# reuses them instead of opening a third independent httpx client. These names
+# are re-exported because the rest of this module (and `/ai/health`) still
+# refers to them.
+AIResult = llm_client.AIResult
+_ollama_hint = llm_client.ollama_hint
 
 
 async def _generate_ai_response(
@@ -213,113 +180,17 @@ async def _generate_ai_response(
     system_prompt: str | None = None,
     max_tokens: int | None = None,
 ) -> AIResult:
-    """Generate an AI response using the configured LLM provider.
+    """Chat-flavoured wrapper over `llm_client.generate`.
 
-    Supports:
-      - "ollama"    → local Ollama server (free, runs on Mac M2 with Metal)
-      - "anthropic" → Anthropic cloud API (requires ANTHROPIC_API_KEY)
-      - "none"      → disabled
+    The only thing this adds is the chat system prompt as the default. The
+    shared client deliberately has no default of its own — the knowledge base
+    needs a different one, and a shared default would be wrong for both.
     """
-    if not settings.AI_ENABLED or settings.LLM_PROVIDER == "none":
-        return AIResult(
-            "AI assistance is currently disabled. Set LLM_PROVIDER=ollama and "
-            "AI_ENABLED=true in backend/.env to enable it.",
-            0,
-            0,
-            ok=False,
-            error="ai_disabled",
-        )
-
-    # ── Ollama (local LLM, OpenAI-compatible endpoint) ──────────────────────
-    if settings.LLM_PROVIDER == "ollama":
-        try:
-            import httpx
-
-            messages = [{"role": "system", "content": system_prompt or _build_system_prompt()}]
-            for turn in history:
-                messages.append({"role": turn["role"], "content": turn["content"]})
-            messages.append({"role": "user", "content": user_message})
-
-            async with httpx.AsyncClient(timeout=settings.AI_TIMEOUT_SECONDS) as client:
-                resp = await client.post(
-                    f"{settings.LLM_BASE_URL}/v1/chat/completions",
-                    json={
-                        "model": settings.LLM_MODEL,
-                        "messages": messages,
-                        "max_tokens": max_tokens or settings.AI_MAX_TOKENS,
-                        "temperature": settings.AI_TEMPERATURE,
-                        "stream": False,
-                        # Ollama-specific: keeps weights resident so the next
-                        # request skips the multi-second model load.
-                        "keep_alive": settings.AI_KEEP_ALIVE,
-                    },
-                )
-                resp.raise_for_status()
-                payload = resp.json()
-
-            choice = payload["choices"][0]
-            response_text: str = choice["message"]["content"]
-            usage = payload.get("usage", {})
-            return AIResult(
-                response_text,
-                usage.get("prompt_tokens", 0),
-                usage.get("completion_tokens", 0),
-            )
-
-        except Exception as exc:
-            log.warning(
-                "ollama_api_error",
-                error=str(exc),
-                model=settings.LLM_MODEL,
-                url=settings.LLM_BASE_URL,
-            )
-            return AIResult(_ollama_hint(exc), 0, 0, ok=False, error=str(exc))
-
-    # ── Anthropic (cloud) ────────────────────────────────────────────────────
-    if settings.LLM_PROVIDER == "anthropic":
-        try:
-            import anthropic  # type: ignore[import-untyped]
-
-            client_a = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-            messages_a = []
-            for turn in history:
-                messages_a.append({"role": turn["role"], "content": turn["content"]})
-            messages_a.append({"role": "user", "content": user_message})
-
-            response = client_a.messages.create(
-                model=settings.LLM_MODEL or "claude-haiku-4-5-20251001",
-                max_tokens=max_tokens or settings.AI_MAX_TOKENS,
-                system=system_prompt or _build_system_prompt(),
-                messages=messages_a,
-            )
-            # First block that actually carries text. Indexing [0].text assumes
-            # the first block is a TextBlock, which stops being true the moment
-            # a response leads with a thinking or tool-use block — and the
-            # failure is an AttributeError mid-request, not a bad answer.
-            response_text = next(
-                (block.text for block in response.content if hasattr(block, "text")),
-                "",
-            )
-            return AIResult(
-                response_text, response.usage.input_tokens, response.usage.output_tokens
-            )
-
-        except Exception as exc:
-            log.warning("anthropic_api_error", error=str(exc))
-            return AIResult(
-                f"The Anthropic API call failed: {exc}",
-                0,
-                0,
-                ok=False,
-                error=str(exc),
-            )
-
-    return AIResult(
-        f"Unsupported LLM_PROVIDER value: {settings.LLM_PROVIDER!r}.",
-        0,
-        0,
-        ok=False,
-        error="unsupported_provider",
+    return await llm_client.generate(
+        user_message,
+        history,
+        system_prompt=system_prompt or _build_system_prompt(),
+        max_tokens=max_tokens,
     )
 
 

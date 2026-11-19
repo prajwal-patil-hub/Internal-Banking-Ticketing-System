@@ -12,6 +12,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.services.job_lock import run_locked
 
 log = get_logger(__name__)
 
@@ -19,6 +20,18 @@ scheduler = AsyncIOScheduler(timezone="UTC")
 
 
 async def check_sla_breaches_job() -> None:
+    """Scheduler entry point. Runs on exactly one replica.
+
+    The schedulers live inside the API process, so without this every replica
+    would run this job on the same tick — duplicate mailbox polls, duplicate
+    breach evaluations, the same stale ticket auto-assigned twice. A
+    session-level Postgres advisory lock makes the extra replicas skip rather
+    than queue, and releases itself if the holder dies.
+    """
+    await run_locked("sla_check", _check_sla_breaches_job_locked)
+
+
+async def _check_sla_breaches_job_locked() -> None:
     """Detect newly breached SLA tickets and dispatch notifications.
 
     Runs every 5 minutes. For each ticket whose resolution deadline has

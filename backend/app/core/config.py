@@ -101,6 +101,36 @@ class Settings(BaseSettings):
     # Keep the model resident in Ollama between requests to avoid cold starts.
     AI_KEEP_ALIVE: str = "10m"
 
+    # --- Knowledge base (RAG) ---
+    KB_ENABLED: bool = True
+    #: Ollama embedding model. Changing this invalidates every stored vector —
+    #: the model name is recorded on each document version so a mismatch is
+    #: detectable rather than silently returning nonsense neighbours.
+    KB_EMBEDDING_MODEL: str = "nomic-embed-text"
+    #: Must match the `Vector(...)` dimension in the migration. Changing it
+    #: requires a migration and a full re-index, not just a config edit.
+    KB_EMBEDDING_DIM: int = 768
+    #: Largest knowledge-base upload. Higher than the 15 MB attachment cap
+    #: because policy manuals are legitimately large.
+    KB_MAX_UPLOAD_BYTES: int = 40 * 1024 * 1024
+    #: Target chunk size and overlap, measured in characters (a ~4 chars/token
+    #: proxy). Chunks split on headings first and only fall back to size.
+    KB_CHUNK_CHARS: int = 2048
+    KB_CHUNK_OVERLAP_CHARS: int = 256
+    #: Candidates pulled from each retrieval arm before fusion.
+    KB_RETRIEVAL_TOP_K: int = 50
+    #: Passages actually placed in the prompt after fusion.
+    KB_CONTEXT_TOP_N: int = 8
+    #: Below this derived confidence the service abstains rather than answering.
+    KB_MIN_CONFIDENCE: float = 0.35
+    #: Hard ceiling on passages produced by one document.
+    #:
+    #: Ingestion runs inline and issues one embedding round trip per batch, so
+    #: an unbounded document holds the single local model — and with it chat
+    #: and email intake — for as long as it takes. A 40 MB text file would
+    #: otherwise yield ~20k passages and ~1250 sequential round trips.
+    KB_MAX_CHUNKS_PER_DOCUMENT: int = 4000
+
     # --- Email Ingestion (IMAP) ---
     IMAP_ENABLED: bool = False
     IMAP_HOST: str = "localhost"

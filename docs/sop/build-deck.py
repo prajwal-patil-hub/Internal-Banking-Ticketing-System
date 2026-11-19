@@ -15,7 +15,7 @@ from PIL import Image, ImageDraw, ImageFont
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE
-from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+from pptx.enum.text import MSO_ANCHOR, MSO_AUTO_SIZE, PP_ALIGN
 from pptx.util import Emu, Inches, Pt
 
 SHOTS = Path(sys.argv[1])
@@ -115,6 +115,37 @@ def wrapped_lines(text: str, width_in: float, pt: float, bold: bool = False) -> 
     return n
 
 
+_TARGET_DPI = 200        # comfortably past what print or a screen resolves
+
+
+def _fit_image(path: Path, display_w_emu: int):
+    """Embed a screenshot at the size it is actually shown, not at capture size.
+
+    Captures are 2880x1800 (a 1440x900 viewport at 2x) but they are displayed
+    about 8.5in wide, so the full-resolution copy is roughly double what even
+    print needs. Twenty-four of them made the file large enough that phone
+    preview apps mis-composited it — showing one slide's picture on another,
+    and leaving shapes behind between slides. Downscaling to 200dpi keeps the
+    screenshots legible at 100% zoom and cuts the file several-fold.
+    """
+    import io
+    target_px = int(display_w_emu / 914400 * _TARGET_DPI)
+    im = Image.open(path)
+    if im.width <= target_px:
+        return str(path)
+    im = im.convert("RGB").resize(
+        (target_px, round(im.height * target_px / im.width)), Image.LANCZOS)
+    # A UI screenshot is mostly flat fills and anti-aliased text, so a 256
+    # colour palette is visually indistinguishable from truecolour here and
+    # about a third of the size. Checked against the smallest type in the
+    # captures before adopting.
+    im = im.quantize(colors=256, dither=Image.FLOYDSTEINBERG)
+    buf = io.BytesIO()
+    im.save(buf, format="PNG", optimize=True)
+    buf.seek(0)
+    return buf
+
+
 def marker(slide, cx, cy, n, diameter, fill, fontsize):
     """A numbered circle whose digit is actually centred.
 
@@ -128,9 +159,15 @@ def marker(slide, cx, cy, n, diameter, fill, fontsize):
     tf.margin_left = tf.margin_right = tf.margin_top = tf.margin_bottom = 0
     tf.word_wrap = False
     tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+    # Autofit off: with it on, a renderer may rescale the glyph and shift it
+    # off centre. Line spacing pinned to 1.0 for the same reason — inherited
+    # leading is added above the line, which pushes a vertically-centred
+    # single character downward.
+    tf.auto_size = MSO_AUTO_SIZE.NONE
     tf.text = str(n)
     p = tf.paragraphs[0]
     p.alignment = PP_ALIGN.CENTER
+    p.line_spacing = 1.0
     r = p.runs[0]
     r.font.size, r.font.bold, r.font.color.rgb, r.font.name = Pt(fontsize), True, WHITE, "Calibri"
     return sh
@@ -171,7 +208,16 @@ def _rect(slide, x, y, w, h, fill, line=None, shape=MSO_SHAPE.RECTANGLE):
 
 
 def _bg(slide, color=WHITE):
-    _rect(slide, 0, 0, W, H, color)
+    """Paint the slide's own background rather than laying a shape over it.
+
+    This used to add a full-bleed rectangle to every slide — 58 extra shapes
+    sitting underneath everything else. A real background is what the format
+    provides for this, and it gives weaker viewers one less large overlapping
+    shape to composite.
+    """
+    fill = slide.background.fill
+    fill.solid()
+    fill.fore_color.rgb = color
 
 
 def footer(slide, label):
@@ -254,6 +300,12 @@ def workflow(shot, title, action, result, nxt, role_tag, extra_note=None):
     """
     global step_no
     step_no += 1
+
+    # Callers write "{next}" instead of a hard-coded "Step 14". Hand-written
+    # numbers went stale the moment a slide was inserted anywhere earlier —
+    # three were already wrong before this deck was regenerated, all pointing
+    # a reader at the slide after the one they meant.
+    nxt = nxt.replace("{next}", f"Step {step_no + 1:02d}")
     s = prs.slides.add_slide(BLANK)
     _bg(s)
     _rect(s, 0, 0, W, Inches(0.95), TEAL)
@@ -268,18 +320,82 @@ def workflow(shot, title, action, result, nxt, role_tag, extra_note=None):
 
     entry = MANIFEST.get(shot.replace(".png", ""), {})
     callouts = entry.get("callouts", [])
+    # A callout has to mark a *thing*. Twelve of them targeted the entire page
+    # — one at 154%, a whole scrolling container — which put a numbered dot on
+    # the sidebar with a label describing the screen as a whole. That is not an
+    # annotation, it is decoration, and it was the bulk of the loose dots. Each
+    # one's statement is already carried by the slide's Action/Result prose,
+    # which is where a statement about the whole screen belongs.
+    #
+    # The threshold cleanly separates them: real targets here run under 16%
+    # (the navigation menu is the largest), the discarded ones start at 78%.
+    dropped = [c for c in callouts if c.get("w", 0) * c.get("h", 0) > 0.45]
+    callouts = [c for c in callouts if c.get("w", 0) * c.get("h", 0) <= 0.45]
+    for c in dropped:
+        print(f"    dropped whole-screen callout on {shot}: {c['label'][:52]}")
+
+    def _marker_y(c: dict) -> float:
+        """Where the marker will actually be drawn, as a fraction of the image.
+
+        A callout on a whole panel ('main', 'nav') is anchored near the top of
+        the region — the centre of a full-height panel is empty space. The
+        numbering has to sort on the same value, or a marker drawn at the top
+        of the screen is numbered as though it sat in the middle. That is what
+        put ② above ① on three slides.
+        """
+        return c.get("y0", 0.0) + 0.045 if c.get("h", 0) > 0.45 else c.get("y", 0.5)
+
     # Number in reading order, not in the order the capture script happened to
     # list them. y is banded first so two callouts at roughly the same height
     # run left-to-right instead of being ordered by a few stray pixels.
-    callouts = sorted(callouts, key=lambda c: (round(c.get("y", 0.5) / 0.06), c.get("x0", c.get("x", 0))))
+    # Rows are clustered, not banded. Any fixed grid has a knife edge: two
+    # controls a third of an inch apart can straddle a boundary and count as
+    # different rows, which numbered a button at the top-right before a search
+    # box six inches to its left and barely lower. To a reader those are one
+    # row, and the numbering ran backwards.
+    #
+    # Walking in y order and starting a new row only when the gap from the
+    # row's first item exceeds ~0.5in has no boundary to straddle. Within a
+    # row, left to right; the trailing y keeps a stacked column of form fields
+    # in top-to-bottom order when they share an x.
+    ROW_GAP = 0.10                      # fraction of image height, ~0.5in
+    rows: list[list[dict]] = []
+    for c in sorted(callouts, key=_marker_y):
+        if rows and _marker_y(c) - _marker_y(rows[-1][0]) <= ROW_GAP:
+            rows[-1].append(c)
+        else:
+            rows.append([c])
+    callouts = [
+        c
+        for row in rows
+        for c in sorted(row, key=lambda c: (c.get("x0", c.get("x", 0)), _marker_y(c)))
+    ]
 
-    img_x, img_y, img_w = Inches(0.45), Inches(1.3), Inches(8.5)
-    img_h = img_w * 900 / 1440
+    img_x, img_y = Inches(0.45), Inches(1.3)
     path = SHOTS / shot
+    # The image is fitted inside a box rather than pinned to one width, and its
+    # height is read off the file rather than assumed to be 1440x900.
+    #
+    # The constant was correct for every screen captured at that viewport and
+    # silently wrong for anything else. `add_picture` honours the real aspect,
+    # so a taller screenshot drew past the height the markers were positioned
+    # against — every marker landed high by a margin that grew down the slide.
+    # Capping the height as well as the width keeps a tall screen inside the
+    # slide and preserves the gap the note strip sits in.
+    MAX_W, MAX_H = Inches(8.5), Inches(5.25)
+    if path.exists():
+        with Image.open(path) as _probe:
+            ratio = _probe.height / _probe.width
+    else:
+        ratio = 900 / 1440
+    img_w, img_h = MAX_W, Emu(int(MAX_W * ratio))
+    if img_h > MAX_H:
+        img_h = MAX_H
+        img_w = Emu(int(MAX_H / ratio))
     if path.exists():
         _rect(s, img_x - Inches(0.025), img_y - Inches(0.025),
               img_w + Inches(0.05), img_h + Inches(0.05), LINE)
-        s.shapes.add_picture(str(path), img_x, img_y, width=img_w)
+        s.shapes.add_picture(_fit_image(path, img_w), img_x, img_y, width=img_w)
     else:
         _rect(s, img_x, img_y, img_w, img_h, CREAM, LINE)
         _tb(s, img_x, img_y + img_h / 2, img_w, Inches(0.4),
@@ -290,13 +406,8 @@ def workflow(shot, title, action, result, nxt, role_tag, extra_note=None):
     # read — the account number, the file name.
     D = Inches(0.30)
     for i, c in enumerate(callouts, start=1):
-        # A callout on a whole panel ('main', 'nav') gets anchored near the top
-        # of the region, not its centre. The centre of a full-height region is
-        # usually empty space, so the marker ends up pointing at nothing.
-        if c.get("h", 0) > 0.45:
-            cy = img_y + Emu(int(img_h * (c.get("y0", 0) + 0.045)))
-        else:
-            cy = img_y + Emu(int(img_h * c.get("y", 0.5)))
+        # Same function the numbering sorted on, so the two cannot diverge.
+        cy = img_y + Emu(int(img_h * _marker_y(c)))
         x0 = c.get("x0")
         if x0 is None:                      # older manifest: fall back to centre
             cx = img_x + Emu(int(img_w * c["x"]))
@@ -338,9 +449,15 @@ def workflow(shot, title, action, result, nxt, role_tag, extra_note=None):
         y += bar_h + Inches(0.22)
 
     if extra_note:
-        _rect(s, img_x, img_y + img_h + Inches(0.13), img_w, Inches(0.5), CREAM)
-        _tb(s, img_x + Inches(0.18), img_y + img_h + Inches(0.24), img_w - Inches(0.36),
-            Inches(0.3), extra_note, size=10.5, color=INK)
+        # Fills the gap between the screenshot and the footer exactly. It used
+        # to be a fixed 0.5in box that started below the image and finished
+        # underneath the footer bar, clipping the last line mid-word.
+        gap_top = img_y + img_h + Inches(0.08)
+        gap_h = (H - Inches(0.42)) - gap_top - Inches(0.04)
+        _rect(s, img_x, gap_top, img_w, gap_h, CREAM)
+        _tb(s, img_x + Inches(0.18), gap_top + Inches(0.07), img_w - Inches(0.36),
+            gap_h - Inches(0.12), extra_note, size=10, color=INK,
+            anchor=MSO_ANCHOR.MIDDLE)
 
     footer(s, f"Step {step_no:02d}")
     return s
@@ -486,13 +603,13 @@ section("03", "Roles and permissions", "Five roles, one per user. This is the wh
 
 s = content("Who can do what", "Enforced server-side in core/authz.py — the interface only hides what the API would refuse anyway")
 table(s, Inches(0.5), Inches(1.3), Inches(12.3),
-      ["Role", "Tickets", "Users & org", "Audit log", "Escalation queue"],
-      [["Branch User", "Own only — raise, comment, attach", "—", "—", "—"],
-       ["Agent", "Any in scope — assign, progress, resolve", "—", "—", "—"],
-       ["Supervisor", "As agent", "Read directory", "—", "Yes"],
-       ["Admin", "As agent", "Full control", "Yes", "Yes"],
-       ["Auditor", "Read only — no writes at all", "—", "Yes", "—"]],
-      col_w=[Inches(1.9), Inches(4.0), Inches(2.4), Inches(1.7), Inches(2.3)])
+      ["Role", "Tickets", "Assignment", "Users & org", "Audit", "Escalations"],
+      [["Branch User", "Own only — raise, comment, attach", "—", "—", "—", "—"],
+       ["Agent", "Any in scope — progress, resolve", "Assign to a person", "—", "—", "—"],
+       ["Supervisor", "As agent", "Also auto-assign, rules, leave", "Read directory", "—", "Yes"],
+       ["Admin", "As agent", "As supervisor, plus the delay", "Full control", "Yes", "Yes"],
+       ["Auditor", "Read only — no writes at all", "—", "—", "Yes", "—"]],
+      col_w=[Inches(1.75), Inches(3.35), Inches(2.85), Inches(1.95), Inches(1.05), Inches(1.35)])
 _rect(s, Inches(0.5), Inches(4.25), Inches(12.3), Inches(1.15), CREAM)
 _rect(s, Inches(0.5), Inches(4.25), Inches(0.06), Inches(1.15), ACCENT)
 _tb(s, Inches(0.8), Inches(4.45), Inches(11.8), Inches(0.8),
@@ -598,18 +715,24 @@ for i, (name, col) in enumerate(lanes):
     _rect(s, Inches(0.5), y, Inches(1.85), lane_h - Inches(0.06), col)
     _tb(s, Inches(0.62), y + Inches(0.36), Inches(1.65), Inches(0.3), name, size=10.5, bold=True, color=WHITE)
     _rect(s, Inches(2.4), y, Inches(10.4), lane_h - Inches(0.06), CREAM if i % 2 == 0 else WHITE, LINE)
+# Nine steps, not eight. The old diagram had the system auto-assigning at
+# creation, which is no longer true and was the single most misleading thing
+# in the deck: it showed a machine making the decision a supervisor makes.
 steps = [
     (0, 0, "Raise ticket\n+ attach evidence"),
-    (3, 1, "Auto-assign\n+ stamp SLA"),
-    (1, 2, "Take it,\ninvestigate"),
-    (1, 3, "Reply\n+ attach fix"),
-    (3, 4, "SLA breach?\nescalate"),
-    (2, 5, "Review,\nreassign"),
-    (1, 6, "Resolve"),
-    (0, 7, "See resolution,\nclose or reopen"),
+    (3, 1, "Number it,\nstamp SLA"),
+    (2, 2, "Assign, or\nauto-assign"),
+    (1, 3, "Take it,\ninvestigate"),
+    (1, 4, "Reply\n+ attach fix"),
+    (3, 5, "SLA breach?\nescalate"),
+    (2, 6, "Review,\nreassign"),
+    (1, 7, "Resolve"),
+    (0, 8, "See resolution,\nclose or reopen"),
 ]
-sw_w, sw_pitch, sw_h = Inches(1.06), Inches(1.29), Inches(0.76)
-sw_x0 = Inches(2.58)
+# Nine columns across the same 10.4in band: the pitch shrinks rather than the
+# band growing, so the lanes still line up with the role labels.
+sw_w, sw_pitch, sw_h = Inches(0.98), Inches(1.145), Inches(0.76)
+sw_x0 = Inches(2.52)
 
 
 def _sw_box(lane, col_i):
@@ -635,9 +758,10 @@ for lane, col_i, label in steps:
     chip(s, x, y, sw_w, sw_h, label, lanes[lane][1], size=8)
 
 _tb(s, Inches(0.5), Inches(6.0), Inches(12.3), Inches(0.9),
-    "The connectors are the handoffs. Only two of them are a person deciding to pass the ticket on — "
-    "the agent escalating, and the branch user reopening. The rest happen because the system moved it, "
-    "or because the next role was already watching.",
+    "The connectors are the handoffs. Two of them are a person deciding: the supervisor choosing an "
+    "owner, and the branch user closing or reopening. The rest happen because the system moved the "
+    "ticket, or because the next role was already watching. Note what the system does not do — it "
+    "numbers the ticket and starts the clock, but it does not choose who works it.",
     size=11.5, color=MUTE, spacing=1.3)
 footer(s, "End to end")
 
@@ -649,30 +773,30 @@ section("06", "Branch user workflow", "You raise the problem, supply the evidenc
 workflow("00-login.png", "Sign in",  "Enter your bank email and password, then select Sign in.",
    "You land on your dashboard. If your account has a second factor enabled, "
    "you are asked for a 6-digit code first.",
-   "Step 02 — read your dashboard.", "Branch User")
+   "{next} — read your dashboard.", "Branch User")
 
 workflow("10-branch-dashboard.png", "Read your dashboard",  "Check the tiles for anything of yours that is breaching or still open.",
    "Each tile opens the exact list it counts — a tile reading 3 opens three tickets.",
-   "Step 03 — open the ticket list.", "Branch User")
+   "{next} — open the ticket list.", "Branch User")
 
 workflow("11-branch-tickets.png", "See only your own tickets",  "Scan the list, or filter to what you are looking for.",
    "You see only tickets you raised. This is enforced by the server, not hidden by the page.",
-   "Step 04 — raise a new ticket.", "Branch User")
+   "{next} — raise a new ticket.", "Branch User")
 
 workflow("12-branch-create-empty.png", "Open the new ticket form",  "Select New Ticket from the ticket list.",
    "An empty form opens. Nothing is submitted until you choose Create Ticket.",
-   "Step 05 — fill it in and attach evidence.", "Branch User")
+   "{next} — fill it in and attach evidence.", "Branch User")
 
 workflow("13-branch-create-filled.png", "Describe it, and attach the evidence",  "Complete the form and attach a screenshot, statement or spreadsheet. "
    "Up to 15 MB per file; images, PDF, Word, Excel, text and CSV.",
    "Files are held in the browser and uploaded the moment the ticket is created — "
    "so evidence arrives with the report, not after it.",
-   "Step 06 — submit and follow it.", "Branch User")
+   "{next} — submit and follow it.", "Branch User")
 
 workflow("15-branch-ticket-detail.png", "Follow your ticket",  "Open the ticket from your list to see where it stands.",
    "The ticket was numbered, given SLA deadlines and assigned automatically — "
    "no one had to triage it by hand.",
-   "Step 07 — answer questions and read the resolution.", "Branch User")
+   "{next} — answer questions and read the resolution.", "Branch User")
 
 workflow("16-branch-ticket-comments.png", "Reply, and read the resolution",  "Answer any question the agent asks, attaching more evidence if needed.",
    "When the agent resolves it, their explanation and any file they attached "
@@ -708,26 +832,26 @@ section("07", "Agent workflow", "You pick the ticket up, investigate, keep the r
 
 workflow("20-agent-dashboard.png", "Start from the dashboard",  "Sign in and read the KPI strip before opening anything.",
    "Every tile is a live count and opens the exact list behind it.",
-   "Step 09 — open the queue.", "Agent")
+   "{next} — open the queue.", "Agent")
 
 workflow("21-agent-tickets.png", "Work the queue",  "Filter to unassigned or to your own, and choose what to work on.",
    "Agents see every ticket in their org scope, not just their own.",
-   "Step 10 — start with what is breaching.", "Agent")
+   "{next} — start with what is breaching.", "Agent")
 
 workflow("22-agent-breached.png", "Deal with breaches first",  "Select the SLA Breached tile on the dashboard.",
    "The list is filtered to exactly the tickets the tile counted — the number "
    "on the card and the length of this list always agree.",
-   "Step 11 — open one and investigate.", "Agent")
+   "{next} — open one and investigate.", "Agent")
 
 workflow("23-agent-ticket-detail.png", "Investigate the ticket",  "Read the description and the attached evidence, then move the ticket to In Progress.",
    "The status change is recorded in the audit trail with your name, and the "
    "first-response clock stops.",
-   "Step 12 — reply, and attach the fix.", "Agent")
+   "{next} — reply, and attach the fix.", "Agent")
 
 workflow("24-agent-ticket-comments.png", "Reply — and attach the fix to your reply",  "Write what you found and attach the corrected statement or screenshot.",
    "Files attached here belong to this reply, so the requester sees your fix "
    "beside the answer that explains it.",
-   "Step 13 — resolve, or escalate.", "Agent")
+   "{next} — resolve, or escalate.", "Agent")
 
 s = content("Resolve, or escalate — and what each means", "Both are one action on the ticket page")
 for i, (t, d, col) in enumerate([
@@ -741,7 +865,7 @@ for i, (t, d, col) in enumerate([
                     "keeps counting toward your queue.", WARN),
 ]):
     y = Inches(1.4) + i * Inches(1.55)
-    _rect(s, Inches(0.6), y, Inches(12.1), Inches(1.32), CREAM if i % 2 == 0 else WHITE, LINE)
+    _rect(s, Inches(0.6), y, Inches(12.1), Inches(1.32), CREAM, LINE)
     _rect(s, Inches(0.6), y, Inches(0.06), Inches(1.32), col)
     _tb(s, Inches(0.95), y + Inches(0.2), Inches(11.4), Inches(0.3), t, size=15, bold=True, color=col)
     _tb(s, Inches(0.95), y + Inches(0.58), Inches(11.4), Inches(0.68), d, size=12, color=INK, spacing=1.28)
@@ -757,17 +881,93 @@ section("08", "Supervisor workflow", "You watch the deadlines and the escalation
 
 workflow("30-supervisor-dashboard.png", "Watch the team's position",  "Read the strip; anything breaching needs an owner today.",
    "Supervisors see the same tiles as agents, plus the SLA monitor and escalation queue in the menu.",
-   "Step 15 — open the SLA monitor.", "Supervisor")
+   "{next} — open the SLA monitor.", "Supervisor")
 
 workflow("31-supervisor-sla.png", "Read the SLA monitor",  "Work down from the tickets nearest their deadline.",
    "At risk means due within the hour. Breached means the deadline has already passed "
    "and, if a rule matched, escalation has already fired.",
-   "Step 16 — review escalations.", "Supervisor")
+   "{next} — review escalations.", "Supervisor")
 
 workflow("32-supervisor-escalations.png", "Review the escalation queue",  "Check what escalated and whether the target is acting on it.",
    "Escalations arrive here whether raised by hand or fired automatically by the "
    "SLA worker — both run the same engine, so the evidence is identical.",
    "Reassign if the target is wrong; otherwise the agent resolves it.", "Supervisor")
+
+workflow("33-supervisor-unassigned.png", "Decide who works it",
+   "Open a ticket with no owner and select Assign.",
+   "Raising a ticket stamps its SLA deadlines but does not choose an owner. That is "
+   "deliberate: who carries the work is a shift decision, and a machine making it at "
+   "2am is how tickets end up with whoever happens to be idlest rather than whoever "
+   "should have them.",
+   "{next} — pick a person, or let the router pick.", "Supervisor")
+
+workflow("34-supervisor-assign-list.png", "Pick a person, or let the router pick",
+   "Choose a name, or select Auto-assign to take the lightest queue.",
+   "Each name shows the number of open tickets that person is already carrying — the "
+   "same number the router ranks on, so you can see what you are overriding. Anyone on "
+   "leave is labelled with their return date and sorted to the bottom. You can still "
+   "assign to them knowingly; auto-assign will not.",
+   "The agent picks it up from their queue.", "Supervisor",
+   extra_note="Auto-assign is supervisor and above; an agent may assign a specific ticket.")
+
+s = content("What the router actually does", "Three steps, and it stops at the first that yields somebody")
+_tb(s, Inches(0.62), Inches(1.3), Inches(12.1), Inches(0.5),
+    "Auto-assign is not a black box. It runs the same search every time, and each step "
+    "falls through to the next rather than failing.", size=12.5, color=INK, spacing=1.25)
+for i, (t, d) in enumerate([
+    ("1 — A category rule",
+     "If a rule names an owner for this category, they get it. Optional: most categories have none."),
+    ("2 — Someone in the ticket's branch",
+     "Of the people left, whoever in that branch is carrying the fewest open tickets."),
+    ("3 — Anyone assignable",
+     "Failing both, the lightest open queue anywhere."),
+]):
+    y = Inches(2.0) + i * Inches(0.92)
+    _rect(s, Inches(0.62), y, Inches(12.1), Inches(0.8), CREAM)
+    _tb(s, Inches(0.95), y + Inches(0.12), Inches(3.6), Inches(0.3), t, size=12.5, bold=True, color=TEAL)
+    _tb(s, Inches(4.6), y + Inches(0.12), Inches(7.9), Inches(0.6), d, size=11.5, color=INK, spacing=1.2)
+
+_tb(s, Inches(0.62), Inches(4.9), Inches(12.1), Inches(0.28),
+    "TWO RULES THAT HOLD AT EVERY STEP", size=10.5, bold=True, color=ACCENT)
+for i, (ttl, d) in enumerate([
+    ("Agents before supervisors",
+     "Ranking on workload alone sends everything to whoever is idlest, which is reliably a "
+     "supervisor — they carry no queue of their own — and frontline work would skip the agents entirely."),
+    ("Nobody on leave, ever",
+     "A category rule naming someone who is away is skipped rather than obeyed. Parking tickets "
+     "on an absent person is worse than having no rule."),
+]):
+    y = Inches(5.22) + i * Inches(0.86)
+    _rect(s, Inches(0.62), y, Inches(12.1), Inches(0.74), CREAM)
+    _tb(s, Inches(0.9), y + Inches(0.08), Inches(11.6), Inches(0.24), ttl, size=12, bold=True, color=TEAL)
+    _tb(s, Inches(0.9), y + Inches(0.34), Inches(11.6), Inches(0.36), d, size=10.5, color=MUTE, spacing=1.15)
+footer(s, "Supervisor")
+
+s = content("The ticket nobody picked up", "Why moving assignment to a person does not risk the SLA")
+_rect(s, Inches(0.6), Inches(1.35), Inches(12.1), Inches(1.3), CREAM)
+_rect(s, Inches(0.6), Inches(1.35), Inches(0.06), Inches(1.3), ACCENT)
+_tb(s, Inches(0.95), Inches(1.58), Inches(11.4), Inches(0.9),
+    "SLA deadlines are stamped when the ticket is raised, and the clock runs from that "
+    "moment. If assignment waited for a person and nobody was on shift, a ticket raised "
+    "overnight could breach — and then escalate — without ever having had an owner.",
+    size=13, color=INK, spacing=1.3)
+for i, (t, d) in enumerate([
+    ("The safety net",
+     "A background worker assigns anything still unassigned after a set delay, using the same router."),
+    ("You set the delay",
+     "An admin sets it while the system is running — two hours by default, anywhere from fifteen minutes to a week."),
+    ("It never overrides you",
+     "It only touches tickets with no owner. It never reassigns one somebody has already given out."),
+]):
+    y = Inches(3.0) + i * Inches(0.92)
+    _rect(s, Inches(0.6), y, Inches(12.1), Inches(0.8), WHITE, LINE)
+    _tb(s, Inches(0.9), y + Inches(0.12), Inches(3.0), Inches(0.3), t, size=12.5, bold=True, color=TEAL)
+    _tb(s, Inches(3.9), y + Inches(0.12), Inches(8.6), Inches(0.6), d, size=11.5, color=INK, spacing=1.2)
+_tb(s, Inches(0.6), Inches(5.95), Inches(12.1), Inches(0.6),
+    "So the window is yours to triage in, not a gap. Shorten it if tickets sit too long; "
+    "lengthen it if the system is assigning work your supervisors wanted to place themselves.",
+    size=11.5, color=MUTE, spacing=1.25)
+footer(s, "Supervisor")
 
 s = content("How escalation actually fires", "Nobody has to be watching for this to happen")
 _rect(s, Inches(0.6), Inches(1.35), Inches(12.1), Inches(1.15), CREAM)
@@ -797,22 +997,39 @@ section("09", "Admin workflow", "You decide who exists, what they may do, and ho
 
 workflow("41-admin-users.png", "Manage users",  "Create a user, set their role, and place them in an org unit.",
    "The role decides what they may do. There are no per-user permission overrides.",
-   "Step 18 — shape the organisation.", "Admin")
+   "{next} — shape the organisation.", "Admin")
+
+workflow("46-admin-users-availability.png", "See who is available",
+   "Read the Availability column before wondering why work is not reaching someone.",
+   "Availability and Active are different columns because they mean different things. "
+   "Active is whether the account works at all; availability is whether the router "
+   "sends new tickets there. Someone on leave can still sign in and finish what they "
+   "already hold.",
+   "Record a leave window with the Leave button.", "Admin")
+
+workflow("47-admin-leave-dialog.png", "Record a leave window",
+   "Enter the first and last day away, then save.",
+   "Auto-assign skips them for that window and starts including them again the day "
+   "after it ends — nobody has to remember to switch them back on. A supervisor can "
+   "still assign to them deliberately, which is why they stay in the list rather than "
+   "disappearing from it.",
+   "{next} — shape the organisation.", "Admin",
+   extra_note="Supervisors can set leave too — rota changes should not wait for an admin.")
 
 workflow("42-admin-org.png", "Shape the organisation",  "Define hierarchy levels, then units within them.",
    "The org tree drives ticket visibility: a user sees their unit's subtree, "
    "plus anything assigned to them personally.",
-   "Step 19 — maintain the branch network.", "Admin")
+   "{next} — maintain the branch network.", "Admin")
 
 workflow("43-admin-branches.png", "Maintain the branch network",  "Add branches, set managers and capacity, and mark degraded ones.",
    "Ticket counts are computed per request, never stored — a counter that "
    "drifts is wrong forever with nothing to reveal it.",
-   "Step 20 — pull reports.", "Admin")
+   "{next} — pull reports.", "Admin")
 
 workflow("44-admin-reports.png", "Pull reports",  "Choose a period, then export.",
    "The export is generated from what is on screen, so it matches the filters "
    "you applied rather than silently re-running an unfiltered query.",
-   "Step 21 — protect your own account.", "Admin")
+   "{next} — protect your own account.", "Admin")
 
 workflow("45-admin-security.png", "Turn on your second factor",  "Open Security, scan the QR code, and enter one code to confirm.",
    "MFA is only switched on once a correct code proves the app is working — "
@@ -846,15 +1063,16 @@ section("10", "Auditor workflow", "You can open everything and change nothing. E
 workflow("50-auditor-dashboard.png", "See the whole picture",  "Sign in and read the dashboard.",
    "Auditors have full visibility. What they do not have is any way to change "
    "what they are looking at.",
-   "Step 23 — open the audit trail.", "Auditor")
+   "{next} — open the audit trail.", "Auditor")
 
 workflow("51-auditor-audit-log.png", "Read the audit trail",  "Filter to the entity or person you are reviewing.",
    "Every state change writes a row: actor, role, IP, request id, and the "
    "values before and after.",
-   "Step 24 — inspect any ticket.", "Auditor")
+   "{next} — inspect any ticket.", "Auditor")
 
 workflow("52-auditor-tickets.png", "Inspect any ticket",  "Open any ticket and read its comments, attachments and timeline.",
-   "Internal notes are visible to an auditor. Write controls are not offered, "
+   "There is no scope limit — an auditor sees every ticket, not a subset. "
+   "Internal notes are visible to them too. Write controls are not offered, "
    "and would be refused if called directly.",
    "This is the end of the auditor's workflow — there is nothing to submit.", "Auditor")
 
@@ -887,7 +1105,7 @@ for i, (t, d, who) in enumerate([
      "The file index for the whole ticket; files from replies are marked as such.", "Anyone who can write"),
 ]):
     y = Inches(1.4) + i * Inches(1.28)
-    _rect(s, Inches(0.6), y, Inches(12.1), Inches(1.08), CREAM if i % 2 == 0 else WHITE, LINE)
+    _rect(s, Inches(0.6), y, Inches(12.1), Inches(1.08), CREAM, LINE)
     _tb(s, Inches(0.95), y + Inches(0.16), Inches(6.4), Inches(0.3), t, size=13.5, bold=True, color=TEAL)
     _tb(s, Inches(0.95), y + Inches(0.52), Inches(6.4), Inches(0.45), d, size=11.5, color=INK, spacing=1.2)
     _tb(s, Inches(7.7), y + Inches(0.16), Inches(4.7), Inches(0.3), "WHO", size=9.5, bold=True, color=ACCENT)
@@ -941,7 +1159,7 @@ for i, (t, d, col) in enumerate([
      "Everything it produces is for you to act on.", ACCENT),
 ]):
     y = Inches(1.4) + i * Inches(1.55)
-    _rect(s, Inches(0.6), y, Inches(12.1), Inches(1.32), CREAM if i % 2 == 0 else WHITE, LINE)
+    _rect(s, Inches(0.6), y, Inches(12.1), Inches(1.32), CREAM, LINE)
     _rect(s, Inches(0.6), y, Inches(0.06), Inches(1.32), col)
     _tb(s, Inches(0.95), y + Inches(0.18), Inches(11.4), Inches(0.3), t, size=14, bold=True, color=col)
     _tb(s, Inches(0.95), y + Inches(0.56), Inches(11.4), Inches(0.7), d, size=12, color=INK, spacing=1.25)
@@ -950,16 +1168,98 @@ _tb(s, Inches(0.6), Inches(6.15), Inches(12.1), Inches(0.7),
     "application. The message it shows includes the specific fix.", size=11.5, color=MUTE, spacing=1.25)
 footer(s, "Assistant")
 
+
 # ===========================================================================
-# 13 — Scenarios
+# 13 — Knowledge base
 # ===========================================================================
-section("13", "Common scenarios", "Four situations, start to finish, naming who does what at each hop.")
+section("13", "The knowledge base",
+        "Ask a question, get an answer with the passage it came from. "
+        "Administrators decide which documents exist and who may search them.")
+
+s = content("Why this is not just a search box", "Three properties the server enforces, not the prompt")
+for i, (t, d, col) in enumerate([
+    ("It can only quote what you may already read",
+     "Access is applied to the search itself, before anything is generated. A passage your role "
+     "has not been granted is never retrieved, so it cannot appear in an answer — you get the same "
+     "response as if the document did not exist.", OK),
+    ("Every claim carries its source",
+     "Each factual sentence is marked with the passage it came from, and you can open that "
+     "document, section and page to check it. If the assistant produces a source that does not "
+     "exist, the sentence it supported is removed before you see it.", OK),
+    ("It refuses rather than guessing",
+     "When the documents do not cover your question it says so and stops. That is the correct "
+     "answer, not a failure — and it names what would help, such as asking an administrator "
+     "whether the relevant document has been uploaded.", ACCENT),
+]):
+    y = Inches(1.4) + i * Inches(1.55)
+    _rect(s, Inches(0.6), y, Inches(12.1), Inches(1.32), CREAM, LINE)
+    _rect(s, Inches(0.6), y, Inches(0.06), Inches(1.32), col)
+    _tb(s, Inches(0.95), y + Inches(0.18), Inches(11.4), Inches(0.3), t, size=14, bold=True, color=col)
+    _tb(s, Inches(0.95), y + Inches(0.56), Inches(11.4), Inches(0.7), d, size=12, color=INK, spacing=1.25)
+_tb(s, Inches(0.6), Inches(6.15), Inches(12.1), Inches(0.7),
+    "Find it in the sidebar under Knowledge Base. Agents, supervisors and administrators can ask "
+    "questions; only administrators can upload documents or change who may search a collection.",
+    size=11.5, color=MUTE, spacing=1.25)
+footer(s, "Knowledge base")
+
+workflow("70-kb-answer.png", "Ask the knowledge base",
+   "Type your question in plain words and select Ask. There is no query syntax and no filters.",
+   "You get an answer with a confidence band, and every factual sentence marked with the passage "
+   "it came from. Cited sources are listed below with their document, section and page.",
+   "{next} — read what it retrieved but did not use.", "Agent & above")
+
+workflow("70-kb-answer.png", "Check the answer",
+   "Read the cited sources, and the passages listed under Also retrieved, not cited.",
+   "The second list is what the search considered and the answer did not use. Seeing both tells "
+   "you how much was weighed; a thin list is a reason to treat the answer carefully.",
+   "{next} — what happens when it has nothing.", "Agent & above",
+   "The confidence band is computed from the evidence, not asked of the assistant.")
+
+workflow("72-kb-abstain.png", "When it declines",
+   "Ask something the uploaded documents do not cover.",
+   "It reports that it has no grounded answer and explains why, rather than producing something "
+   "plausible. Try different wording, or ask an administrator whether the document exists.",
+   "{next} — administrators: stocking the base.", "Agent & above")
+
+workflow("71-kb-documents.png", "Upload and grant access",
+   "Select a collection, choose Upload document, then set which roles may search it.",
+   "The file is parsed, split into passages and indexed. It becomes searchable only once every "
+   "passage is indexed — a document is never half-available.",
+   "{next} — the two states worth knowing.", "Admin only")
+
+s = content("Two states you will meet", "Both are the system being honest rather than broken")
+for i, (t, d, col) in enumerate([
+    ("\u201cNo roles granted \u2014 not searchable\u201d",
+     "A new collection is readable by nobody until you grant a role. It will accept uploads and "
+     "answer nothing until you do, so the list says so rather than leaving you to wonder why "
+     "search returns silence.", ACCENT),
+    ("A document marked Failed, with the reason",
+     "Most often a scanned PDF with no text layer, or the local model being unreachable. The "
+     "previous version of that document keeps answering throughout \u2014 select Re-index once the "
+     "cause is fixed.", ACCENT),
+]):
+    y = Inches(1.5) + i * Inches(1.9)
+    _rect(s, Inches(0.6), y, Inches(12.1), Inches(1.62), CREAM, LINE)
+    _rect(s, Inches(0.6), y, Inches(0.06), Inches(1.62), col)
+    _tb(s, Inches(0.95), y + Inches(0.2), Inches(11.4), Inches(0.3), t, size=14, bold=True, color=col)
+    _tb(s, Inches(0.95), y + Inches(0.6), Inches(11.4), Inches(0.9), d, size=12, color=INK, spacing=1.25)
+_tb(s, Inches(0.6), Inches(5.6), Inches(12.1), Inches(1.1),
+    "Branch users and auditors cannot search the knowledge base at all, and there is no navigation "
+    "entry for them. It holds internal staff procedure, and an auditor is an oversight role rather "
+    "than a working one.", size=11.5, color=MUTE, spacing=1.3)
+footer(s, "Knowledge base")
+
+# ===========================================================================
+# 14 — Scenarios
+# ===========================================================================
+section("14", "Common scenarios", "Four situations, start to finish, naming who does what at each hop.")
 
 for title, kicker, rows in [
     ("Scenario A — a duplicated debit",
      "The everyday case: raised with evidence, worked, resolved",
      [("Branch user", "Raises the ticket with a screenshot, the statement and a CSV of the transactions"),
-      ("System", "Numbers it, stamps SLA deadlines, assigns the agent with the lightest queue"),
+      ("System", "Numbers it and stamps both SLA deadlines. It does not pick an owner"),
+      ("Supervisor", "Assigns it — by hand, or with Auto-assign to take the lightest queue"),
       ("Agent", "Moves it to In Progress, checks the evidence, confirms the duplicate"),
       ("Agent", "Replies with the corrected statement attached to that reply, then resolves"),
       ("Branch user", "Sees the explanation and the corrected file together, and the ticket closes")]),
@@ -986,26 +1286,34 @@ for title, kicker, rows in [
       ("Agent", "Resolves again — the whole history stays on the one ticket")]),
 ]:
     s = content(title, kicker)
+    # The row pitch is derived from how many rows there are, not fixed. Adding
+    # the supervisor step to Scenario A made it six rows, and at the old fixed
+    # 1.02in pitch the last one ran underneath the footer bar.
+    top, bottom = Inches(1.32), H - Inches(0.62)
+    pitch = min(Inches(1.02), (bottom - top) // max(1, len(rows)))
+    row_h = pitch - Inches(0.16)
     for i, (who, what) in enumerate(rows):
-        y = Inches(1.35) + i * Inches(1.02)
+        y = top + i * pitch
         col = TEAL if who not in ("System",) else MUTE
-        _rect(s, Inches(0.6), y, Inches(2.25), Inches(0.86), col)
-        _tb(s, Inches(0.78), y + Inches(0.28), Inches(2.0), Inches(0.3), who, size=12, bold=True, color=WHITE)
-        _rect(s, Inches(2.95), y, Inches(9.78), Inches(0.86), CREAM if i % 2 == 0 else WHITE, LINE)
-        _tb(s, Inches(3.25), y + Inches(0.2), Inches(9.2), Inches(0.6), what, size=12, color=INK, spacing=1.2)
+        _rect(s, Inches(0.6), y, Inches(2.25), row_h, col)
+        _tb(s, Inches(0.78), y, Inches(2.0), row_h, who, size=12, bold=True, color=WHITE,
+            anchor=MSO_ANCHOR.MIDDLE)
+        _rect(s, Inches(2.95), y, Inches(9.78), row_h, CREAM, LINE)
+        _tb(s, Inches(3.25), y, Inches(9.2), row_h, what, size=12, color=INK, spacing=1.2,
+            anchor=MSO_ANCHOR.MIDDLE)
     footer(s, "Scenarios")
 
 # ===========================================================================
-# 14 — Quick reference
+# 15 — Quick reference
 # ===========================================================================
-section("14", "Quick reference", "The desk copy. Statuses, who does what, and where things live.")
+section("15", "Quick reference", "The desk copy. Statuses, who does what, and where things live.")
 
 s = content("Status reference", "Who can move a ticket into each state, and what it means")
 table(s, Inches(0.5), Inches(1.25), Inches(12.3),
       ["Status", "Means", "Set by"],
       [["new", "Raised, not yet looked at", "System, on creation"],
        ["acknowledged", "Seen, not yet owned", "Agent"],
-       ["assigned", "Has an owner", "System or agent"],
+       ["assigned", "Has an owner", "Supervisor, or agent; system after the delay"],
        ["in_progress", "Actively being worked", "Agent"],
        ["on_hold", "Waiting on someone outside the team", "Agent"],
        ["escalated", "Handed up — by hand or by SLA breach", "Agent, or the SLA worker"],
@@ -1021,6 +1329,9 @@ table(s, Inches(0.5), Inches(1.25), Inches(12.3),
       [["Raise a problem", "Tickets → New Ticket", "Everyone"],
        ["Follow my ticket", "Tickets → open it", "Everyone (own only, for branch users)"],
        ["Find what is breaching", "Dashboard → SLA Breached tile", "Agent and above"],
+       ["Give a ticket an owner", "Ticket → Assignee → Assign", "Agent and above"],
+       ["Let the router choose", "Ticket → Assignee → Auto-assign", "Supervisor, admin"],
+       ["Say someone is away", "Users → Leave", "Supervisor, admin"],
        ["See what escalated", "Escalations", "Supervisor, admin"],
        ["Check deadlines", "SLA Monitor", "Supervisor, admin"],
        ["Add or change a user", "Users", "Admin"],
@@ -1040,7 +1351,7 @@ for i, (t, d) in enumerate([
     ("No per-user permissions", "One role per user. Anything finer is expressed through the org tree."),
 ]):
     y = Inches(1.35) + i * Inches(1.0)
-    _rect(s, Inches(0.6), y, Inches(12.1), Inches(0.84), CREAM if i % 2 == 0 else WHITE, LINE)
+    _rect(s, Inches(0.6), y, Inches(12.1), Inches(0.84), CREAM, LINE)
     _tb(s, Inches(0.95), y + Inches(0.14), Inches(4.0), Inches(0.3), t, size=12.5, bold=True, color=ACCENT)
     _tb(s, Inches(5.1), y + Inches(0.14), Inches(7.4), Inches(0.6), d, size=11.5, color=INK, spacing=1.2)
 _tb(s, Inches(0.6), Inches(6.5), Inches(12.1), Inches(0.4),

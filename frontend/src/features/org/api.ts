@@ -50,6 +50,15 @@ export interface OrgUser {
   org_role: { id: string; name: string; can_manage_unit: boolean; can_manage_subtree: boolean } | null;
   is_super_admin: boolean;
   is_active: boolean;
+  /**
+   * Availability, which is not the same as `is_active`. `is_active` says
+   * whether the account can log in; these say whether to route new work here.
+   * Both dates inclusive; `on_leave` is the server's answer for today.
+   */
+  leave_from: string | null;
+  leave_to: string | null;
+  leave_note: string | null;
+  on_leave: boolean;
   mfa_enabled: boolean;
   last_login_at: string | null;
   created_at: string;
@@ -181,4 +190,19 @@ export async function updateUser(id: string, payload: Partial<{
 
 export async function deactivateUser(id: string): Promise<void> {
   await api.delete(`/users/${id}`);
+}
+
+/**
+ * Record or clear a leave window. Supervisor and above.
+ *
+ * Pass nulls for both dates to mark somebody available again. This never
+ * touches `is_active` — deactivating an account to cover leave would lock the
+ * person out of the system.
+ */
+export async function setUserLeave(
+  id: string,
+  payload: { leave_from: string | null; leave_to: string | null; leave_note?: string | null },
+): Promise<OrgUser> {
+  const res = await api.patch(`/users/${id}/leave`, payload);
+  return res.data.data;
 }

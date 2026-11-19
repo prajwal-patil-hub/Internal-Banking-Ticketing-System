@@ -216,11 +216,11 @@ export function AIChatWidget() {
       {/* Chat panel */}
       {open && (
         <div
-          className="fixed bottom-6 right-6 z-50 flex flex-col bg-white dark:bg-slate-900 rounded-2xl shadow-cardLg border border-slate-200 dark:border-slate-700"
+          className="fixed bottom-6 right-6 z-50 flex flex-col bg-white rounded-2xl shadow-cardLg border border-[var(--sh-dark)]"
           style={{ width: 400, height: 600 }}
         >
           {/* Header */}
-          <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-200 dark:border-slate-700 bg-brand-600 rounded-t-2xl">
+          <div className="flex items-center gap-3 px-4 py-3 border-b border-[var(--sh-dark)] bg-brand-600 rounded-t-2xl">
             <div className="h-8 w-8 rounded-full bg-white/20 flex items-center justify-center shrink-0">
               <svg className="h-4 w-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M12 2a10 10 0 0 1 0 20M12 2a10 10 0 0 0 0 20M12 8v4M12 16h.01" strokeLinecap="round" strokeLinejoin="round" />
@@ -254,7 +254,7 @@ export function AIChatWidget() {
 
           {/* What the assistant can see. Names the real sources the server
               reported rather than implying access from the URL alone. */}
-          <div className="px-4 py-2 bg-brand-50 dark:bg-brand-900/20 border-b border-slate-100 dark:border-slate-800">
+          <div className="px-4 py-2 bg-brand-50 dark:bg-brand-900/20 border-b border-[var(--sh-dark)]">
             <span className="text-xs text-brand-700 dark:text-brand-300 font-medium">
               {grounding.length
                 ? `Can see: ${grounding.join(' · ')}`
@@ -272,8 +272,8 @@ export function AIChatWidget() {
                   </svg>
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Banking AI Assistant</p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-xs">
+                  <p className="text-sm font-medium text-[var(--tx-2)]">Banking AI Assistant</p>
+                  <p className="text-xs text-[var(--tx-3)] mt-1 max-w-xs">
                     Ask me about tickets, SLA policies, procedures, or any banking support topic.
                   </p>
                 </div>
@@ -282,7 +282,7 @@ export function AIChatWidget() {
                     <button
                       key={s}
                       onClick={() => { setInput(s); textareaRef.current?.focus(); }}
-                      className="text-xs text-left px-3 py-2 rounded-xl bg-surface-subtle dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-brand-50 dark:hover:bg-brand-900/20 hover:text-brand-700 dark:hover:text-brand-300 transition-colors"
+                      className="text-xs text-left px-3 py-2 rounded-xl bg-surface-subtle text-[var(--tx-2)] hover:bg-brand-50 dark:hover:bg-brand-900/20 hover:text-brand-700 dark:hover:text-brand-300 transition-colors"
                     >
                       {s}
                     </button>
@@ -312,7 +312,7 @@ export function AIChatWidget() {
                     'max-w-[75%] rounded-2xl px-3 py-2 text-sm leading-relaxed',
                     msg.role === 'user'
                       ? 'bg-brand-600 text-white rounded-br-sm'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 rounded-bl-sm',
+                      : 'bg-[var(--inset)] text-[var(--tx)] rounded-bl-sm',
                     msg.isTyping && 'min-w-[60px]',
                   )}
                 >
@@ -346,7 +346,7 @@ export function AIChatWidget() {
           </div>
 
           {/* Input area */}
-          <div className="px-4 py-3 border-t border-slate-200 dark:border-slate-700">
+          <div className="px-4 py-3 border-t border-[var(--sh-dark)]">
             <div className="flex items-end gap-2">
               <textarea
                 ref={textareaRef}
@@ -357,9 +357,9 @@ export function AIChatWidget() {
                 placeholder="Ask anything... (Enter to send)"
                 disabled={sending}
                 className={cn(
-                  'flex-1 resize-none rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm',
-                  'placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-200 outline-none transition-colors',
-                  'disabled:opacity-60 dark:text-slate-100 max-h-32',
+                  'flex-1 resize-none rounded-xl border border-[var(--sh-dark)] bg-white px-3 py-2 text-sm',
+                  'placeholder:text-[var(--tx-3)] focus:border-brand-500 focus:ring-2 focus:ring-brand-200 outline-none transition-colors',
+                  'disabled:opacity-60 max-h-32',
                 )}
                 style={{ minHeight: 40 }}
               />
@@ -373,7 +373,7 @@ export function AIChatWidget() {
                 </svg>
               </button>
             </div>
-            <p className="text-[10px] text-slate-400 mt-1.5 text-center">
+            <p className="text-[10px] text-[var(--tx-3)] mt-1.5 text-center">
               {sending
                 ? 'Generating… the first token after an idle period can take a while.'
                 : 'Shift+Enter for newline · Powered by a local LLM'}
@@ -391,7 +391,7 @@ function TypingIndicator() {
       {[0, 1, 2].map((i) => (
         <span
           key={i}
-          className="h-2 w-2 rounded-full bg-slate-400 dark:bg-slate-500 animate-bounce"
+          className="h-2 w-2 rounded-full bg-[var(--tx-3)] animate-bounce"
           style={{ animationDelay: `${i * 150}ms`, animationDuration: '800ms' }}
         />
       ))}

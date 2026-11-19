@@ -5,6 +5,7 @@ import { cn } from '@/lib/cn';
 import { getSLAStatus } from '@/features/dashboard/api';
 import { listTickets } from '@/features/tickets/api';
 import type { Ticket } from '@/features/tickets/api';
+import { PageHeader, PageShell } from '@/components/PageHeader';
 
 const STALE = 30_000;
 const OPEN_STATUSES = ['new', 'acknowledged', 'assigned', 'in_progress', 'escalated', 'reopened'];
@@ -235,15 +236,12 @@ export function SLAMonitorPage() {
   const isLoading = slaQuery.isLoading || ticketsQuery.isLoading;
 
   return (
-    <div className="flex flex-col gap-5">
+    <PageShell>
 
-      {/* ── Header ──────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight text-[var(--tx)]">SLA Monitor</h1>
-          <p className="text-xs text-[var(--tx-3)] mt-0.5">Real-time service level agreement tracking</p>
-        </div>
-        {sla && (
+      <PageHeader
+        title="SLA Monitor"
+        subtitle="Real-time service level agreement tracking"
+        actions={sla && (
           <span className={cn(
             'pill text-sm px-3 py-1',
             sla.compliance_rate >= 90 ? 'pill-ok' :
@@ -253,7 +251,7 @@ export function SLAMonitorPage() {
             {sla.compliance_rate.toFixed(1)}% SLO Compliance
           </span>
         )}
-      </div>
+      />
 
       {/* ── Metric cards ─────────────────────────────────────────── */}
       {isLoading ? (
@@ -415,6 +413,6 @@ export function SLAMonitorPage() {
           </div>
         )}
       </div>
-    </div>
+    </PageShell>
   );
 }

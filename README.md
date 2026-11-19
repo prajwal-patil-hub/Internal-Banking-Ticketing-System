@@ -1,27 +1,118 @@
+<p align="center">
+  <img src="docs/images/banner.png" alt="SUCCESS Bank — internal banking ticket operations" width="100%">
+</p>
+
+<p align="center">
+  <a href="https://github.com/prajwal-patil-hub/Internal-Banking-Ticketing-System/actions/workflows/ci.yml">
+    <img src="https://github.com/prajwal-patil-hub/Internal-Banking-Ticketing-System/actions/workflows/ci.yml/badge.svg" alt="CI">
+  </a>
+  <img src="https://img.shields.io/badge/backend%20tests-509-0F5C5C" alt="509 backend tests">
+  <img src="https://img.shields.io/badge/frontend%20tests-133-0F5C5C" alt="133 frontend tests">
+  <img src="https://img.shields.io/badge/python-3.12-blue" alt="Python 3.12">
+  <img src="https://img.shields.io/badge/typescript-5.6-blue" alt="TypeScript 5.6">
+</p>
+
 # SUCCESS Bank — Internal Ticketing & CRM
 
-Production-style internal ticketing platform for a bank. Branches raise issues,
-admin triages, agents resolve, supervisors monitor SLAs, auditors review
-immutable logs.
+An internal complaint-handling platform for a retail bank. A branch raises a
+problem, the system stamps its SLA clock, a supervisor assigns it, an agent
+resolves it, and an auditor can later prove exactly what happened and who did
+it — on a trail the database itself refuses to let anyone edit.
 
-> Status: **P0–P8 delivered.** Auth and RBAC, the ticket lifecycle, SLA engine,
-> escalations, audit trail, attachments, email intake, MFA with recovery codes,
-> and a grounded local-model assistant are all wired end to end. See
-> `docs/architecture.md` for the design and `docs/roadmap.md` for the phases.
+Five roles, each with a boundary that is enforced in SQL rather than in the
+UI. A local language model drafts summaries and answers questions from the
+bank's own policy documents, and it can only ever read what the person asking
+is already allowed to read.
+
+Everything runs on your own machine. No API keys, no data leaving the host.
+
+```bash
+git clone https://github.com/prajwal-patil-hub/Internal-Banking-Ticketing-System
+cd Internal-Banking-Ticketing-System
+docker compose -f infra/docker-compose.yml up -d
+# → http://localhost:5173   sign in as admin@successbank.local / Admin@123456
+```
+
+---
+
+## What it looks like
+
+| | |
+|:--:|:--:|
+| <img src="docs/images/dashboard.png" alt="Operations dashboard"><br>**Dashboard** — eight KPIs, each one a link to the tickets behind the number | <img src="docs/images/tickets.png" alt="Ticket queue"><br>**Queue** — filter by status, priority, SLA state or AI risk band |
+| <img src="docs/images/ticket-detail.png" alt="Ticket detail"><br>**Ticket** — lifecycle, SLA countdown, attachments, AI helpers | <img src="docs/images/sla-monitor.png" alt="SLA monitor"><br>**SLA monitor** — every open deadline and what is about to miss one |
+| <img src="docs/images/knowledge-base.png" alt="Knowledge base"><br>**Knowledge base** — answers cite the passage they came from | <img src="docs/images/audit-log.png" alt="Audit log"><br>**Audit log** — who changed what, when, from where |
+
+A [click-through walkthrough of all 32 screens](docs/sop/SUCCESS-Bank-Application-Walkthrough.html)
+is in the repository — download it and open it; it needs no server.
+
+---
+
+## Four things worth a look
+
+**The audit trail cannot be edited, by anyone.** Two Postgres triggers refuse
+`UPDATE`, `DELETE` and `TRUNCATE` on `audit_logs` with SQLSTATE 42501 — for
+every connection, the table owner included. `TRUNCATE` needed its own
+statement-level trigger, because a row trigger does not fire for it. Dropping
+the table is still possible for whoever can drop the trigger; that limit is
+written down rather than implied. → [`0010_audit_immutability.py`](backend/alembic/versions/0010_audit_immutability.py)
+
+**Access is applied before retrieval, not after.** In the knowledge base,
+`kb_chunks` carries a denormalised `collection_id` so the permission check is a
+single `WHERE` rather than a three-hop join that a later performance rewrite
+could flatten and silently drop. A passage your role has no grant on is never
+*selected*, so it never enters the prompt — which is what makes prompt
+injection unable to surface it. → [`kb_retrieval_service.py`](backend/app/services/kb_retrieval_service.py)
+
+**Citations are validated server-side, sentence by sentence.** A sentence whose
+only citation was fabricated is removed entirely. Stripping just the marker
+would leave the claim standing as unattributed prose — the exact failure the
+check exists to prevent.
+
+**One permission table, mirrored and tested.** `authz.py` is the authority;
+`permissions.ts` mirrors it so the UI stops *offering* actions the server will
+refuse, and a hand-written 5-role × 13-gate matrix fails the build if the two
+drift. The super-admin flag widens an administrative role and never converts a
+branch user or an auditor into one — a rule that exists because an earlier
+version got it wrong. → [`permissions.test.ts`](frontend/src/lib/permissions.test.ts)
+
+---
 
 ## Stack
 
-| Layer       | Tech |
-|-------------|------|
-| Frontend    | React 18 + TypeScript + Vite + TailwindCSS + React Query + React Router + Zustand |
-| Backend     | FastAPI (Python 3.12) + SQLAlchemy 2 (async) + Alembic + Pydantic v2 |
-| Auth        | JWT (access + refresh) + Argon2id + TOTP MFA |
-| DB          | PostgreSQL 15 (Supabase compatible) |
-| Cache/Queue | Redis 7 |
-| Storage     | S3-compatible (MinIO local) |
-| Scheduler   | APScheduler |
-| Observability | structlog (JSON) + Prometheus metrics |
-| Container   | Docker + docker-compose |
+| Layer | Tech |
+|-------|------|
+| Frontend | React 18 · TypeScript 5.6 · Vite · TailwindCSS · TanStack Query · Zustand · Recharts |
+| Backend | FastAPI · Python 3.12 · SQLAlchemy 2 (async) · Alembic · Pydantic v2 |
+| Database | PostgreSQL 16 + **pgvector** (HNSW, cosine) |
+| Retrieval | Hybrid dense + full-text, fused with Reciprocal Rank Fusion |
+| AI | Ollama — `glm4` for chat, `nomic-embed-text` for 768-dim embeddings. Local only |
+| Auth | JWT access + refresh · Argon2id · TOTP MFA with recovery codes |
+| Cache | Redis — dashboard aggregates, 30s TTL |
+| Storage | S3-compatible (MinIO locally) |
+| Jobs | APScheduler + Postgres advisory locks, so a second replica is safe |
+| Observability | structlog (JSON) · Prometheus metrics |
+| Container | Docker · docker-compose |
+
+**Scale:** 110 API endpoints · 34 tables · 10 migrations · ~17.6k lines of
+Python · ~11.7k lines of TypeScript.
+
+---
+
+## Documentation
+
+| Document | What's in it |
+|---|---|
+| [`docs/02-technical-architecture.md`](docs/02-technical-architecture.md) | Services, data flow, design decisions |
+| [`docs/03-security-and-access.md`](docs/03-security-and-access.md) | The role model and how each boundary is enforced |
+| [`docs/06-rag-knowledge-base.md`](docs/06-rag-knowledge-base.md) | Retrieval design, and the nine open questions with the default chosen for each |
+| [`docs/07-voice-agent.md`](docs/07-voice-agent.md) | **Proposal.** Local-only speech, and why the browser's Web Speech API is disqualified |
+| [`docs/08-model-opportunities.md`](docs/08-model-opportunities.md) | **Analysis.** Where a model makes this faster, ranked, with three items now built |
+| [`docs/runbook.md`](docs/runbook.md) | Operating it: backup, restore, retention, incident steps |
+
+Items marked **Proposal** or **Analysis** are not built. Everything else
+described in this README is.
+
 
 ## Quick start (local)
 
@@ -74,14 +165,41 @@ re-seeding will shift.
 
 ## Ticket intake
 
-A ticket raised through the API gets its SLA deadlines stamped and is
-auto-assigned to the agent with the lightest open queue. Agents are preferred
-over supervisors — ranking on workload alone sends everything to whoever is
-idlest, which is reliably a supervisor, and frontline work would skip the
-agents entirely. Auditors and branch users are never candidates.
+A ticket raised through the API gets its SLA deadlines stamped and arrives
+**unassigned**. Deciding who works it is a supervisor's call, not something the
+system does silently at 2am.
 
-Pass `auto_assign: false` when creating a ticket to leave it unassigned for
-manual triage.
+From the ticket page an agent or above can assign anyone directly; the list
+shows each person's open-ticket count and marks anyone on leave. A supervisor
+or admin can instead press **Auto-assign** and let the router choose.
+
+The router picks, in order:
+
+1. **A category rule**, if one names an owner for that category. Optional, and
+   skipped when the named person is away rather than obeyed blindly.
+2. **Someone in the ticket's own branch**, by lightest open queue.
+3. **Anyone assignable**, by lightest open queue.
+
+Agents are preferred over supervisors at every step — ranking on workload alone
+sends everything to whoever is idlest, which is reliably a supervisor, and
+frontline work would skip the agents entirely. Auditors and branch users are
+never candidates, and neither is anyone inside a leave window.
+
+**The safety net.** A ticket that nobody has assigned within a configurable
+window is routed automatically, so one raised overnight cannot burn its whole
+SLA and then escalate to nobody. Admins set the window under
+`PUT /assignment/settings` (default two hours, range 15 minutes to a week).
+
+Pass `auto_assign: true` when creating a ticket to route it immediately —
+the email intake path does this, having no supervisor watching.
+
+### Leave
+
+Supervisors and admins record leave as a date range on a user. Routing skips
+them for that window and resumes on its own, so nobody has to remember to
+switch availability back on. This is separate from `is_active`, which gates
+login: deactivating an account to cover a week off would lock the person out
+of the system.
 
 ### By email
 
@@ -287,10 +405,12 @@ AI panel. Each opens a ticket list filtered to exactly the number on the card.
 That equality is the point: a card that opens a list with a different total
 reads as a broken filter, so it is verified on every build.
 
-**3. Raise a ticket and watch it route itself.** *New Ticket* → save. It comes
-back already `assigned`, with an owner and both SLA deadlines stamped. The
-assignee is the agent with the lightest open queue, never a supervisor or an
-auditor.
+**3. Raise a ticket, then decide who works it.** *New Ticket* → save. It comes
+back with both SLA deadlines stamped and **no owner** — that is deliberate.
+Open it as `priya.sharma@successbank.local` (a supervisor) and use *Assign* to
+pick someone, or *Auto-assign* to take the lightest queue. Put that person on
+leave from the Users page and auto-assign again: the router skips them, and
+their account still works.
 
 **4. Attach files, both ways.** Raise a second ticket as
 `sunita.desai@successbank.local` (a branch user) and drag a screenshot and a PDF
@@ -392,14 +512,14 @@ attachments, each downloading with a checksum identical to before the backup.
 These are exactly what CI runs, so a green run here means a green run there.
 
 ```bash
-# Backend — lint and 326 tests
+# Backend — lint and 509 tests
 docker compose -f infra/docker-compose.yml exec backend ruff check .
 docker compose -f infra/docker-compose.yml exec backend python -m pytest -q
 
 # Confirm the models and the database still agree
 docker compose -f infra/docker-compose.yml exec backend alembic check
 
-# Frontend — lint, typecheck, 42 tests, production build
+# Frontend — lint, typecheck, 133 tests, production build
 cd frontend && npm run lint && npm run typecheck && npm run test && npm run build
 ```
 
@@ -416,12 +536,23 @@ import restored the check is real, and email intake works.
 ## Repository layout
 
 ```
-backend/    FastAPI service (clean architecture: api → services → repositories → models)
-  scripts/  seed_dev.py, backup.py, restore.py
-frontend/   React SPA (feature-sliced)
-infra/      docker-compose
-docs/       architecture, roadmap, runbook
-.github/    CI workflow
+backend/
+  app/
+    api/v1/routes/   110 endpoints
+    services/        business logic, incl. kb_retrieval_service (the security boundary)
+    workers/         SLA, email intake, auto-assign, AI enrichment — all advisory-locked
+    models/          34 tables
+    core/authz.py    the role policy every route imports
+  alembic/versions/  10 migrations
+  evals/             knowledge-base evaluation harness + pinned corpus
+  scripts/           seed_dev.py, backup.py, restore.py
+  tests/             509 tests, run against a real PostgreSQL
+frontend/src/
+  lib/permissions.ts mirrors authz.py; permissions.test.ts fails the build on drift
+  pages/ components/ features/   React SPA, feature-sliced
+infra/               docker-compose (dev and prod)
+docs/                specs, runbook, SOP deck and screen captures
+.github/workflows/   CI and CD
 ```
 
 ## Roadmap (high level)
@@ -435,7 +566,8 @@ docs/       architecture, roadmap, runbook
 - **P6** Audit trail *(✓)*
 - **P7** UI polish *(✓)*
 - **P8** Hardening (rate limit, MFA, metrics) *(✓)*
-- **P9** DevOps finalisation — CI gates, deployment, backup/restore drill
+- **P9** DevOps finalisation — CI gates, deployment, backup/restore drill *(✓)*
+- **P10** Knowledge base (RAG), audit immutability, replica-safe workers *(✓)*
 
 ## License
 
