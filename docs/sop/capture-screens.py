@@ -11,6 +11,7 @@ placed at a guess.
 """
 from __future__ import annotations
 
+import glob
 import json
 import sys
 from pathlib import Path
@@ -18,7 +19,26 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 BASE = "http://127.0.0.1:5199"
-CHROME = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome"
+
+def find_chrome() -> str:
+    """Locate the bundled Chromium, rather than pinning a build number.
+
+    This was `/opt/pw-browsers/chromium-1194/chrome-linux/chrome`. The image
+    was later rebuilt with chromium-1243, which also moved the directory to
+    `chrome-linux64` — so the hard-coded path stopped existing and both
+    capture scripts died with "executable doesn't exist". A pinned build
+    number is a time bomb in an image somebody else rebuilds.
+
+    Falls back to Playwright's own lookup, which is right on a developer
+    machine where the browser lives under ~/.cache.
+    """
+    found = sorted(glob.glob("/opt/pw-browsers/chromium-*/chrome-linux*/chrome"))
+    if found:
+        return found[-1]
+    return ""  # empty string: Playwright then uses its own managed browser
+
+
+CHROME = find_chrome()
 OUT = Path(sys.argv[1])
 OUT.mkdir(parents=True, exist_ok=True)
 from capture_config import DEVICE_SCALE_FACTOR, VIEWPORT

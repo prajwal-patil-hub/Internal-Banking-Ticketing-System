@@ -307,7 +307,13 @@ export function TicketDetailPage() {
       setReplyError('Failed to post comment.');
     },
   });
-  const summarizeMutation = useMutation({ mutationFn: () => aiSummarize(id!), onSuccess: (r) => { setAISummaryResult(r); setAiExpanded(true); } });
+  // `regenerate` is the caller's choice, not a default: without it the server
+  // returns the summary the enrichment worker already wrote, which is a column
+  // read rather than a model round trip.
+  const summarizeMutation = useMutation({
+    mutationFn: (regenerate: boolean = false) => aiSummarize(id!, regenerate),
+    onSuccess: (r) => { setAISummaryResult(r); setAiExpanded(true); },
+  });
   const suggestMutation   = useMutation({ mutationFn: () => aiSuggest(id!),   onSuccess: (r) => { setAISuggestResult(r); setShowSuggestions(true); setAiExpanded(true); } });
   const pauseSLAMutation  = useMutation({ mutationFn: () => pauseSLA(id!),    onSuccess: (u) => queryClient.setQueryData(['tickets', id], u) });
   const resumeSLAMutation = useMutation({ mutationFn: () => resumeSLA(id!),   onSuccess: (u) => queryClient.setQueryData(['tickets', id], u) });
@@ -431,7 +437,10 @@ export function TicketDetailPage() {
                 <Button
                   variant="ghost"
                   disabled={summarizeMutation.isPending}
-                  onClick={() => summarizeMutation.mutate()}
+                  onClick={() => summarizeMutation.mutate(false)}
+                  title={ticket.ai_summary
+                    ? 'Show the summary written when this ticket arrived'
+                    : 'Summarise this ticket'}
                 >
                   {summarizeMutation.isPending ? (
                     <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -440,6 +449,19 @@ export function TicketDetailPage() {
                   ) : null}
                   {summarizeMutation.isPending ? 'Summarizing…' : 'Summarize'}
                 </Button>
+                {/* Only offered once a summary exists — there is nothing to
+                    regenerate before that, and the plain button already
+                    generates one. */}
+                {ticket.ai_summary && (
+                  <Button
+                    variant="ghost"
+                    disabled={summarizeMutation.isPending}
+                    onClick={() => summarizeMutation.mutate(true)}
+                    title="Generate a fresh summary from the conversation as it stands now"
+                  >
+                    Regenerate
+                  </Button>
+                )}
                 <Button
                   variant="ghost"
                   disabled={suggestMutation.isPending}

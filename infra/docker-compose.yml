@@ -14,7 +14,7 @@ name: success-bank
 
 services:
   postgres:
-    image: pgvector/pgvector:pg15
+    image: pgvector/pgvector:pg16
     container_name: success-postgres
     restart: unless-stopped
     environment:

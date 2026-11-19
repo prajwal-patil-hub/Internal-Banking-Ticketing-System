@@ -165,9 +165,10 @@ Migration `0009_knowledge_base` enables pgvector. Two things go wrong here:
 
 - **The image does not ship the extension.** Stock `postgres:15` / `postgres:16`
   do not, and the migration fails with *"could not open extension control
-  file"*. All three compose files and CI pin `pgvector/pgvector:pg15` / `pg16`.
-  If you are running your own Postgres, install `postgresql-16-pgvector` (or
-  build pgvector from source) before migrating.
+  file"*. Both compose files and CI pin `pgvector/pgvector:pg16` — the dev
+  compose used to pin `pg15`, so you developed against one major version and
+  deployed to another. If you are running your own Postgres, install
+  `postgresql-16-pgvector` (or build pgvector from source) before migrating.
 - **The database role cannot create extensions.** `CREATE EXTENSION` needs
   superuser, or `CREATE` on the database plus the extension being
   allow-listed. On managed Postgres (RDS, Cloud SQL, Supabase) the provider

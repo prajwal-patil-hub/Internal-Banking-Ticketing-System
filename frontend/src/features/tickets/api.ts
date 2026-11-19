@@ -242,10 +242,27 @@ export async function getCategories(): Promise<Category[]> {
  */
 export async function aiSummarize(
   ticketId: string,
-): Promise<{ summary: string | null; sentiment: string | null; risk_score: number | null; risk_band: 'high' | 'medium' | 'low' | null; error: string | null }> {
-  const { data } = await api.post(`/tickets/${ticketId}/ai-summarize`, undefined, {
-    timeout: AI_TIMEOUT_MS,
-  });
+  /**
+   * Force a fresh generation. Omitted, the server returns the summary the
+   * enrichment worker wrote shortly after the ticket arrived — a column read,
+   * so it comes back immediately. Pass true when the thread has moved on and
+   * the stored summary no longer describes it.
+   */
+  regenerate = false,
+): Promise<{
+  summary: string | null;
+  sentiment: string | null;
+  risk_score: number | null;
+  risk_band: 'high' | 'medium' | 'low' | null;
+  /** False when this came from the stored column rather than the model. */
+  generated?: boolean;
+  error: string | null;
+}> {
+  const { data } = await api.post(
+    `/tickets/${ticketId}/ai-summarize`,
+    undefined,
+    { params: regenerate ? { regenerate: true } : undefined, timeout: AI_TIMEOUT_MS },
+  );
   return data.data;
 }
 
